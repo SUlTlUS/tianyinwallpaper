@@ -79,7 +79,7 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
             Log.d("TAG", "onBindViewHolder: "+layoutParams.height);
         }
         TianYinWallpaperModel model=list.get(position);
-        // Load from original URI for better quality and to avoid saving files to app directory
+        // Load wallpapers directly from their original URIs when available
         if (model.getType() == 0 && model.getImgUri() != null && !model.getImgUri().isEmpty()) {
             // For static images, load from original URI
             Glide.with(context).load(android.net.Uri.parse(model.getImgUri())).into(holder.iv);
