@@ -216,9 +216,15 @@ public class TianYinWallpaperService extends WallpaperService {
                 InputStream is = null;
                 try {
                     is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(currentModel.getImgUri()));
-                    return BitmapFactory.decodeStream(is);
+                    Bitmap bitmap = BitmapFactory.decodeStream(is);
+                    if (bitmap == null) {
+                        android.util.Log.e("TianYinWallpaperService", "Failed to decode bitmap from URI: " + currentModel.getImgUri());
+                        // Fall back to file path
+                        return BitmapFactory.decodeFile(currentModel.getImgPath());
+                    }
+                    return bitmap;
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    android.util.Log.e("TianYinWallpaperService", "Error reading bitmap from URI: " + currentModel.getImgUri(), e);
                     // Fall back to file path if URI fails
                     return BitmapFactory.decodeFile(currentModel.getImgPath());
                 } finally {
@@ -226,7 +232,7 @@ public class TianYinWallpaperService extends WallpaperService {
                         try {
                             is.close();
                         } catch (IOException e) {
-                            e.printStackTrace();
+                            android.util.Log.e("TianYinWallpaperService", "Error closing input stream", e);
                         }
                     }
                 }

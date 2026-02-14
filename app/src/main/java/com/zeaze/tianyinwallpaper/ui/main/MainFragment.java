@@ -316,6 +316,8 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                     Bitmap thumbnail = FileUtil.getVideoThumbnailFromUri(getContext(), currentUri);
                     if (thumbnail != null) {
                         FileUtil.bitmap2Path(thumbnail, model.getImgPath());
+                    } else {
+                        Log.e("MainFragment", "Failed to generate thumbnail for video URI: " + currentUri);
                     }
                     addModel();
 
