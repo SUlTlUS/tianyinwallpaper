@@ -37,7 +37,7 @@ public class TianYinWallpaperService extends WallpaperService {
         return new TianYinSolaEngine();
     }
 
-    class TianYinSolaEngine extends WallpaperService.Engine {
+    class TianYinSolaEngine extends WallpaperService.Engine implements SharedPreferences.OnSharedPreferenceChangeListener {
         private MediaPlayer mediaPlayer;
         private Paint mPaint;
         private List<TianYinWallpaperModel> list;
@@ -57,6 +57,9 @@ public class TianYinWallpaperService extends WallpaperService {
             pageChange = pref.getBoolean("pageChange",false);
             needBackgroundPlay = pref.getBoolean("needBackgroundPlay",false);
             wallpaperScroll = pref.getBoolean("wallpaperScroll",false);
+            
+            // Register preference change listener
+            pref.registerOnSharedPreferenceChangeListener(this);
 //            for (TianYinWallpaperModel model:list){
 //                if (model.getType()==1){
 //                    hasVideo=true;
@@ -190,9 +193,6 @@ public class TianYinWallpaperService extends WallpaperService {
                     bitmap=getBitmap();
                 }
                 
-                // Refresh wallpaper scroll setting from SharedPreferences
-                wallpaperScroll = pref.getBoolean("wallpaperScroll", false);
-                
                 if (bitmap != null && wallpaperScroll) {
                     int canvasWidth = localCanvas.getWidth();
                     int canvasHeight = localCanvas.getHeight();
@@ -301,9 +301,6 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset);
             
-            // Refresh wallpaper scroll setting from SharedPreferences
-            wallpaperScroll = pref.getBoolean("wallpaperScroll", false);
-            
             // Handle wallpaper scrolling
             if (wallpaperScroll && !hasVideo) {
                 currentXOffset = xOffset;
@@ -383,6 +380,8 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             super.onDestroy();
+            // Unregister preference change listener
+            pref.unregisterOnSharedPreferenceChangeListener(this);
             releaseMediaPlayer();
         }
 
@@ -393,6 +392,13 @@ public class TianYinWallpaperService extends WallpaperService {
                 }
                 mediaPlayer.release();
                 mediaPlayer = null;
+            }
+        }
+        
+        @Override
+        public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+            if ("wallpaperScroll".equals(key)) {
+                wallpaperScroll = sharedPreferences.getBoolean(key, false);
             }
         }
 
