@@ -299,7 +299,8 @@ public class TianYinWallpaperService extends WallpaperService {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset);
             
             // Handle wallpaper scrolling
-            if (wallpaperScroll && !hasVideo) {
+            // Check if current wallpaper is static image (type 0) before applying scroll
+            if (wallpaperScroll && index >= 0 && index < list.size() && list.get(index).getType() == 0) {
                 currentXOffset = xOffset;
                 setWallpaper(false); // Don't reload bitmap, just redraw
             }
