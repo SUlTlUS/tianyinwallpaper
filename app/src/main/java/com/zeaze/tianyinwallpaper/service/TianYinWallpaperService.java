@@ -204,7 +204,8 @@ public class TianYinWallpaperService extends WallpaperService {
                     bitmap=getBitmap();
                 }
                 
-                if (bitmap != null && wallpaperScroll) {
+                // Only apply scrolling to static image wallpapers (type 0)
+                if (bitmap != null && wallpaperScroll && isCurrentWallpaperImage()) {
                     int canvasWidth = localCanvas.getWidth();
                     int canvasHeight = localCanvas.getHeight();
                     int bitmapWidth = bitmap.getWidth();
@@ -243,7 +244,7 @@ public class TianYinWallpaperService extends WallpaperService {
                         localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
                     }
                 } else {
-                    // Scrolling disabled, draw normally
+                    // Scrolling disabled or not a static image wallpaper, draw normally
                     if (bitmap != null) {
                         Rect rect = new Rect();
                         rect.left = rect.top = 0;
