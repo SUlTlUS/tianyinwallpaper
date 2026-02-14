@@ -52,11 +52,9 @@ public class TianYinWallpaperService extends WallpaperService {
         private float currentXOffset = 0f;
         private Bitmap currentBitmap;
         
-        // 视频滚动相关
+        // 视频尺寸
         private int videoWidth = 0;
         private int videoHeight = 0;
-        private Rect videoSrcRect = new Rect();
-        private Rect videoDstRect = new Rect();
         
         public TianYinSolaEngine() {
             this.mPaint = new Paint();
@@ -190,9 +188,10 @@ public class TianYinWallpaperService extends WallpaperService {
             if (isCurrentWallpaperImage()) {
                 setWallpaper(false);
             } else if (isCurrentWallpaperVideo() && mediaPlayer != null) {
-                // 重新设置Surface并播放
                 try {
                     mediaPlayer.setSurface(holder.getSurface());
+                    // 重新设置视频显示区域
+                    setVideoDisplayArea();
                     if (!mediaPlayer.isPlaying()) {
                         mediaPlayer.start();
                     }
@@ -227,7 +226,6 @@ public class TianYinWallpaperService extends WallpaperService {
                         drawImageWallpaper(localCanvas);
                     } else if (isCurrentWallpaperVideo()) {
                         // 如果是视频壁纸且MediaPlayer正在播放，不需要额外绘制
-                        // 视频会通过Surface自动显示
                         if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
                             // 视频未播放，显示预览图
                             if (currentBitmap == null || reloadBitmap) {
@@ -241,7 +239,7 @@ public class TianYinWallpaperService extends WallpaperService {
                             }
                         } else {
                             // 视频正在播放，我们不需要绘制任何东西
-                            // 但为了清除之前的绘制，可以绘制透明或黑色
+                            // 但为了清除之前的绘制，可以绘制透明
                             localCanvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR);
                         }
                     }
@@ -309,6 +307,58 @@ public class TianYinWallpaperService extends WallpaperService {
             }
         }
 
+        private void setVideoDisplayArea() {
+            if (mediaPlayer == null || surfaceHolder == null) return;
+            
+            try {
+                // 获取视频实际尺寸
+                if (videoWidth <= 0 || videoHeight <= 0) {
+                    videoWidth = mediaPlayer.getVideoWidth();
+                    videoHeight = mediaPlayer.getVideoHeight();
+                }
+                
+                if (videoWidth <= 0 || videoHeight <= 0) return;
+                
+                // 获取Surface尺寸
+                int surfaceWidth = surfaceHolder.getSurfaceFrame().width();
+                int surfaceHeight = surfaceHolder.getSurfaceFrame().height();
+                
+                if (surfaceWidth <= 0 || surfaceHeight <= 0) return;
+                
+                // 计算视频的显示比例
+                float videoAspect = (float) videoWidth / videoHeight;
+                float surfaceAspect = (float) surfaceWidth / surfaceHeight;
+                
+                // 计算目标显示区域，保持视频原始比例
+                int targetWidth, targetHeight;
+                int offsetX = 0, offsetY = 0;
+                
+                if (videoAspect > surfaceAspect) {
+                    // 视频更宽：适应宽度，上下可能有黑边
+                    targetWidth = surfaceWidth;
+                    targetHeight = (int) (surfaceWidth / videoAspect);
+                    offsetY = (surfaceHeight - targetHeight) / 2;
+                } else {
+                    // 视频更高：适应高度，左右可能有黑边
+                    targetHeight = surfaceHeight;
+                    targetWidth = (int) (surfaceHeight * videoAspect);
+                    offsetX = (surfaceWidth - targetWidth) / 2;
+                }
+                
+                // 创建视频显示区域（在Surface上的位置）
+                Rect videoRect = new Rect(offsetX, offsetY, offsetX + targetWidth, offsetY + targetHeight);
+                
+                // 注意：MediaPlayer不支持直接设置显示区域，这是通过SurfaceView/TextureView实现的
+                // 这里我们只能通过设置缩放模式来尽可能保持比例
+                
+                // 使用VIDEO_SCALING_MODE_SCALE_TO_FIT来保持视频比例
+                mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
         private void initVideoWallpaper() {
             releaseMediaPlayer();
             
@@ -345,14 +395,9 @@ public class TianYinWallpaperService extends WallpaperService {
                         mp.setLooping(currentModel.isLoop());
                         mp.setVolume(0, 0);
                         
-                        // 设置缩放模式
-                        if (wallpaperScroll) {
-                            // 滚动模式下使用SCALE_TO_FIT保持完整视频
-                            mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
-                        } else {
-                            // 非滚动模式下使用裁剪填充
-                            mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
-                        }
+                        // 关键修改：使用SCALE_TO_FIT保持视频原始比例
+                        // 这样视频会完整显示，可能会有黑边，但不会变形
+                        mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
                         
                         mp.start();
                         
@@ -467,6 +512,9 @@ public class TianYinWallpaperService extends WallpaperService {
                             if (surfaceHolder != null && surfaceHolder.getSurface() != null) {
                                 mediaPlayer.setSurface(surfaceHolder.getSurface());
                             }
+                            
+                            // 确保缩放模式正确
+                            mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
                             
                             if (!mediaPlayer.isPlaying()) {
                                 mediaPlayer.start();
