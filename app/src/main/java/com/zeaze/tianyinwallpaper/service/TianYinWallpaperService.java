@@ -323,8 +323,8 @@ public class TianYinWallpaperService extends WallpaperService {
                     if (currentModel.getVideoPath() != null && !currentModel.getVideoPath().isEmpty()) {
                         mediaPlayer.setDataSource(currentModel.getVideoPath());
                     } else {
-                        // 降级：如果没有视频路径，尝试从图片生成（不应该发生）
-                        throw new IOException("Static wallpaper missing video path");
+                        // 视频文件缺失，无法播放静态壁纸
+                        throw new IOException("Static wallpaper (index=" + index + ", uuid=" + currentModel.getUuid() + ") missing video path");
                     }
                 } else {
                     // 动态壁纸：使用原始视频
@@ -333,7 +333,7 @@ public class TianYinWallpaperService extends WallpaperService {
                     } else if (currentModel.getVideoPath() != null && !currentModel.getVideoPath().isEmpty()) {
                         mediaPlayer.setDataSource(currentModel.getVideoPath());
                     } else {
-                        throw new IOException("Dynamic wallpaper missing video source");
+                        throw new IOException("Dynamic wallpaper (index=" + index + ", uuid=" + currentModel.getUuid() + ") missing video source");
                     }
                 }
                 
