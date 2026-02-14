@@ -64,6 +64,16 @@ public class TianYinWallpaperService extends WallpaperService {
 //                }
 //            }
         }
+        
+        // Helper method to check if current wallpaper is a video
+        private boolean isCurrentWallpaperVideo() {
+            return index >= 0 && index < list.size() && list.get(index).getType() == 1;
+        }
+        
+        // Helper method to check if current wallpaper is a static image
+        private boolean isCurrentWallpaperImage() {
+            return index >= 0 && index < list.size() && list.get(index).getType() == 0;
+        }
 
         private boolean getNextIndex(){
             isOnlyOne=false;
@@ -300,7 +310,7 @@ public class TianYinWallpaperService extends WallpaperService {
             
             // Handle wallpaper scrolling
             // Check if current wallpaper is static image (type 0) before applying scroll
-            if (wallpaperScroll && index >= 0 && index < list.size() && list.get(index).getType() == 0) {
+            if (wallpaperScroll && isCurrentWallpaperImage()) {
                 currentXOffset = xOffset;
                 setWallpaper(false); // Don't reload bitmap, just redraw
             }
@@ -337,8 +347,8 @@ public class TianYinWallpaperService extends WallpaperService {
             super.onVisibilityChanged(visible);
             if(visible){
                 // Check if current wallpaper is video (type 1)
-                if (hasVideo && index >= 0 && index < list.size() && list.get(index).getType() == 1) {
-                    if (mediaPlayer != null) {
+                if (isCurrentWallpaperVideo()) {
+                    if (hasVideo && mediaPlayer != null) {
                         if (index!=-1) {
                             // Use individual wallpaper loop setting
                             mediaPlayer.setLooping(list.get(index).isLoop());
@@ -358,7 +368,7 @@ public class TianYinWallpaperService extends WallpaperService {
                 }
                 if (getNextIndex()) {
                     // Check current wallpaper type to decide which method to call
-                    if (index >= 0 && index < list.size() && list.get(index).getType() == 1) {
+                    if (isCurrentWallpaperVideo()) {
                         if (hasVideo && mediaPlayer != null) {
                             setLiveWallpaper();
                         }
@@ -368,9 +378,11 @@ public class TianYinWallpaperService extends WallpaperService {
                 }
                 else{
                     // Check if current wallpaper is video before pausing
-                    if (hasVideo && mediaPlayer != null && index >= 0 && index < list.size() && list.get(index).getType() == 1) {
-                        mediaPlayer.setLooping(false);
-                        mediaPlayer.pause();
+                    if (isCurrentWallpaperVideo()) {
+                        if (hasVideo && mediaPlayer != null) {
+                            mediaPlayer.setLooping(false);
+                            mediaPlayer.pause();
+                        }
                     }
                 }
             }
