@@ -1,13 +1,12 @@
-plugins {
-    id 'com.android.application'
-}
+apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 android {
-    compileSdk 29
+    namespace 'com.zeaze.tianyinwallpaper'
+    compileSdk 33
     defaultConfig {
         applicationId "com.zeaze.tianyinwallpaper"
         minSdk 20
-        targetSdk 28
+        targetSdk 33
         versionCode 30
         versionName "3.0"
         multiDexEnabled true
