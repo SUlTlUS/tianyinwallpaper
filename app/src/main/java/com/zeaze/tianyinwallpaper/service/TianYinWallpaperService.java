@@ -219,14 +219,11 @@ public class TianYinWallpaperService extends WallpaperService {
                     Bitmap bitmap = BitmapFactory.decodeStream(is);
                     if (bitmap == null) {
                         android.util.Log.e("TianYinWallpaperService", "Failed to decode bitmap from URI: " + currentModel.getImgUri());
-                        // Fall back to file path
-                        return BitmapFactory.decodeFile(currentModel.getImgPath());
+                    } else {
+                        return bitmap;
                     }
-                    return bitmap;
                 } catch (Exception e) {
                     android.util.Log.e("TianYinWallpaperService", "Error reading bitmap from URI: " + currentModel.getImgUri(), e);
-                    // Fall back to file path if URI fails
-                    return BitmapFactory.decodeFile(currentModel.getImgPath());
                 } finally {
                     if (is != null) {
                         try {
@@ -236,9 +233,9 @@ public class TianYinWallpaperService extends WallpaperService {
                         }
                     }
                 }
-            } else {
-                return BitmapFactory.decodeFile(currentModel.getImgPath());
             }
+            // Fall back to file path
+            return BitmapFactory.decodeFile(currentModel.getImgPath());
         }
 
         int page=-1;

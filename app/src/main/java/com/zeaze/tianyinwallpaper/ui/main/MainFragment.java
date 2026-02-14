@@ -200,18 +200,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                         model=null;
                         return;
                     }
-                    // Take persistable URI permissions for each selected URI
-                    for (Uri uri : results) {
-                        try {
-                            getActivity().getContentResolver().takePersistableUriPermission(
-                                uri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            );
-                        } catch (SecurityException e) {
-                            // Permission may not be available for all URIs
-                            Log.e("MainFragment", "Could not take persistable permission for URI: " + uri, e);
-                        }
-                    }
+                    takePersistableUriPermissions(results);
                     now=0;
                     uris=results;
                     type=1;
@@ -229,18 +218,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                         model = null;
                         return;
                     }
-                    // Take persistable URI permissions for each selected URI
-                    for (Uri uri : results) {
-                        try {
-                            getActivity().getContentResolver().takePersistableUriPermission(
-                                uri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            );
-                        } catch (SecurityException e) {
-                            // Permission may not be available for all URIs
-                            Log.e("MainFragment", "Could not take persistable permission for URI: " + uri, e);
-                        }
-                    }
+                    takePersistableUriPermissions(results);
                     now=0;
                     uris=results;
                     type=2;
@@ -278,6 +256,21 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
         });
     }
 
+    private void takePersistableUriPermissions(List<Uri> uris) {
+        // Take persistable URI permissions for each selected URI
+        for (Uri uri : uris) {
+            try {
+                getActivity().getContentResolver().takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                );
+            } catch (SecurityException e) {
+                // Permission may not be available for all URIs
+                Log.e("MainFragment", "Could not take persistable permission for URI: " + uri, e);
+            }
+        }
+    }
+
     private void exchange(int index){
         if (uris==null||uris.size()<=index){
             return;
@@ -295,7 +288,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                     model.setImgUri(currentUri.toString());
                     // Still create thumbnail path for list display
                     model.setImgPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".png");
-                    // videoPath is for the video generated from the static bitmap (not copied from source URI)
+                    // videoPath is for YapVideoEncoder to create animated wallpaper video from static bitmap
                     model.setVideoPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".mp4");
                     // Save thumbnail only
                     bitmap = FileUtil.bitmap2Path(bitmap, model.getImgPath());
