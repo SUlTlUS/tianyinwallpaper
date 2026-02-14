@@ -49,6 +49,11 @@ public class TianYinWallpaperService extends WallpaperService {
         private float currentXOffset=0f;
         public TianYinSolaEngine(){
             this.mPaint = new Paint();
+            // Add Paint flags for better bitmap rendering quality
+            this.mPaint.setFilterBitmap(true);
+            this.mPaint.setDither(true);
+            this.mPaint.setAntiAlias(true);
+            
             String s= FileUtil.loadData(getApplicationContext(),FileUtil.wallpaperPath);
             list= JSON.parseArray(s, TianYinWallpaperModel.class);
             hasVideo=true;
@@ -185,7 +190,7 @@ public class TianYinWallpaperService extends WallpaperService {
         private void setWallpaper(boolean reloadBitmap){
             Canvas localCanvas=surfaceHolder.lockCanvas();
             if (localCanvas != null) {
-                localCanvas.drawColor(Color.WHITE);
+                localCanvas.drawColor(Color.BLACK); // Use black background for better visual effect
                 if (reloadBitmap) {
                     if (bitmap!=null){
                         bitmap.recycle();
@@ -199,40 +204,34 @@ public class TianYinWallpaperService extends WallpaperService {
                     int bitmapWidth = bitmap.getWidth();
                     int bitmapHeight = bitmap.getHeight();
                     
-                    // Calculate scaled dimensions to fit height
-                    float bitmapAspect = (float) bitmapWidth / bitmapHeight;
-                    int scaledWidth = (int) (canvasHeight * bitmapAspect);
+                    // Scale bitmap to fit screen height
+                    float scale = (float) canvasHeight / bitmapHeight;
+                    int scaledWidth = (int) (bitmapWidth * scale);
                     
-                    // Only apply scrolling if bitmap is wider than screen
+                    // Only apply parallax scrolling if bitmap is wider than screen
                     if (scaledWidth > canvasWidth) {
-                        // Calculate horizontal offset based on xOffset (0.0 to 1.0)
+                        // Parallax calculation: offset movement is 30% of the actual scroll
+                        // This creates the parallax effect where background moves slower than foreground
+                        float parallaxFactor = 0.3f;
                         int maxOffset = scaledWidth - canvasWidth;
-                        int xOffset = (int) (maxOffset * currentXOffset);
+                        float offsetX = maxOffset * currentXOffset * parallaxFactor;
                         
-                        // Create source and destination rectangles
-                        Rect srcRect = new Rect();
-                        srcRect.left = (int) ((float) xOffset * bitmapWidth / scaledWidth);
-                        srcRect.top = 0;
-                        srcRect.right = (int) (((float) xOffset + canvasWidth) * bitmapWidth / scaledWidth);
-                        srcRect.bottom = bitmapHeight;
-                        
-                        Rect dstRect = new Rect();
-                        dstRect.left = 0;
-                        dstRect.top = 0;
-                        dstRect.bottom = canvasHeight;
-                        dstRect.right = canvasWidth;
-                        
-                        localCanvas.drawBitmap(bitmap, srcRect, dstRect, this.mPaint);
+                        // Draw bitmap with offset
+                        localCanvas.save();
+                        localCanvas.scale(scale, scale);
+                        localCanvas.drawBitmap(bitmap, -offsetX / scale, 0f, this.mPaint);
+                        localCanvas.restore();
                     } else {
-                        // Bitmap is not wider than screen, draw normally
+                        // Bitmap is not wider than screen, draw centered
                         Rect rect = new Rect();
-                        rect.left = rect.top = 0;
+                        rect.left = (canvasWidth - scaledWidth) / 2;
+                        rect.top = 0;
+                        rect.right = rect.left + scaledWidth;
                         rect.bottom = canvasHeight;
-                        rect.right = canvasWidth;
                         localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
                     }
                 } else {
-                    // Scrolling disabled, draw normally
+                    // Scrolling disabled, draw normally to fit screen
                     if (bitmap != null) {
                         Rect rect = new Rect();
                         rect.left = rect.top = 0;
@@ -301,10 +300,14 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset);
             
-            // Handle wallpaper scrolling
+            // Handle wallpaper scrolling - only update offset and trigger redraw
+            // Don't do heavy operations here as this is called on main thread
             if (wallpaperScroll && !hasVideo) {
                 currentXOffset = xOffset;
-                setWallpaper(false); // Don't reload bitmap, just redraw
+                // Skip redraw in preview mode for performance
+                if (!isPreview()) {
+                    setWallpaper(false); // Don't reload bitmap, just redraw with new offset
+                }
             }
             
             // Handle page change detection
@@ -382,6 +385,11 @@ public class TianYinWallpaperService extends WallpaperService {
             super.onDestroy();
             // Unregister preference change listener
             pref.unregisterOnSharedPreferenceChangeListener(this);
+            // Recycle bitmap to free memory
+            if (bitmap != null && !bitmap.isRecycled()) {
+                bitmap.recycle();
+                bitmap = null;
+            }
             releaseMediaPlayer();
         }
 
