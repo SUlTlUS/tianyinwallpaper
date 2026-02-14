@@ -32,3 +32,13 @@ gradlew.bat assembleRelease
 
 构建产物可在Actions运行页面的Artifacts部分下载。
 
+## 签名配置
+
+项目的release构建类型默认使用debug keystore进行签名（用于CI/CD自动构建）。
+
+**注意：** 如果您需要发布生产版本的APK，请配置正式的签名密钥：
+
+1. 创建或使用您的release keystore文件
+2. 在`app/build.gradle`中的`signingConfigs.release`部分配置您的密钥信息
+3. 或者通过环境变量传递签名信息
+
