@@ -41,30 +41,32 @@ public class TianYinWallpaperService extends WallpaperService {
         return new TianYinSolaEngine();
     }
 
-    class TianYinSolaEngine extends Engine {
+    class TianYinSolaEngine extends WallpaperService.Engine {
         private MediaPlayer mediaPlayer;
         private Paint mPaint;
         private List<TianYinWallpaperModel> list;
-        private int index = -1;
+        private int index=-1;
         private SurfaceHolder surfaceHolder;
-        
-        private boolean pageChange = false;
-        private float currentXOffset = 0f;
-        private Bitmap currentBitmap;
-        
-        // 视频尺寸
-        private int videoWidth = 0;
-        private int videoHeight = 0;
-        
-        public TianYinSolaEngine() {
+        private boolean hasVideo;
+
+        private boolean pageChange=false;
+        private float currentXOffset=0f;
+        public TianYinSolaEngine(){
             this.mPaint = new Paint();
-            String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
-            list = JSON.parseArray(s, TianYinWallpaperModel.class);
-            lastTime = System.currentTimeMillis() / 1000;
-            pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE);
-            pageChange = pref.getBoolean("pageChange", false);
-            needBackgroundPlay = pref.getBoolean("needBackgroundPlay", false);
-            wallpaperScroll = pref.getBoolean("wallpaperScroll", false);
+            String s= FileUtil.loadData(getApplicationContext(),FileUtil.wallpaperPath);
+            list= JSON.parseArray(s, TianYinWallpaperModel.class);
+            hasVideo=true;
+            lastTime = System.currentTimeMillis()/1000;
+            pref = getSharedPreferences(App.TIANYIN,MODE_PRIVATE);
+            pageChange = pref.getBoolean("pageChange",false);
+            needBackgroundPlay = pref.getBoolean("needBackgroundPlay",false);
+            wallpaperScroll = pref.getBoolean("wallpaperScroll",false);
+//            for (TianYinWallpaperModel model:list){
+//                if (model.getType()==1){
+//                    hasVideo=true;
+//                    break;
+//                }
+//            }
         }
         
         // Helper method to check if current wallpaper is a video
@@ -77,507 +79,308 @@ public class TianYinWallpaperService extends WallpaperService {
             return list != null && index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_IMAGE;
         }
 
-        private boolean getNextIndex() {
-            isOnlyOne = false;
-            if (index != -1) {
+        private boolean getNextIndex(){
+            isOnlyOne=false;
+            if (index!=-1) {
                 int minTime = pref.getInt("minTime", 1);
                 if (System.currentTimeMillis() / 1000 - lastTime <= minTime) {
-                    isOnlyOne = true;
+                    isOnlyOne=true;
                     return false;
                 }
             }
-            lastTime = System.currentTimeMillis() / 1000;
-            boolean isRand = pref.getBoolean("rand", false);
+            lastTime=System.currentTimeMillis()/1000;
+            boolean isRand = pref.getBoolean("rand",false);
             int i = 1;
-            if (isRand) {
-                i = (int) (Math.random() * list.size()) + 1;
+            if (isRand){
+                i=(int)(Math.random()*list.size())+1;
             }
             int lastIndex = index;
-            while (i > 0) {
+            while (i>0) {
                 if (index == -1) index = list.size() - 1;
                 index = getIfIndex();
-                if (index == lastIndex) {
+                if (index == lastIndex){
                     if (index == -1) index = list.size() - 1;
                     index = getIfIndex();
                 }
                 i = i - 1;
             }
-            if (lastIndex == index) {
-                isOnlyOne = true;
+            if (lastIndex==index){
+                isOnlyOne=true;
             }
             return true;
         }
 
-        private int getIfIndex() {
-            int i = index + 1;
-            if (i >= list.size()) {
-                i = 0;
+
+
+        private int getIfIndex(){
+            int i=index+1;
+            if (i>= list.size()){
+                i=0;
             }
-            while (!isIf(i)) {
-                if (i == index) {
+            while (!isIf(i)){
+                if (i==index){
                     return getNoIfIndex();
                 }
                 i++;
-                if (i >= list.size()) {
-                    i = 0;
+                if (i>= list.size()){
+                    i=0;
                 }
             }
             return i;
         }
 
-        private int getNoIfIndex() {
-            int i = index + 1;
-            if (i >= list.size()) {
-                i = 0;
+        private int getNoIfIndex(){
+            int i=index+1;
+            if (i>= list.size()){
+                i=0;
             }
-            while (!((list.get(i).getStartTime() == -1 || list.get(i).getEndTime() == -1))) {
-                if (i == index) {
-                    i = index + 1;
-                    if (i >= list.size()) {
-                        i = 0;
+            while (!((list.get(i).getStartTime()==-1||list.get(i).getEndTime()==-1))){
+                if (i==index){
+                    i=index+1;
+                    if (i>= list.size()){
+                        i=0;
                     }
                     return i;
                 }
                 i++;
-                if (i >= list.size()) {
-                    i = 0;
+                if (i>= list.size()){
+                    i=0;
                 }
             }
             return i;
         }
 
-        private boolean isIf(int index) {
-            TianYinWallpaperModel model = list.get(index);
-            if (model.getStartTime() == -1 || model.getEndTime() == -1) {
+        private boolean isIf(int index){
+            TianYinWallpaperModel model=list.get(index);
+            if (model.getStartTime()==-1||model.getEndTime()==-1){
                 return false;
             }
-            int now = getTime();
-            if (model.getStartTime() == model.getEndTime() && model.getStartTime() == now) {
+            int now=getTime();
+            if (model.getStartTime()==model.getEndTime()&&model.getStartTime()==now){
                 return true;
             }
-            if (model.getStartTime() <= now && now < model.getEndTime()) {
+            if (model.getStartTime()<=now&&now<model.getEndTime()){
                 return true;
             }
-            if (now < model.getEndTime() && model.getEndTime() < model.getStartTime()) {
+            if (now<model.getEndTime()&&model.getEndTime()<model.getStartTime()){
                 return true;
             }
-            if (model.getEndTime() < model.getStartTime() && model.getStartTime() <= now) {
+            if (model.getEndTime()<model.getStartTime()&&model.getStartTime()<=now){
                 return true;
             }
             return false;
         }
 
-        private int getTime() {
+        private int getTime(){
             Calendar cal = Calendar.getInstance();
             cal.setTime(new Date());
             int nowHour = cal.get(Calendar.HOUR_OF_DAY);
             int nowMin = cal.get(Calendar.MINUTE);
-            return nowHour * 60 + nowMin;
+            return nowHour*60+nowMin;
         }
 
         @Override
         public void onSurfaceCreated(SurfaceHolder holder) {
             super.onSurfaceCreated(holder);
-            surfaceHolder = holder;
-        }
-
-        @Override
-        public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-            super.onSurfaceChanged(holder, format, width, height);
-            // 重新绘制当前壁纸
-            if (isCurrentWallpaperImage()) {
-                setWallpaper(false);
-            } else if (isCurrentWallpaperVideo() && mediaPlayer != null) {
-                try {
-                    mediaPlayer.setSurface(holder.getSurface());
-                    // 重新设置视频显示区域
-                    setVideoDisplayArea();
-                    if (!mediaPlayer.isPlaying()) {
-                        mediaPlayer.start();
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
+            surfaceHolder=holder;
+            if (hasVideo) {
+                mediaPlayer = new MediaPlayer();
+                mediaPlayer.setSurface(holder.getSurface());
             }
         }
-
-        private void setWallpaper() {
+        Bitmap bitmap;
+        private void setWallpaper(){
             setWallpaper(true);
         }
         
-        private void setWallpaper(boolean reloadBitmap) {
-            if (surfaceHolder == null) return;
-            
-            Canvas localCanvas = null;
-            try {
-                localCanvas = surfaceHolder.lockCanvas();
-                if (localCanvas != null) {
-                    localCanvas.drawColor(Color.BLACK);
+        private void setWallpaper(boolean reloadBitmap){
+            Canvas localCanvas=surfaceHolder.lockCanvas();
+            if (localCanvas != null) {
+                localCanvas.drawColor(Color.WHITE);
+                if (reloadBitmap) {
+                    if (bitmap!=null){
+                        bitmap.recycle();
+                    }
+                    bitmap=getBitmap();
+                }
+                
+                if (bitmap != null && wallpaperScroll) {
+                    int canvasWidth = localCanvas.getWidth();
+                    int canvasHeight = localCanvas.getHeight();
+                    int bitmapWidth = bitmap.getWidth();
+                    int bitmapHeight = bitmap.getHeight();
                     
-                    if (isCurrentWallpaperImage()) {
-                        // 处理图片壁纸
-                        if (reloadBitmap) {
-                            if (currentBitmap != null) {
-                                currentBitmap.recycle();
-                            }
-                            currentBitmap = getBitmap();
-                        }
+                    // Calculate scaled dimensions to fit height
+                    float bitmapAspect = (float) bitmapWidth / bitmapHeight;
+                    int scaledWidth = (int) (canvasHeight * bitmapAspect);
+                    
+                    // Only apply scrolling if bitmap is wider than screen
+                    if (scaledWidth > canvasWidth) {
+                        // Calculate horizontal offset based on xOffset (0.0 to 1.0)
+                        int maxOffset = scaledWidth - canvasWidth;
+                        int xOffset = (int) (maxOffset * currentXOffset);
                         
-                        drawImageWallpaper(localCanvas);
-                    } else if (isCurrentWallpaperVideo()) {
-                        // 如果是视频壁纸且MediaPlayer正在播放，不需要额外绘制
-                        if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
-                            // 视频未播放，显示预览图
-                            if (currentBitmap == null || reloadBitmap) {
-                                if (currentBitmap != null) {
-                                    currentBitmap.recycle();
-                                }
-                                currentBitmap = getBitmap();
-                            }
-                            if (currentBitmap != null) {
-                                drawImageWallpaper(localCanvas);
-                            }
-                        } else {
-                            // 视频正在播放，我们不需要绘制任何东西
-                            // 但为了清除之前的绘制，可以绘制透明
-                            localCanvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR);
-                        }
+                        // Create source and destination rectangles
+                        Rect srcRect = new Rect();
+                        srcRect.left = (int) ((float) xOffset * bitmapWidth / scaledWidth);
+                        srcRect.top = 0;
+                        srcRect.right = (int) (((float) xOffset + canvasWidth) * bitmapWidth / scaledWidth);
+                        srcRect.bottom = bitmapHeight;
+                        
+                        Rect dstRect = new Rect();
+                        dstRect.left = 0;
+                        dstRect.top = 0;
+                        dstRect.bottom = canvasHeight;
+                        dstRect.right = canvasWidth;
+                        
+                        localCanvas.drawBitmap(bitmap, srcRect, dstRect, this.mPaint);
+                    } else {
+                        // Bitmap is not wider than screen, draw normally
+                        Rect rect = new Rect();
+                        rect.left = rect.top = 0;
+                        rect.bottom = canvasHeight;
+                        rect.right = canvasWidth;
+                        localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
+                    }
+                } else {
+                    // Scrolling disabled, draw normally
+                    if (bitmap != null) {
+                        Rect rect = new Rect();
+                        rect.left = rect.top = 0;
+                        rect.bottom = localCanvas.getHeight();
+                        rect.right = localCanvas.getWidth();
+                        localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
                     }
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
-                if (localCanvas != null && surfaceHolder != null) {
-                    try {
-                        surfaceHolder.unlockCanvasAndPost(localCanvas);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-        }
-
-        private void drawImageWallpaper(Canvas canvas) {
-            if (currentBitmap == null || currentBitmap.isRecycled()) return;
-            
-            int canvasWidth = canvas.getWidth();
-            int canvasHeight = canvas.getHeight();
-            int bitmapWidth = currentBitmap.getWidth();
-            int bitmapHeight = currentBitmap.getHeight();
-            
-            if (canvasWidth <= 0 || canvasHeight <= 0) return;
-            
-            if (wallpaperScroll && isCurrentWallpaperImage()) {
-                // 计算缩放后的尺寸（适应高度）
-                float bitmapAspect = (float) bitmapWidth / bitmapHeight;
-                int scaledWidth = (int) (canvasHeight * bitmapAspect);
                 
-                // Only apply scrolling if bitmap is wider than screen
-                if (scaledWidth > canvasWidth) {
-                    // Calculate horizontal offset based on xOffset (0.0 to 1.0)
-                    int maxOffset = scaledWidth - canvasWidth;
-                    int xOffset = (int) (maxOffset * currentXOffset);
-                    
-                    // Create source and destination rectangles
-                    Rect srcRect = new Rect();
-                    srcRect.left = (int) ((float) xOffset * bitmapWidth / scaledWidth);
-                    srcRect.top = 0;
-                    srcRect.right = (int) (((float) xOffset + canvasWidth) * bitmapWidth / scaledWidth);
-                    srcRect.bottom = bitmapHeight;
-                    
-                    Rect dstRect = new Rect();
-                    dstRect.left = 0;
-                    dstRect.top = 0;
-                    dstRect.bottom = canvasHeight;
-                    dstRect.right = canvasWidth;
-                    
-                    canvas.drawBitmap(currentBitmap, srcRect, dstRect, this.mPaint);
-                } else {
-                    // Bitmap is not wider than screen, draw normally
-                    Rect rect = new Rect();
-                    rect.left = rect.top = 0;
-                    rect.bottom = canvasHeight;
-                    rect.right = canvasWidth;
-                    canvas.drawBitmap(currentBitmap, null, rect, this.mPaint);
-                }
-            } else {
-                // 不滚动，直接绘制填充
-                Rect rect = new Rect(0, 0, canvasWidth, canvasHeight);
-                canvas.drawBitmap(currentBitmap, null, rect, mPaint);
+                surfaceHolder.unlockCanvasAndPost(localCanvas);
             }
         }
 
-        private void setVideoDisplayArea() {
-            if (mediaPlayer == null || surfaceHolder == null) return;
-            
+        private void setLiveWallpaper() {
             try {
-                // 获取视频实际尺寸
-                if (videoWidth <= 0 || videoHeight <= 0) {
-                    videoWidth = mediaPlayer.getVideoWidth();
-                    videoHeight = mediaPlayer.getVideoHeight();
-                }
-                
-                if (videoWidth <= 0 || videoHeight <= 0) return;
-                
-                // 获取Surface尺寸
-                int surfaceWidth = surfaceHolder.getSurfaceFrame().width();
-                int surfaceHeight = surfaceHolder.getSurfaceFrame().height();
-                
-                if (surfaceWidth <= 0 || surfaceHeight <= 0) return;
-                
-                // 计算视频的显示比例
-                float videoAspect = (float) videoWidth / videoHeight;
-                float surfaceAspect = (float) surfaceWidth / surfaceHeight;
-                
-                // 计算目标显示区域，保持视频原始比例
-                int targetWidth, targetHeight;
-                int offsetX = 0, offsetY = 0;
-                
-                if (videoAspect > surfaceAspect) {
-                    // 视频更宽：适应宽度，上下可能有黑边
-                    targetWidth = surfaceWidth;
-                    targetHeight = (int) (surfaceWidth / videoAspect);
-                    offsetY = (surfaceHeight - targetHeight) / 2;
-                } else {
-                    // 视频更高：适应高度，左右可能有黑边
-                    targetHeight = surfaceHeight;
-                    targetWidth = (int) (surfaceHeight * videoAspect);
-                    offsetX = (surfaceWidth - targetWidth) / 2;
-                }
-                
-                // 创建视频显示区域（在Surface上的位置）
-                Rect videoRect = new Rect(offsetX, offsetY, offsetX + targetWidth, offsetY + targetHeight);
-                
-                // 注意：MediaPlayer不支持直接设置显示区域，这是通过SurfaceView/TextureView实现的
-                // 这里我们只能通过设置缩放模式来尽可能保持比例
-                
-                // 使用VIDEO_SCALING_MODE_SCALE_TO_FIT来保持视频比例
-                mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
-                
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-
-        private void initVideoWallpaper() {
-            releaseMediaPlayer();
-            
-            try {
-                mediaPlayer = new MediaPlayer();
-                
-                // 设置Surface
-                if (surfaceHolder != null && surfaceHolder.getSurface() != null && surfaceHolder.getSurface().isValid()) {
-                    mediaPlayer.setSurface(surfaceHolder.getSurface());
-                }
-                
+                mediaPlayer.reset();
                 TianYinWallpaperModel currentModel = list.get(index);
-                
-                // 设置数据源
+                // Use URI if available, otherwise fall back to file path
                 if (currentModel.getVideoUri() != null && !currentModel.getVideoUri().isEmpty()) {
                     mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(currentModel.getVideoUri()));
                 } else {
                     mediaPlayer.setDataSource(currentModel.getVideoPath());
                 }
-                
-                mediaPlayer.setOnVideoSizeChangedListener(new MediaPlayer.OnVideoSizeChangedListener() {
-                    @Override
-                    public void onVideoSizeChanged(MediaPlayer mp, int width, int height) {
-                        videoWidth = width;
-                        videoHeight = height;
-                    }
-                });
-                
-                mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                    @Override
-                    public void onPrepared(MediaPlayer mp) {
-                        videoWidth = mp.getVideoWidth();
-                        videoHeight = mp.getVideoHeight();
-                        mp.setLooping(currentModel.isLoop());
-                        mp.setVolume(0, 0);
-                        
-                        // 关键修改：使用SCALE_TO_FIT保持视频原始比例
-                        // 这样视频会完整显示，可能会有黑边，但不会变形
-                        mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
-                        
-                        mp.start();
-                        
-                        // 清除画布，让视频显示
-                        setWallpaper(false);
-                    }
-                });
-                
-                mediaPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
-                    @Override
-                    public boolean onError(MediaPlayer mp, int what, int extra) {
-                        // 视频播放出错，回退到图片
-                        setWallpaper(true);
-                        return true;
-                    }
-                });
-                
-                mediaPlayer.prepareAsync();
-                
+                mediaPlayer.prepare();
+                // Use individual wallpaper loop setting
+                mediaPlayer.setLooping(currentModel.isLoop());
+                mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
+                mediaPlayer.setVolume(0,0);
+                mediaPlayer.start();
             } catch (IOException e) {
                 e.printStackTrace();
-                setWallpaper(true);
             }
         }
 
-        private Bitmap getBitmap() {
+        private Bitmap getBitmap(){
             TianYinWallpaperModel currentModel = list.get(index);
-            
-            // 先尝试从URI加载
+            // Use URI if available, otherwise fall back to file path
             if (currentModel.getImgUri() != null && !currentModel.getImgUri().isEmpty()) {
                 InputStream is = null;
                 try {
                     is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(currentModel.getImgUri()));
                     Bitmap bitmap = BitmapFactory.decodeStream(is);
-                    if (bitmap != null) {
+                    if (bitmap == null) {
+                        android.util.Log.e("TianYinWallpaperService", "Failed to decode bitmap from URI: " + currentModel.getImgUri());
+                    } else {
                         return bitmap;
                     }
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    android.util.Log.e("TianYinWallpaperService", "Error reading bitmap from URI: " + currentModel.getImgUri(), e);
                 } finally {
                     if (is != null) {
                         try {
                             is.close();
                         } catch (IOException e) {
-                            e.printStackTrace();
+                            android.util.Log.e("TianYinWallpaperService", "Error closing input stream", e);
                         }
                     }
                 }
             }
-            
-            // 降级到文件路径
+            // Fall back to file path
             return BitmapFactory.decodeFile(currentModel.getImgPath());
         }
 
-        int page = -1;
-        private long lastPlayTime;
-
+        int page=-1;
         @Override
-        public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, 
-                                     float yOffsetStep, int xPixelOffset, int yPixelOffset) {
+        public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset);
             
-            // 更新滚动偏移 - 只对图片壁纸生效
+            // Handle wallpaper scrolling
+            // Check if current wallpaper is static image (type 0) before applying scroll
             if (wallpaperScroll && isCurrentWallpaperImage()) {
                 currentXOffset = xOffset;
-                setWallpaper(false);
+                setWallpaper(false); // Don't reload bitmap, just redraw
             }
             
             // Handle page change detection
-            if (!pageChange) {
+            if (!pageChange){
                 return;
             }
-            
-            float dx = xOffset;
-            while (dx > xOffsetStep) {
-                dx = dx - xOffset;
+            float dx=xOffset;
+            while (dx>xOffsetStep){
+                dx=dx-xOffset;
             }
-            dx = dx / xOffsetStep;
-            
-            if (page == -1) {
-                if (dx < 0.1 || dx > 0.9) {
+            dx=dx/xOffsetStep;
+            if (page==-1){
+                if (dx<0.1||dx>0.9) {
                     page = Math.round(xOffset / xOffsetStep);
                 }
                 return;
             }
-            
-            if (dx < 0.1 || dx > 0.9) {
+            if (dx<0.1||dx>0.9) {
                 int newPage = Math.round(xOffset / xOffsetStep);
-                if (newPage != page) {
-                    lastTime = 0;
+                if (newPage!=page){
+                    lastTime=0;
                     onVisibilityChanged(false);
                     onVisibilityChanged(true);
-                    page = newPage;
+                    page=newPage;
                 }
             }
         }
 
+        private long lastPlayTime;
         @Override
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
-            
-            if (visible) {
-                // 壁纸可见
-                if (isCurrentWallpaperVideo()) {
-                    // 当前是视频壁纸
-                    if (mediaPlayer == null) {
-                        // 首次播放
-                        initVideoWallpaper();
-                    } else {
-                        try {
-                            // 确保Surface设置正确
-                            if (surfaceHolder != null && surfaceHolder.getSurface() != null) {
-                                mediaPlayer.setSurface(surfaceHolder.getSurface());
-                            }
-                            
-                            // 确保缩放模式正确
-                            mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
-                            
-                            if (!mediaPlayer.isPlaying()) {
-                                mediaPlayer.start();
-                            }
-                            
-                            if (isOnlyOne && lastPlayTime > 0 && needBackgroundPlay) {
-                                long duration = mediaPlayer.getDuration();
-                                if (duration > 0) {
-                                    long nowTime = (lastPlayTime + System.currentTimeMillis() - lastTime * 1000) % duration;
-                                    mediaPlayer.seekTo((int) nowTime);
-                                }
-                            }
-                            
-                            // 清除画布，让视频显示
-                            setWallpaper(false);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                            initVideoWallpaper();
-                        }
+            if(visible){
+                // Check if current wallpaper is video (type 1)
+                if (isCurrentWallpaperVideo() && mediaPlayer != null) {
+                    // Use individual wallpaper loop setting
+                    mediaPlayer.setLooping(list.get(index).isLoop());
+                    if (!mediaPlayer.isPlaying()){
+                        mediaPlayer.start();
                     }
-                } else if (isCurrentWallpaperImage()) {
-                    // 当前是图片壁纸，确保显示图片
-                    setWallpaper(false);
-                }
-            } else {
-                // 壁纸不可见
-                if (mediaPlayer != null) {
-                    try {
-                        if (mediaPlayer.isPlaying()) {
-                            lastPlayTime = mediaPlayer.getCurrentPosition();
-                            mediaPlayer.pause();
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
+                    if (isOnlyOne && lastPlayTime > 0 && needBackgroundPlay){
+                        long nowTime = (lastPlayTime + System.currentTimeMillis() - lastTime * 1000) % (mediaPlayer.getDuration());
+                        mediaPlayer.seekTo((int)nowTime);
                     }
                 }
-                
-                // 准备下一个壁纸
+            }else{
+                if (mediaPlayer!=null){
+                    lastPlayTime=mediaPlayer.getCurrentPosition();
+                }
                 if (getNextIndex()) {
-                    // 切换到下一个壁纸
-                    if (isCurrentWallpaperVideo()) {
-                        initVideoWallpaper();
-                    } else {
-                        setWallpaper(true);
-                    }
-                } else {
-                    // 没有切换，暂停视频
+                    // Check current wallpaper type to decide which method to call
                     if (isCurrentWallpaperVideo() && mediaPlayer != null) {
-                        try {
-                            mediaPlayer.pause();
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
+                        setLiveWallpaper();
+                    } else {
+                        this.setWallpaper();
                     }
                 }
-            }
-        }
-
-        @Override
-        public void onSurfaceDestroyed(SurfaceHolder holder) {
-            super.onSurfaceDestroyed(holder);
-            if (mediaPlayer != null) {
-                mediaPlayer.setSurface(null);
+                else{
+                    // Check if current wallpaper is video before pausing
+                    if (isCurrentWallpaperVideo() && mediaPlayer != null) {
+                        mediaPlayer.setLooping(false);
+                        mediaPlayer.pause();
+                    }
+                }
             }
         }
 
@@ -585,26 +388,17 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onDestroy() {
             super.onDestroy();
             releaseMediaPlayer();
-            
-            if (currentBitmap != null) {
-                currentBitmap.recycle();
-                currentBitmap = null;
-            }
         }
 
-        private void releaseMediaPlayer() {
-            if (mediaPlayer != null) {
-                try {
-                    if (mediaPlayer.isPlaying()) {
-                        mediaPlayer.stop();
-                    }
-                    mediaPlayer.reset();
-                    mediaPlayer.release();
-                } catch (Exception e) {
-                    e.printStackTrace();
+        private void releaseMediaPlayer(){
+            if (mediaPlayer!=null) {
+                if (mediaPlayer.isPlaying()) {
+                    mediaPlayer.stop();
                 }
+                mediaPlayer.release();
                 mediaPlayer = null;
             }
         }
+
     }
 }
