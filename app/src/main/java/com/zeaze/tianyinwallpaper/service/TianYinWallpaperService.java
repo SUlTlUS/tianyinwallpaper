@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.media.MediaPlayer;
+import android.net.Uri;
 import android.service.wallpaper.WallpaperService;
 import android.view.SurfaceHolder;
 
@@ -17,6 +18,7 @@ import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel;
 import com.zeaze.tianyinwallpaper.utils.FileUtil;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
@@ -190,7 +192,13 @@ public class TianYinWallpaperService extends WallpaperService {
         private void setLiveWallpaper() {
             try {
                 mediaPlayer.reset();
-                mediaPlayer.setDataSource(list.get(index).getVideoPath());
+                TianYinWallpaperModel currentModel = list.get(index);
+                // Use URI if available, otherwise fall back to file path
+                if (currentModel.getVideoUri() != null && !currentModel.getVideoUri().isEmpty()) {
+                    mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(currentModel.getVideoUri()));
+                } else {
+                    mediaPlayer.setDataSource(currentModel.getVideoPath());
+                }
                 mediaPlayer.prepare();
                 mediaPlayer.setLooping(false);
                 mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
@@ -202,7 +210,24 @@ public class TianYinWallpaperService extends WallpaperService {
         }
 
         private Bitmap getBitmap(){
-            return BitmapFactory.decodeFile(list.get(index).getImgPath());
+            TianYinWallpaperModel currentModel = list.get(index);
+            // Use URI if available, otherwise fall back to file path
+            if (currentModel.getImgUri() != null && !currentModel.getImgUri().isEmpty()) {
+                try {
+                    InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(currentModel.getImgUri()));
+                    Bitmap bitmap = BitmapFactory.decodeStream(is);
+                    if (is != null) {
+                        is.close();
+                    }
+                    return bitmap;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    // Fall back to file path if URI fails
+                    return BitmapFactory.decodeFile(currentModel.getImgPath());
+                }
+            } else {
+                return BitmapFactory.decodeFile(currentModel.getImgPath());
+            }
         }
 
         int page=-1;

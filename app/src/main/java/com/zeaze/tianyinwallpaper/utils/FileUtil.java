@@ -53,6 +53,45 @@ public class FileUtil {
         return  null;
     }
 
+    public static Bitmap getVideoThumbnailFromUri(Context context, Uri uri) {
+        InputStream is = null;
+        File tempFile = null;
+        try {
+            // Create temporary file for video thumbnail generation
+            tempFile = File.createTempFile("temp_video", ".mp4", context.getCacheDir());
+            is = context.getContentResolver().openInputStream(uri);
+            FileOutputStream os = new FileOutputStream(tempFile);
+            byte[] buffer = new byte[1024];
+            int len;
+            while ((len = is.read(buffer)) != -1) {
+                os.write(buffer, 0, len);
+            }
+            os.close();
+            is.close();
+            
+            Bitmap thumbnail = android.media.ThumbnailUtils.createVideoThumbnail(
+                tempFile.getAbsolutePath(), 
+                android.provider.MediaStore.Video.Thumbnails.FULL_SCREEN_KIND
+            );
+            
+            return thumbnail;
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                if (is != null) {
+                    is.close();
+                }
+                if (tempFile != null) {
+                    tempFile.delete();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        return null;
+    }
+
     public static Bitmap bitmap2Path(Bitmap bitmap, String path) {
         if (bitmap.getWidth()*height==width*bitmap.getHeight()){
 
