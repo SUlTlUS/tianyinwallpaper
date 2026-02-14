@@ -295,7 +295,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                     model.setImgUri(currentUri.toString());
                     // Still create thumbnail path for list display
                     model.setImgPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".png");
-                    // videoPath is for the generated video (created from the bitmap, not copied from URI)
+                    // videoPath is for the video generated from the static bitmap (not copied from source URI)
                     model.setVideoPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".mp4");
                     // Save thumbnail only
                     bitmap = FileUtil.bitmap2Path(bitmap, model.getImgPath());
@@ -310,7 +310,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                     model.setVideoUri(currentUri.toString());
                     // Still create thumbnail path for list display
                     model.setImgPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".png");
-                    // videoPath kept for backward compatibility but not used (video accessed via URI)
+                    // videoPath maintained for data structure compatibility (not used - video accessed via videoUri)
                     model.setVideoPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".mp4");
                     // Generate and save thumbnail
                     Bitmap thumbnail = FileUtil.getVideoThumbnailFromUri(getContext(), currentUri);

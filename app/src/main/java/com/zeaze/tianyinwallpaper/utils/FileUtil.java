@@ -54,41 +54,22 @@ public class FileUtil {
     }
 
     public static Bitmap getVideoThumbnailFromUri(Context context, Uri uri) {
-        InputStream is = null;
-        FileOutputStream os = null;
-        File tempFile = null;
+        android.media.MediaMetadataRetriever retriever = null;
         try {
-            // Create temporary file for video thumbnail generation
-            tempFile = File.createTempFile("temp_video", ".mp4", context.getCacheDir());
-            is = context.getContentResolver().openInputStream(uri);
-            os = new FileOutputStream(tempFile);
-            byte[] buffer = new byte[1024];
-            int len;
-            while ((len = is.read(buffer)) != -1) {
-                os.write(buffer, 0, len);
-            }
-            
-            Bitmap thumbnail = android.media.ThumbnailUtils.createVideoThumbnail(
-                tempFile.getAbsolutePath(), 
-                android.provider.MediaStore.Video.Thumbnails.FULL_SCREEN_KIND
-            );
-            
+            retriever = new android.media.MediaMetadataRetriever();
+            retriever.setDataSource(context, uri);
+            // Get frame at time 0 (first frame) for thumbnail
+            Bitmap thumbnail = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
             return thumbnail;
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
-            try {
-                if (is != null) {
-                    is.close();
+            if (retriever != null) {
+                try {
+                    retriever.release();
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
-                if (os != null) {
-                    os.close();
-                }
-                if (tempFile != null) {
-                    tempFile.delete();
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
             }
         }
         return null;
