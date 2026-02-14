@@ -347,8 +347,8 @@ public class TianYinWallpaperService extends WallpaperService {
                         mp.setLooping(currentModel.isLoop());
                         mp.setVolume(0, 0);
                         
-                        // 重要：使用SCALE_TO_FIT保持比例
-                        mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
+                        // 重要：使用SCALE_TO_FIT_WITH_CROPPING保持比例并裁剪，避免横向压缩
+                        mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
                         
                         mp.start();
                         
@@ -464,8 +464,8 @@ public class TianYinWallpaperService extends WallpaperService {
                                 mediaPlayer.setSurface(surfaceHolder.getSurface());
                             }
                             
-                            // 确保缩放模式正确
-                            mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT);
+                            // 确保缩放模式正确，使用裁剪模式避免横向压缩
+                            mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
                             
                             if (!mediaPlayer.isPlaying()) {
                                 mediaPlayer.start();
