@@ -203,18 +203,18 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
         TextView set=view.findViewById(R.id.set);
         TianYinWallpaperModel model=list.get(i);
         loopCheckBox.setChecked(model.isLoop());
+        builder.setView(view);
+        builder.setCancelable(false);
+        AlertDialog loopDialog=builder.create();
         set.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 model.setLoop(loopCheckBox.isChecked());
                 tryToNotifyDataSetChanged();
-                dialog.dismiss();
+                loopDialog.dismiss();
             }
         });
-        builder.setView(view);
-        builder.setCancelable(false);
-        dialog=builder.create();
-        dialog.show();
+        loopDialog.show();
     }
 
     private String getTimeString(int t){
