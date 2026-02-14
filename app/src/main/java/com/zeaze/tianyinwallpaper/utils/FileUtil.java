@@ -60,8 +60,7 @@ public class FileUtil {
             retriever.setDataSource(context, uri);
             // Get frame at time 0 (first frame) for thumbnail
             // OPTION_CLOSEST_SYNC is used for better performance - retrieves the nearest keyframe
-            Bitmap thumbnail = retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
-            return thumbnail;
+            return retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
