@@ -210,11 +210,13 @@ public class TianYinWallpaperService extends WallpaperService {
                     
                     // Only apply parallax scrolling if bitmap is wider than screen
                     if (scaledWidth > canvasWidth) {
-                        // Parallax calculation: offset movement is 30% of the actual scroll
-                        // This creates the parallax effect where background moves slower than foreground
-                        float parallaxFactor = 0.3f;
+                        // Calculate the full offset range
                         int maxOffset = scaledWidth - canvasWidth;
-                        float offsetX = maxOffset * currentXOffset * parallaxFactor;
+                        // Apply parallax factor: background moves slower than the scroll
+                        // This creates depth perception - typical parallax uses 0.3-0.5 factor
+                        float parallaxFactor = 0.3f;
+                        float scrollRange = maxOffset * (1.0f - parallaxFactor);
+                        float offsetX = scrollRange * currentXOffset;
                         
                         // Draw bitmap with offset
                         localCanvas.save();
@@ -222,13 +224,12 @@ public class TianYinWallpaperService extends WallpaperService {
                         localCanvas.drawBitmap(bitmap, -offsetX / scale, 0f, this.mPaint);
                         localCanvas.restore();
                     } else {
-                        // Bitmap is not wider than screen, draw centered
-                        Rect rect = new Rect();
-                        rect.left = (canvasWidth - scaledWidth) / 2;
-                        rect.top = 0;
-                        rect.right = rect.left + scaledWidth;
-                        rect.bottom = canvasHeight;
-                        localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
+                        // Bitmap is not wider than screen, draw it scaled to fit without stretching
+                        localCanvas.save();
+                        localCanvas.scale(scale, scale);
+                        float xPos = (canvasWidth / scale - bitmapWidth) / 2f;
+                        localCanvas.drawBitmap(bitmap, xPos, 0f, this.mPaint);
+                        localCanvas.restore();
                     }
                 } else {
                     // Scrolling disabled, draw normally to fit screen
