@@ -190,6 +190,9 @@ public class TianYinWallpaperService extends WallpaperService {
                     bitmap=getBitmap();
                 }
                 
+                // Refresh wallpaper scroll setting from SharedPreferences
+                wallpaperScroll = pref.getBoolean("wallpaperScroll", false);
+                
                 if (bitmap != null && wallpaperScroll) {
                     int canvasWidth = localCanvas.getWidth();
                     int canvasHeight = localCanvas.getHeight();
@@ -297,6 +300,9 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset);
+            
+            // Refresh wallpaper scroll setting from SharedPreferences
+            wallpaperScroll = pref.getBoolean("wallpaperScroll", false);
             
             // Handle wallpaper scrolling
             if (wallpaperScroll && !hasVideo) {
