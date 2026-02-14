@@ -176,13 +176,19 @@ public class TianYinWallpaperService extends WallpaperService {
         }
         Bitmap bitmap;
         private void setWallpaper(){
+            setWallpaper(true);
+        }
+        
+        private void setWallpaper(boolean reloadBitmap){
             Canvas localCanvas=surfaceHolder.lockCanvas();
             if (localCanvas != null) {
                 localCanvas.drawColor(Color.WHITE);
-                if (bitmap!=null){
-                    bitmap.recycle();
+                if (reloadBitmap) {
+                    if (bitmap!=null){
+                        bitmap.recycle();
+                    }
+                    bitmap=getBitmap();
                 }
-                bitmap=getBitmap();
                 
                 if (wallpaperScroll && bitmap != null) {
                     int canvasWidth = localCanvas.getWidth();
@@ -190,13 +196,9 @@ public class TianYinWallpaperService extends WallpaperService {
                     int bitmapWidth = bitmap.getWidth();
                     int bitmapHeight = bitmap.getHeight();
                     
-                    // Check if bitmap is wider than screen
-                    float bitmapAspect = (float) bitmapWidth / bitmapHeight;
-                    float canvasAspect = (float) canvasWidth / canvasHeight;
-                    
                     // Calculate scaled dimensions to fit height
+                    float bitmapAspect = (float) bitmapWidth / bitmapHeight;
                     int scaledWidth = (int) (canvasHeight * bitmapAspect);
-                    int scaledHeight = canvasHeight;
                     
                     // Only apply scrolling if bitmap is wider than screen
                     if (scaledWidth > canvasWidth) {
@@ -297,7 +299,7 @@ public class TianYinWallpaperService extends WallpaperService {
             // Handle wallpaper scrolling
             if (wallpaperScroll && !hasVideo) {
                 currentXOffset = xOffset;
-                setWallpaper();
+                setWallpaper(false); // Don't reload bitmap, just redraw
             }
             
             // Handle page change detection
