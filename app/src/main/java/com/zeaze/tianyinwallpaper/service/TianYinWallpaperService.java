@@ -53,7 +53,6 @@ public class TianYinWallpaperService extends WallpaperService {
             this.mPaint.setFilterBitmap(true);
             this.mPaint.setDither(true);
             this.mPaint.setAntiAlias(true);
-            
             String s= FileUtil.loadData(getApplicationContext(),FileUtil.wallpaperPath);
             list= JSON.parseArray(s, TianYinWallpaperModel.class);
             hasVideo=true;
