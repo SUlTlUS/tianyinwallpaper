@@ -229,7 +229,7 @@ public class TianYinWallpaperService extends WallpaperService {
                 
                 // Create source rectangle (portion of bitmap to draw)
                 Rect srcRect = new Rect();
-                srcRect.left = (int) bitmapStartX;
+                srcRect.left = Math.max(0, (int) bitmapStartX);
                 srcRect.top = 0;
                 srcRect.right = Math.min((int) bitmapEndX, bitmapWidth);
                 srcRect.bottom = bitmapHeight;
@@ -251,8 +251,7 @@ public class TianYinWallpaperService extends WallpaperService {
         
         private void drawNormalWallpaper(Canvas canvas) {
             Rect rect = new Rect();
-            rect.left = 0;
-            rect.top = 0;
+            rect.left = rect.top = 0;
             rect.right = canvas.getWidth();
             rect.bottom = canvas.getHeight();
             canvas.drawBitmap(bitmap, null, rect, this.mPaint);
