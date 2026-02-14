@@ -336,7 +336,8 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
             if(visible){
-                if (hasVideo) {
+                // Check if current wallpaper is video (type 1)
+                if (hasVideo && index >= 0 && index < list.size() && list.get(index).getType() == 1) {
                     if (mediaPlayer != null) {
                         if (index!=-1) {
                             // Use individual wallpaper loop setting
@@ -356,8 +357,9 @@ public class TianYinWallpaperService extends WallpaperService {
                     lastPlayTime=mediaPlayer.getCurrentPosition();
                 }
                 if (getNextIndex()) {
-                    if (hasVideo) {
-                        if (mediaPlayer != null) {
+                    // Check current wallpaper type to decide which method to call
+                    if (index >= 0 && index < list.size() && list.get(index).getType() == 1) {
+                        if (hasVideo && mediaPlayer != null) {
                             setLiveWallpaper();
                         }
                     } else {
@@ -365,11 +367,10 @@ public class TianYinWallpaperService extends WallpaperService {
                     }
                 }
                 else{
-                    if (hasVideo) {
-                        if (mediaPlayer != null) {
-                            mediaPlayer.setLooping(false);
-                            mediaPlayer.pause();
-                        }
+                    // Check if current wallpaper is video before pausing
+                    if (hasVideo && mediaPlayer != null && index >= 0 && index < list.size() && list.get(index).getType() == 1) {
+                        mediaPlayer.setLooping(false);
+                        mediaPlayer.pause();
                     }
                 }
             }
