@@ -523,6 +523,16 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
             }
         });
 
+        CheckBox checkBox5=view.findViewById(R.id.checkBox5);
+        checkBox5.setChecked(pref.getBoolean("autoScroll",false));
+        checkBox5.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                editor.putBoolean("autoScroll",isChecked);
+                editor.apply();
+            }
+        });
+
         TextView tv=view.findViewById(R.id.tv);
         tv.setText("壁纸最小切换时间:"+pref.getInt("minTime",1)+"秒（点击修改）");
         tv.setOnClickListener(new View.OnClickListener() {
