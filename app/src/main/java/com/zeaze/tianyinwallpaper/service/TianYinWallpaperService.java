@@ -216,8 +216,7 @@ public class TianYinWallpaperService extends WallpaperService {
                 InputStream is = null;
                 try {
                     is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(currentModel.getImgUri()));
-                    Bitmap bitmap = BitmapFactory.decodeStream(is);
-                    return bitmap;
+                    return BitmapFactory.decodeStream(is);
                 } catch (Exception e) {
                     e.printStackTrace();
                     // Fall back to file path if URI fails

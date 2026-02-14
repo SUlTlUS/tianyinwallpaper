@@ -67,10 +67,6 @@ public class FileUtil {
             while ((len = is.read(buffer)) != -1) {
                 os.write(buffer, 0, len);
             }
-            os.close();
-            os = null;
-            is.close();
-            is = null;
             
             Bitmap thumbnail = android.media.ThumbnailUtils.createVideoThumbnail(
                 tempFile.getAbsolutePath(), 
