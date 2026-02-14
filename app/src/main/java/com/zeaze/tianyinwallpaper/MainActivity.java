@@ -179,6 +179,21 @@ public class MainActivity extends BaseActivity  {
         if(ContextCompat.checkSelfPermission(this,Manifest.permission.SET_WALLPAPER) != PackageManager.PERMISSION_GRANTED){
             permissionList.add(Manifest.permission.SET_WALLPAPER);
         }
+        // Check for storage permissions based on Android version
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            // Android 13+
+            if(ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED){
+                permissionList.add(Manifest.permission.READ_MEDIA_IMAGES);
+            }
+            if(ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED){
+                permissionList.add(Manifest.permission.READ_MEDIA_VIDEO);
+            }
+        } else {
+            // Android 12 and below
+            if(ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED){
+                permissionList.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+            }
+        }
         if(!permissionList.isEmpty()){
             String [] permissions = permissionList.toArray(new String[permissionList.size()]);
             ActivityCompat.requestPermissions(this,permissions,1);

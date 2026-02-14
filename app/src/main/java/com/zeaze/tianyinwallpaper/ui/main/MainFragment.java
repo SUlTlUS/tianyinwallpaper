@@ -200,6 +200,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                         model=null;
                         return;
                     }
+                    takePersistableUriPermissions(results);
                     now=0;
                     uris=results;
                     type=1;
@@ -217,6 +218,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                         model = null;
                         return;
                     }
+                    takePersistableUriPermissions(results);
                     now=0;
                     uris=results;
                     type=2;
@@ -254,6 +256,21 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
         });
     }
 
+    private void takePersistableUriPermissions(List<Uri> uris) {
+        // Take persistable URI permissions for each selected URI
+        for (Uri uri : uris) {
+            try {
+                getActivity().getContentResolver().takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                );
+            } catch (SecurityException e) {
+                // Permission may not be available for all URIs
+                Log.e("MainFragment", "Could not take persistable permission for URI: " + uri, e);
+            }
+        }
+    }
+
     private void exchange(int index){
         if (uris==null||uris.size()<=index){
             return;
@@ -262,12 +279,18 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
             @Override
             public void run() {
                 model=new TianYinWallpaperModel();
+                Uri currentUri = uris.get(index);
                 if (type == 1) {
-                    bitmap = FileUtil.ImageSizeCompress(getContext(), uris.get(index));
+                    bitmap = FileUtil.ImageSizeCompress(getContext(), currentUri);
                     model.setType(0);
                     model.setUuid(UUID.randomUUID().toString());
+                    // Store the URI string for direct access to original image
+                    model.setImgUri(currentUri.toString());
+                    // Thumbnail path for wallpaper list UI (improves scrolling performance)
                     model.setImgPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".png");
+                    // videoPath is for YapVideoEncoder to create animated wallpaper video from static bitmap
                     model.setVideoPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".mp4");
+                    // Save thumbnail only
                     bitmap = FileUtil.bitmap2Path(bitmap, model.getImgPath());
                     new YapVideoEncoder(MainFragment.this,
                             new File(model.getVideoPath()), 1)
@@ -276,11 +299,19 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                 else{
                     model.setType(1);
                     model.setUuid(UUID.randomUUID().toString());
+                    // Store the URI string for direct access to original video
+                    model.setVideoUri(currentUri.toString());
+                    // Thumbnail path for wallpaper list UI (improves scrolling performance)
                     model.setImgPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".png");
+                    // videoPath maintained for data structure compatibility (unused for dynamic wallpapers - video accessed via videoUri)
                     model.setVideoPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".mp4");
-                    FileUtil.uri2Path(getContext(), uris.get(index), model.getVideoPath());
-                    FileUtil.bitmap2Path(ThumbnailUtils.createVideoThumbnail(model.getVideoPath(), MediaStore.Video.Thumbnails.FULL_SCREEN_KIND)
-                            , model.getImgPath());
+                    // Generate and save thumbnail
+                    Bitmap thumbnail = FileUtil.getVideoThumbnailFromUri(getContext(), currentUri);
+                    if (thumbnail != null) {
+                        FileUtil.bitmap2Path(thumbnail, model.getImgPath());
+                    } else {
+                        Log.e("MainFragment", "Failed to generate thumbnail for video URI: " + currentUri);
+                    }
                     addModel();
 
                 }

@@ -53,6 +53,28 @@ public class FileUtil {
         return  null;
     }
 
+    public static Bitmap getVideoThumbnailFromUri(Context context, Uri uri) {
+        android.media.MediaMetadataRetriever retriever = null;
+        try {
+            retriever = new android.media.MediaMetadataRetriever();
+            retriever.setDataSource(context, uri);
+            // Get frame at time 0 (first frame) for thumbnail
+            // OPTION_CLOSEST_SYNC is used for better performance - retrieves the nearest keyframe
+            return retriever.getFrameAtTime(0, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            if (retriever != null) {
+                try {
+                    retriever.release();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        return null;
+    }
+
     public static Bitmap bitmap2Path(Bitmap bitmap, String path) {
         if (bitmap.getWidth()*height==width*bitmap.getHeight()){
 

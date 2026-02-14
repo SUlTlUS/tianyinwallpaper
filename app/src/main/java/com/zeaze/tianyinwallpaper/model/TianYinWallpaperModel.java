@@ -5,6 +5,8 @@ public class TianYinWallpaperModel {
     private String uuid;
     private String imgPath;
     private String videoPath;
+    private String imgUri; // URI for image
+    private String videoUri; // URI for video
     private int startTime=-1,endTime=-1;
 
     public int getStartTime() {
@@ -53,5 +55,21 @@ public class TianYinWallpaperModel {
 
     public void setVideoPath(String videoPath) {
         this.videoPath = videoPath;
+    }
+
+    public String getImgUri() {
+        return imgUri;
+    }
+
+    public void setImgUri(String imgUri) {
+        this.imgUri = imgUri;
+    }
+
+    public String getVideoUri() {
+        return videoUri;
+    }
+
+    public void setVideoUri(String videoUri) {
+        this.videoUri = videoUri;
     }
 }
