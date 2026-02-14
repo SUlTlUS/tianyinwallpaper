@@ -9,6 +9,8 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.media.MediaPlayer;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.service.wallpaper.WallpaperService;
 import android.view.SurfaceHolder;
 
@@ -31,6 +33,7 @@ public class TianYinWallpaperService extends WallpaperService {
     private boolean isOnlyOne=false;
     private boolean needBackgroundPlay=false;
     private boolean wallpaperScroll=false;
+    private boolean autoScrollEnabled=false;
 
     @Override
     public Engine onCreateEngine() {
@@ -47,6 +50,14 @@ public class TianYinWallpaperService extends WallpaperService {
 
         private boolean pageChange=false;
         private float currentXOffset=0f;
+        
+        // Auto-scroll RecyclerView-like horizontal scrolling
+        private Handler autoScrollHandler;
+        private Runnable autoScrollRunnable;
+        private float carouselScrollOffset = 0f;
+        private static final int AUTO_SCROLL_DELAY = 3000; // 3 seconds delay
+        private static final float SCROLL_SPEED = 1.5f; // pixels per frame
+        private List<Bitmap> carouselBitmaps;
         public TianYinSolaEngine(){
             this.mPaint = new Paint();
             // Add Paint flags for better bitmap rendering quality
@@ -61,9 +72,27 @@ public class TianYinWallpaperService extends WallpaperService {
             pageChange = pref.getBoolean("pageChange",false);
             needBackgroundPlay = pref.getBoolean("needBackgroundPlay",false);
             wallpaperScroll = pref.getBoolean("wallpaperScroll",false);
+            autoScrollEnabled = pref.getBoolean("autoScroll",false);
             
             // Register preference change listener
             pref.registerOnSharedPreferenceChangeListener(this);
+            
+            // Initialize auto-scroll Handler and Runnable
+            autoScrollHandler = new Handler(Looper.getMainLooper());
+            autoScrollRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if (autoScrollEnabled && !hasVideo) {
+                        // Update scroll offset for smooth animation
+                        carouselScrollOffset += SCROLL_SPEED;
+                        drawCarousel();
+                        // Continue animation
+                        autoScrollHandler.postDelayed(this, 16); // ~60 FPS
+                    }
+                }
+            };
+            
+            carouselBitmaps = new java.util.ArrayList<>();
 //            for (TianYinWallpaperModel model:list){
 //                if (model.getType()==1){
 //                    hasVideo=true;
@@ -341,6 +370,12 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
             if(visible){
+                // Start auto-scroll when wallpaper becomes visible
+                if (autoScrollEnabled && !hasVideo) {
+                    loadCarouselBitmaps();
+                    autoScrollHandler.post(autoScrollRunnable);
+                }
+                
                 if (hasVideo) {
                     if (mediaPlayer != null) {
                         if (index!=-1) {
@@ -357,6 +392,11 @@ public class TianYinWallpaperService extends WallpaperService {
                     }
                 }
             }else{
+                // Stop auto-scroll when wallpaper is not visible
+                if (autoScrollEnabled) {
+                    autoScrollHandler.removeCallbacks(autoScrollRunnable);
+                }
+                
                 if (mediaPlayer!=null){
                     lastPlayTime=mediaPlayer.getCurrentPosition();
                 }
@@ -383,6 +423,10 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             super.onDestroy();
+            // Stop auto-scroll
+            if (autoScrollHandler != null) {
+                autoScrollHandler.removeCallbacks(autoScrollRunnable);
+            }
             // Unregister preference change listener
             pref.unregisterOnSharedPreferenceChangeListener(this);
             // Recycle bitmap to free memory
@@ -390,6 +434,8 @@ public class TianYinWallpaperService extends WallpaperService {
                 bitmap.recycle();
                 bitmap = null;
             }
+            // Recycle carousel bitmaps
+            recycleCarouselBitmaps();
             releaseMediaPlayer();
         }
 
@@ -407,6 +453,135 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
             if ("wallpaperScroll".equals(key)) {
                 wallpaperScroll = sharedPreferences.getBoolean(key, false);
+            } else if ("autoScroll".equals(key)) {
+                autoScrollEnabled = sharedPreferences.getBoolean(key, false);
+                if (autoScrollEnabled && !hasVideo) {
+                    loadCarouselBitmaps();
+                    autoScrollHandler.post(autoScrollRunnable);
+                } else {
+                    autoScrollHandler.removeCallbacks(autoScrollRunnable);
+                }
+            }
+        }
+        
+        /**
+         * Load bitmaps for carousel display
+         */
+        private void loadCarouselBitmaps() {
+            recycleCarouselBitmaps();
+            
+            if (list == null || list.isEmpty()) {
+                return;
+            }
+            
+            // Load up to 5 wallpapers for carousel (or all if less than 5)
+            int maxCount = Math.min(5, list.size());
+            for (int i = 0; i < maxCount; i++) {
+                TianYinWallpaperModel model = list.get(i);
+                if (model.getType() == 0) { // Only static images for carousel
+                    Bitmap bmp = loadBitmapFromModel(model);
+                    if (bmp != null) {
+                        carouselBitmaps.add(bmp);
+                    }
+                }
+            }
+        }
+        
+        /**
+         * Load bitmap from model (similar to getBitmap but for any index)
+         */
+        private Bitmap loadBitmapFromModel(TianYinWallpaperModel model) {
+            if (model.getImgUri() != null && !model.getImgUri().isEmpty()) {
+                java.io.InputStream is = null;
+                try {
+                    is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(model.getImgUri()));
+                    return BitmapFactory.decodeStream(is);
+                } catch (Exception e) {
+                    android.util.Log.e("TianYinWallpaperService", "Error reading bitmap from URI", e);
+                } finally {
+                    if (is != null) {
+                        try {
+                            is.close();
+                        } catch (java.io.IOException e) {
+                            // Ignore
+                        }
+                    }
+                }
+            }
+            // Fall back to file path
+            return BitmapFactory.decodeFile(model.getImgPath());
+        }
+        
+        /**
+         * Recycle all carousel bitmaps to free memory
+         */
+        private void recycleCarouselBitmaps() {
+            if (carouselBitmaps != null) {
+                for (Bitmap bmp : carouselBitmaps) {
+                    if (bmp != null && !bmp.isRecycled()) {
+                        bmp.recycle();
+                    }
+                }
+                carouselBitmaps.clear();
+            }
+        }
+        
+        /**
+         * Draw the horizontal scrolling carousel
+         */
+        private void drawCarousel() {
+            if (surfaceHolder == null || carouselBitmaps == null || carouselBitmaps.isEmpty()) {
+                return;
+            }
+            
+            Canvas canvas = surfaceHolder.lockCanvas();
+            if (canvas == null) {
+                return;
+            }
+            
+            try {
+                // Clear canvas
+                canvas.drawColor(Color.BLACK);
+                
+                int canvasWidth = canvas.getWidth();
+                int canvasHeight = canvas.getHeight();
+                
+                // Calculate total width needed for all images
+                float totalWidth = 0;
+                for (Bitmap bmp : carouselBitmaps) {
+                    float scale = (float) canvasHeight / bmp.getHeight();
+                    totalWidth += bmp.getWidth() * scale;
+                }
+                
+                // Reset scroll offset when we've scrolled past all images
+                if (carouselScrollOffset >= totalWidth) {
+                    carouselScrollOffset = 0;
+                }
+                
+                // Draw each bitmap in the carousel
+                float currentX = -carouselScrollOffset;
+                for (Bitmap bmp : carouselBitmaps) {
+                    float scale = (float) canvasHeight / bmp.getHeight();
+                    float scaledWidth = bmp.getWidth() * scale;
+                    
+                    // Only draw if bitmap is visible on screen
+                    if (currentX + scaledWidth > 0 && currentX < canvasWidth) {
+                        canvas.save();
+                        canvas.translate(currentX, 0);
+                        canvas.scale(scale, scale);
+                        canvas.drawBitmap(bmp, 0, 0, mPaint);
+                        canvas.restore();
+                    }
+                    
+                    currentX += scaledWidth;
+                    
+                    // If we still have space and reached the end, loop back
+                    if (currentX < canvasWidth && currentX >= totalWidth - carouselScrollOffset) {
+                        currentX = -carouselScrollOffset;
+                    }
+                }
+            } finally {
+                surfaceHolder.unlockCanvasAndPost(canvas);
             }
         }
 
