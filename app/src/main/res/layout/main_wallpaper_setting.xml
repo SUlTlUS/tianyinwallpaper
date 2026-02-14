@@ -41,6 +41,16 @@
         android:text="只有一张壁纸时是否假装后台播放"
         android:textColor="@color/textColor"/>
 
+    <CheckBox
+        android:id="@+id/checkBox4"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:layout_gravity="center"
+        android:buttonTint="@color/checkColor"
+        android:text="宽度超过屏幕的壁纸跟随滑动滚动"
+        android:textColor="@color/textColor"/>
+
     <TextView
         android:textColor="@color/textColor"
         android:id="@+id/tv"
