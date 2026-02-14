@@ -191,56 +191,71 @@ public class TianYinWallpaperService extends WallpaperService {
                 }
                 
                 if (bitmap != null && wallpaperScroll) {
-                    int canvasWidth = localCanvas.getWidth();
-                    int canvasHeight = localCanvas.getHeight();
-                    int bitmapWidth = bitmap.getWidth();
-                    int bitmapHeight = bitmap.getHeight();
-                    
-                    // Calculate scaled dimensions to fit height
-                    float bitmapAspect = (float) bitmapWidth / bitmapHeight;
-                    int scaledWidth = (int) (canvasHeight * bitmapAspect);
-                    
-                    // Only apply scrolling if bitmap is wider than screen
-                    if (scaledWidth > canvasWidth) {
-                        // Calculate horizontal offset based on xOffset (0.0 to 1.0)
-                        int maxOffset = scaledWidth - canvasWidth;
-                        int xOffset = (int) (maxOffset * currentXOffset);
-                        
-                        // Create source and destination rectangles
-                        Rect srcRect = new Rect();
-                        srcRect.left = (int) ((float) xOffset * bitmapWidth / scaledWidth);
-                        srcRect.top = 0;
-                        srcRect.right = (int) (((float) xOffset + canvasWidth) * bitmapWidth / scaledWidth);
-                        srcRect.bottom = bitmapHeight;
-                        
-                        Rect dstRect = new Rect();
-                        dstRect.left = 0;
-                        dstRect.top = 0;
-                        dstRect.bottom = canvasHeight;
-                        dstRect.right = canvasWidth;
-                        
-                        localCanvas.drawBitmap(bitmap, srcRect, dstRect, this.mPaint);
-                    } else {
-                        // Bitmap is not wider than screen, draw normally
-                        Rect rect = new Rect();
-                        rect.left = rect.top = 0;
-                        rect.bottom = canvasHeight;
-                        rect.right = canvasWidth;
-                        localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
-                    }
+                    drawScrollingWallpaper(localCanvas);
                 } else {
                     // Scrolling disabled, draw normally
                     if (bitmap != null) {
-                        Rect rect = new Rect();
-                        rect.left = rect.top = 0;
-                        rect.bottom = localCanvas.getHeight();
-                        rect.right = localCanvas.getWidth();
-                        localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
+                        drawNormalWallpaper(localCanvas);
                     }
                 }
                 
                 surfaceHolder.unlockCanvasAndPost(localCanvas);
             }
+        }
+        
+        private void drawScrollingWallpaper(Canvas canvas) {
+            int canvasWidth = canvas.getWidth();
+            int canvasHeight = canvas.getHeight();
+            int bitmapWidth = bitmap.getWidth();
+            int bitmapHeight = bitmap.getHeight();
+            
+            // Calculate scale to fill the canvas height
+            float scale = (float) canvasHeight / bitmapHeight;
+            int scaledBitmapWidth = (int) (bitmapWidth * scale);
+            
+            // Only apply scrolling if the scaled bitmap is wider than the canvas
+            if (scaledBitmapWidth > canvasWidth) {
+                // Calculate the maximum horizontal scroll offset
+                int maxHorizontalOffset = scaledBitmapWidth - canvasWidth;
+                
+                // Calculate the actual horizontal offset based on currentXOffset (0.0 to 1.0)
+                // This simulates the parallax scrolling effect as user swipes between home screens
+                int horizontalOffset = (int) (maxHorizontalOffset * currentXOffset);
+                
+                // Calculate which portion of the bitmap to show
+                // Convert canvas coordinates back to bitmap coordinates
+                float bitmapStartX = horizontalOffset / scale;
+                float bitmapEndX = (horizontalOffset + canvasWidth) / scale;
+                
+                // Create source rectangle (portion of bitmap to draw)
+                Rect srcRect = new Rect();
+                srcRect.left = (int) bitmapStartX;
+                srcRect.top = 0;
+                srcRect.right = Math.min((int) bitmapEndX, bitmapWidth);
+                srcRect.bottom = bitmapHeight;
+                
+                // Create destination rectangle (where to draw on canvas)
+                Rect dstRect = new Rect();
+                dstRect.left = 0;
+                dstRect.top = 0;
+                dstRect.right = canvasWidth;
+                dstRect.bottom = canvasHeight;
+                
+                // Draw the bitmap with scrolling effect
+                canvas.drawBitmap(bitmap, srcRect, dstRect, this.mPaint);
+            } else {
+                // Bitmap is not wider than canvas, draw without scrolling
+                drawNormalWallpaper(canvas);
+            }
+        }
+        
+        private void drawNormalWallpaper(Canvas canvas) {
+            Rect rect = new Rect();
+            rect.left = 0;
+            rect.top = 0;
+            rect.right = canvas.getWidth();
+            rect.bottom = canvas.getHeight();
+            canvas.drawBitmap(bitmap, null, rect, this.mPaint);
         }
 
         private void setLiveWallpaper() {
