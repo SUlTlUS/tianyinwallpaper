@@ -79,7 +79,17 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
             Log.d("TAG", "onBindViewHolder: "+layoutParams.height);
         }
         TianYinWallpaperModel model=list.get(position);
-        Glide.with(context).load(model.getImgPath()).into(holder.iv);
+        // Load wallpapers directly from their original URIs when available
+        if (model.getType() == 0 && model.getImgUri() != null && !model.getImgUri().isEmpty()) {
+            // For static images, load from original URI
+            Glide.with(context).load(android.net.Uri.parse(model.getImgUri())).into(holder.iv);
+        } else if (model.getType() == 1 && model.getVideoUri() != null && !model.getVideoUri().isEmpty()) {
+            // For videos, load from original video URI
+            Glide.with(context).load(android.net.Uri.parse(model.getVideoUri())).into(holder.iv);
+        } else {
+            // Fallback to imgPath for compatibility with old data
+            Glide.with(context).load(model.getImgPath()).into(holder.iv);
+        }
         if (model.getType()==0){
             holder.tr.setText("静态");
         }

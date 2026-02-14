@@ -286,12 +286,9 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                     model.setUuid(UUID.randomUUID().toString());
                     // Store the URI string for direct access to original image
                     model.setImgUri(currentUri.toString());
-                    // Thumbnail path for wallpaper list UI (improves scrolling performance)
-                    model.setImgPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".png");
                     // videoPath is for YapVideoEncoder to create animated wallpaper video from static bitmap
                     model.setVideoPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".mp4");
-                    // Save thumbnail only
-                    bitmap = FileUtil.bitmap2Path(bitmap, model.getImgPath());
+                    // Start video encoder to create animated wallpaper from static image
                     new YapVideoEncoder(MainFragment.this,
                             new File(model.getVideoPath()), 1)
                             .start();
@@ -301,17 +298,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                     model.setUuid(UUID.randomUUID().toString());
                     // Store the URI string for direct access to original video
                     model.setVideoUri(currentUri.toString());
-                    // Thumbnail path for wallpaper list UI (improves scrolling performance)
-                    model.setImgPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".png");
-                    // videoPath maintained for data structure compatibility (unused for dynamic wallpapers - video accessed via videoUri)
-                    model.setVideoPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".mp4");
-                    // Generate and save thumbnail
-                    Bitmap thumbnail = FileUtil.getVideoThumbnailFromUri(getContext(), currentUri);
-                    if (thumbnail != null) {
-                        FileUtil.bitmap2Path(thumbnail, model.getImgPath());
-                    } else {
-                        Log.e("MainFragment", "Failed to generate thumbnail for video URI: " + currentUri);
-                    }
+                    // No need to save thumbnail - adapter will load directly from videoUri
                     addModel();
 
                 }
