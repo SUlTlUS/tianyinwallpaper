@@ -55,9 +55,9 @@ public class TianYinWallpaperService extends WallpaperService {
         private Handler autoScrollHandler;
         private Runnable autoScrollRunnable;
         private float carouselScrollOffset = 0f;
-        private static final int AUTO_SCROLL_DELAY = 3000; // 3 seconds delay
         private static final float SCROLL_SPEED = 1.5f; // pixels per frame
         private List<Bitmap> carouselBitmaps;
+        private final Object carouselLock = new Object(); // Synchronization lock
         public TianYinSolaEngine(){
             this.mPaint = new Paint();
             // Add Paint flags for better bitmap rendering quality
@@ -468,20 +468,22 @@ public class TianYinWallpaperService extends WallpaperService {
          * Load bitmaps for carousel display
          */
         private void loadCarouselBitmaps() {
-            recycleCarouselBitmaps();
-            
-            if (list == null || list.isEmpty()) {
-                return;
-            }
-            
-            // Load up to 5 wallpapers for carousel (or all if less than 5)
-            int maxCount = Math.min(5, list.size());
-            for (int i = 0; i < maxCount; i++) {
-                TianYinWallpaperModel model = list.get(i);
-                if (model.getType() == 0) { // Only static images for carousel
-                    Bitmap bmp = loadBitmapFromModel(model);
-                    if (bmp != null) {
-                        carouselBitmaps.add(bmp);
+            synchronized (carouselLock) {
+                recycleCarouselBitmaps();
+                
+                if (list == null || list.isEmpty()) {
+                    return;
+                }
+                
+                // Load up to 5 wallpapers for carousel (or all if less than 5)
+                int maxCount = Math.min(5, list.size());
+                for (int i = 0; i < maxCount; i++) {
+                    TianYinWallpaperModel model = list.get(i);
+                    if (model.getType() == 0) { // Only static images for carousel
+                        Bitmap bmp = loadBitmapFromModel(model);
+                        if (bmp != null) {
+                            carouselBitmaps.add(bmp);
+                        }
                     }
                 }
             }
@@ -516,13 +518,15 @@ public class TianYinWallpaperService extends WallpaperService {
          * Recycle all carousel bitmaps to free memory
          */
         private void recycleCarouselBitmaps() {
-            if (carouselBitmaps != null) {
-                for (Bitmap bmp : carouselBitmaps) {
-                    if (bmp != null && !bmp.isRecycled()) {
-                        bmp.recycle();
+            synchronized (carouselLock) {
+                if (carouselBitmaps != null) {
+                    for (Bitmap bmp : carouselBitmaps) {
+                        if (bmp != null && !bmp.isRecycled()) {
+                            bmp.recycle();
+                        }
                     }
+                    carouselBitmaps.clear();
                 }
-                carouselBitmaps.clear();
             }
         }
         
@@ -530,58 +534,82 @@ public class TianYinWallpaperService extends WallpaperService {
          * Draw the horizontal scrolling carousel
          */
         private void drawCarousel() {
-            if (surfaceHolder == null || carouselBitmaps == null || carouselBitmaps.isEmpty()) {
-                return;
-            }
-            
-            Canvas canvas = surfaceHolder.lockCanvas();
-            if (canvas == null) {
-                return;
-            }
-            
-            try {
-                // Clear canvas
-                canvas.drawColor(Color.BLACK);
-                
-                int canvasWidth = canvas.getWidth();
-                int canvasHeight = canvas.getHeight();
-                
-                // Calculate total width needed for all images
-                float totalWidth = 0;
-                for (Bitmap bmp : carouselBitmaps) {
-                    float scale = (float) canvasHeight / bmp.getHeight();
-                    totalWidth += bmp.getWidth() * scale;
+            synchronized (carouselLock) {
+                if (surfaceHolder == null || carouselBitmaps == null || carouselBitmaps.isEmpty()) {
+                    return;
                 }
                 
-                // Reset scroll offset when we've scrolled past all images
-                if (carouselScrollOffset >= totalWidth) {
-                    carouselScrollOffset = 0;
+                Canvas canvas = surfaceHolder.lockCanvas();
+                if (canvas == null) {
+                    return;
                 }
                 
-                // Draw each bitmap in the carousel
-                float currentX = -carouselScrollOffset;
-                for (Bitmap bmp : carouselBitmaps) {
-                    float scale = (float) canvasHeight / bmp.getHeight();
-                    float scaledWidth = bmp.getWidth() * scale;
+                try {
+                    // Clear canvas
+                    canvas.drawColor(Color.BLACK);
                     
-                    // Only draw if bitmap is visible on screen
-                    if (currentX + scaledWidth > 0 && currentX < canvasWidth) {
-                        canvas.save();
-                        canvas.translate(currentX, 0);
-                        canvas.scale(scale, scale);
-                        canvas.drawBitmap(bmp, 0, 0, mPaint);
-                        canvas.restore();
+                    int canvasWidth = canvas.getWidth();
+                    int canvasHeight = canvas.getHeight();
+                    
+                    // Calculate total width needed for all images
+                    float totalWidth = 0;
+                    for (Bitmap bmp : carouselBitmaps) {
+                        float scale = (float) canvasHeight / bmp.getHeight();
+                        totalWidth += bmp.getWidth() * scale;
                     }
                     
-                    currentX += scaledWidth;
-                    
-                    // If we still have space and reached the end, loop back
-                    if (currentX < canvasWidth && currentX >= totalWidth - carouselScrollOffset) {
-                        currentX = -carouselScrollOffset;
+                    // Reset scroll offset when we've scrolled past all images
+                    if (carouselScrollOffset >= totalWidth) {
+                        carouselScrollOffset = 0;
                     }
+                    
+                    // Draw images that are visible on screen
+                    // We may need to draw images twice to create seamless loop effect
+                    float currentX = -carouselScrollOffset;
+                    
+                    // First pass: draw all images from current offset
+                    for (Bitmap bmp : carouselBitmaps) {
+                        float scale = (float) canvasHeight / bmp.getHeight();
+                        float scaledWidth = bmp.getWidth() * scale;
+                        
+                        // Only draw if bitmap is visible on screen
+                        if (currentX + scaledWidth > 0 && currentX < canvasWidth) {
+                            canvas.save();
+                            canvas.translate(currentX, 0);
+                            canvas.scale(scale, scale);
+                            canvas.drawBitmap(bmp, 0, 0, mPaint);
+                            canvas.restore();
+                        }
+                        
+                        currentX += scaledWidth;
+                    }
+                    
+                    // Second pass: if there's empty space on the right, loop back and draw from beginning
+                    if (currentX < canvasWidth && totalWidth > 0) {
+                        // Start drawing from the beginning to fill the gap
+                        for (Bitmap bmp : carouselBitmaps) {
+                            float scale = (float) canvasHeight / bmp.getHeight();
+                            float scaledWidth = bmp.getWidth() * scale;
+                            
+                            if (currentX + scaledWidth > 0 && currentX < canvasWidth) {
+                                canvas.save();
+                                canvas.translate(currentX, 0);
+                                canvas.scale(scale, scale);
+                                canvas.drawBitmap(bmp, 0, 0, mPaint);
+                                canvas.restore();
+                            }
+                            
+                            currentX += scaledWidth;
+                            
+                            // Stop if we've filled the screen
+                            if (currentX >= canvasWidth) {
+                                break;
+                            }
+                        }
+                    }
+                } finally {
+                    surfaceHolder.unlockCanvasAndPost(canvas);
                 }
-            } finally {
-                surfaceHolder.unlockCanvasAndPost(canvas);
             }
         }
 
