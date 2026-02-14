@@ -213,17 +213,23 @@ public class TianYinWallpaperService extends WallpaperService {
             TianYinWallpaperModel currentModel = list.get(index);
             // Use URI if available, otherwise fall back to file path
             if (currentModel.getImgUri() != null && !currentModel.getImgUri().isEmpty()) {
+                InputStream is = null;
                 try {
-                    InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(currentModel.getImgUri()));
+                    is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(currentModel.getImgUri()));
                     Bitmap bitmap = BitmapFactory.decodeStream(is);
-                    if (is != null) {
-                        is.close();
-                    }
                     return bitmap;
                 } catch (Exception e) {
                     e.printStackTrace();
                     // Fall back to file path if URI fails
                     return BitmapFactory.decodeFile(currentModel.getImgPath());
+                } finally {
+                    if (is != null) {
+                        try {
+                            is.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
                 }
             } else {
                 return BitmapFactory.decodeFile(currentModel.getImgPath());

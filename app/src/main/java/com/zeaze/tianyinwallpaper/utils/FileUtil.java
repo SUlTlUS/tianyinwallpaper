@@ -55,19 +55,22 @@ public class FileUtil {
 
     public static Bitmap getVideoThumbnailFromUri(Context context, Uri uri) {
         InputStream is = null;
+        FileOutputStream os = null;
         File tempFile = null;
         try {
             // Create temporary file for video thumbnail generation
             tempFile = File.createTempFile("temp_video", ".mp4", context.getCacheDir());
             is = context.getContentResolver().openInputStream(uri);
-            FileOutputStream os = new FileOutputStream(tempFile);
+            os = new FileOutputStream(tempFile);
             byte[] buffer = new byte[1024];
             int len;
             while ((len = is.read(buffer)) != -1) {
                 os.write(buffer, 0, len);
             }
             os.close();
+            os = null;
             is.close();
+            is = null;
             
             Bitmap thumbnail = android.media.ThumbnailUtils.createVideoThumbnail(
                 tempFile.getAbsolutePath(), 
@@ -81,6 +84,9 @@ public class FileUtil {
             try {
                 if (is != null) {
                     is.close();
+                }
+                if (os != null) {
+                    os.close();
                 }
                 if (tempFile != null) {
                     tempFile.delete();
