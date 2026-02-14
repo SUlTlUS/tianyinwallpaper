@@ -71,12 +71,12 @@ public class TianYinWallpaperService extends WallpaperService {
         
         // Helper method to check if current wallpaper is a video
         private boolean isCurrentWallpaperVideo() {
-            return index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_VIDEO;
+            return list != null && index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_VIDEO;
         }
         
         // Helper method to check if current wallpaper is a static image
         private boolean isCurrentWallpaperImage() {
-            return index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_IMAGE;
+            return list != null && index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_IMAGE;
         }
 
         private boolean getNextIndex(){
@@ -357,7 +357,7 @@ public class TianYinWallpaperService extends WallpaperService {
                     if (!mediaPlayer.isPlaying()){
                         mediaPlayer.start();
                     }
-                    if (isOnlyOne &&lastPlayTime>0&&needBackgroundPlay){
+                    if (isOnlyOne && lastPlayTime > 0 && needBackgroundPlay){
                         long nowTime=(lastPlayTime+System.currentTimeMillis()-lastTime*1000)%(mediaPlayer.getDuration());
                         mediaPlayer.seekTo((int)nowTime);
                     }
