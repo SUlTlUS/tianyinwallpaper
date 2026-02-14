@@ -17,7 +17,7 @@
 gradlew.bat assembleRelease
 ```
 
-3. 构建完成后，APK文件位于：`app/build/outputs/apk/release/app-release.apk`
+3. 构建完成后，APK文件位于：`app/build/outputs/apk/release/`目录下
 
 ### 方法二：使用Android Studio构建
 
