@@ -1,6 +1,7 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 android {
+    namespace 'com.zeaze.tianyinwallpaper'
     compileSdk 29
     defaultConfig {
         applicationId "com.zeaze.tianyinwallpaper"
