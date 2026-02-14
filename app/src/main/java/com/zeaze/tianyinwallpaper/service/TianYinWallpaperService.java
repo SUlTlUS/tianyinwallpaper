@@ -67,12 +67,14 @@ public class TianYinWallpaperService extends WallpaperService {
             wallpaperScroll = pref.getBoolean("wallpaperScroll", false);
         }
         
-        // Helper method to check if current wallpaper is a video
+        // Helper method to check if current wallpaper should use video playback
+        // Both static (type=0) and dynamic (type=1) wallpapers now use video playback
         private boolean isCurrentWallpaperVideo() {
-            return list != null && index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_VIDEO;
+            return list != null && index >= 0 && index < list.size();
         }
         
-        // Helper method to check if current wallpaper is a static image
+        // Helper method to check if current wallpaper is a static image (legacy support)
+        // Note: Static images are now played as videos, but this helps identify the original type
         private boolean isCurrentWallpaperImage() {
             return list != null && index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_IMAGE;
         }
@@ -184,10 +186,8 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
             super.onSurfaceChanged(holder, format, width, height);
-            // 重新绘制当前壁纸
-            if (isCurrentWallpaperImage()) {
-                setWallpaper(false);
-            } else if (isCurrentWallpaperVideo() && mediaPlayer != null) {
+            // 重新绘制当前壁纸 - 所有壁纸类型现在都使用视频播放
+            if (isCurrentWallpaperVideo() && mediaPlayer != null) {
                 try {
                     mediaPlayer.setSurface(holder.getSurface());
                     if (!mediaPlayer.isPlaying()) {
@@ -212,18 +212,8 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (localCanvas != null) {
                     localCanvas.drawColor(Color.BLACK);
                     
-                    if (isCurrentWallpaperImage()) {
-                        // 处理图片壁纸
-                        if (reloadBitmap) {
-                            if (currentBitmap != null) {
-                                currentBitmap.recycle();
-                            }
-                            currentBitmap = getBitmap();
-                        }
-                        
-                        drawImageWallpaper(localCanvas);
-                    } else if (isCurrentWallpaperVideo()) {
-                        // 如果是视频壁纸，显示预览图或让视频显示
+                    // 所有壁纸类型现在都使用视频播放系统
+                    if (isCurrentWallpaperVideo()) {
                         if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
                             // 视频未播放，显示预览图
                             if (currentBitmap == null || reloadBitmap) {
@@ -270,8 +260,10 @@ public class TianYinWallpaperService extends WallpaperService {
             
             Rect dstRect = new Rect();
             
-            if (wallpaperScroll && isCurrentWallpaperImage()) {
-                // 滚动模式：适应高度，宽度可滚动
+            // 注意：静态壁纸现在作为视频播放，不支持滚动模式
+            // 滚动功能仅在预览图显示时有效
+            if (wallpaperScroll && isCurrentWallpaperImage() && (mediaPlayer == null || !mediaPlayer.isPlaying())) {
+                // 滚动模式：适应高度，宽度可滚动（仅在视频未播放的预览状态）
                 int scaledWidth = (int) (canvasHeight * bitmapAspect);
                 
                 if (scaledWidth > canvasWidth) {
@@ -324,11 +316,25 @@ public class TianYinWallpaperService extends WallpaperService {
                 
                 TianYinWallpaperModel currentModel = list.get(index);
                 
-                // 设置数据源
-                if (currentModel.getVideoUri() != null && !currentModel.getVideoUri().isEmpty()) {
-                    mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(currentModel.getVideoUri()));
+                // 设置数据源 - 支持静态和动态壁纸
+                // 静态壁纸(type=0)使用生成的视频文件，动态壁纸(type=1)使用原始视频
+                if (currentModel.getType() == WALLPAPER_TYPE_IMAGE) {
+                    // 静态壁纸：使用生成的视频文件
+                    if (currentModel.getVideoPath() != null && !currentModel.getVideoPath().isEmpty()) {
+                        mediaPlayer.setDataSource(currentModel.getVideoPath());
+                    } else {
+                        // 降级：如果没有视频路径，尝试从图片生成（不应该发生）
+                        throw new IOException("Static wallpaper missing video path");
+                    }
                 } else {
-                    mediaPlayer.setDataSource(currentModel.getVideoPath());
+                    // 动态壁纸：使用原始视频
+                    if (currentModel.getVideoUri() != null && !currentModel.getVideoUri().isEmpty()) {
+                        mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(currentModel.getVideoUri()));
+                    } else if (currentModel.getVideoPath() != null && !currentModel.getVideoPath().isEmpty()) {
+                        mediaPlayer.setDataSource(currentModel.getVideoPath());
+                    } else {
+                        throw new IOException("Dynamic wallpaper missing video source");
+                    }
                 }
                 
                 mediaPlayer.setOnVideoSizeChangedListener(new MediaPlayer.OnVideoSizeChangedListener() {
@@ -411,8 +417,9 @@ public class TianYinWallpaperService extends WallpaperService {
                                      float yOffsetStep, int xPixelOffset, int yPixelOffset) {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset);
             
-            // 更新滚动偏移 - 只对图片壁纸生效
-            if (wallpaperScroll && isCurrentWallpaperImage()) {
+            // 更新滚动偏移 - 仅在预览图显示时生效（视频未播放状态）
+            // 静态壁纸作为视频播放时不支持滚动
+            if (wallpaperScroll && isCurrentWallpaperImage() && (mediaPlayer == null || !mediaPlayer.isPlaying())) {
                 currentXOffset = xOffset;
                 setWallpaper(false);
             }
@@ -451,9 +458,8 @@ public class TianYinWallpaperService extends WallpaperService {
             super.onVisibilityChanged(visible);
             
             if (visible) {
-                // 壁纸可见
+                // 壁纸可见 - 所有类型都使用视频播放
                 if (isCurrentWallpaperVideo()) {
-                    // 当前是视频壁纸
                     if (mediaPlayer == null) {
                         // 首次播放
                         initVideoWallpaper();
@@ -486,9 +492,6 @@ public class TianYinWallpaperService extends WallpaperService {
                             initVideoWallpaper();
                         }
                     }
-                } else if (isCurrentWallpaperImage()) {
-                    // 当前是图片壁纸，确保显示图片
-                    setWallpaper(false);
                 }
             } else {
                 // 壁纸不可见
@@ -505,15 +508,11 @@ public class TianYinWallpaperService extends WallpaperService {
                 
                 // 准备下一个壁纸
                 if (getNextIndex()) {
-                    // 切换到下一个壁纸
-                    if (isCurrentWallpaperVideo()) {
-                        initVideoWallpaper();
-                    } else {
-                        setWallpaper(true);
-                    }
+                    // 切换到下一个壁纸 - 所有类型都初始化视频播放
+                    initVideoWallpaper();
                 } else {
                     // 没有切换，暂停视频
-                    if (isCurrentWallpaperVideo() && mediaPlayer != null) {
+                    if (mediaPlayer != null) {
                         try {
                             mediaPlayer.pause();
                         } catch (Exception e) {
