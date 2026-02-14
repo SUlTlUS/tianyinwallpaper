@@ -28,7 +28,7 @@
         android:layout_marginTop="10dp"
         android:layout_gravity="center"
         android:buttonTint="@color/checkColor"
-        android:text="滑动桌面后是否切换"
+        android:text="是否跟随屏幕滚动切换壁纸"
         android:textColor="@color/textColor"/>
 
     <CheckBox
