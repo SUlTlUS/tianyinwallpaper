@@ -190,7 +190,7 @@ public class TianYinWallpaperService extends WallpaperService {
                     bitmap=getBitmap();
                 }
                 
-                if (wallpaperScroll && bitmap != null) {
+                if (bitmap != null && wallpaperScroll) {
                     int canvasWidth = localCanvas.getWidth();
                     int canvasHeight = localCanvas.getHeight();
                     int bitmapWidth = bitmap.getWidth();
@@ -230,11 +230,13 @@ public class TianYinWallpaperService extends WallpaperService {
                     }
                 } else {
                     // Scrolling disabled, draw normally
-                    Rect rect = new Rect();
-                    rect.left = rect.top = 0;
-                    rect.bottom = localCanvas.getHeight();
-                    rect.right = localCanvas.getWidth();
-                    localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
+                    if (bitmap != null) {
+                        Rect rect = new Rect();
+                        rect.left = rect.top = 0;
+                        rect.bottom = localCanvas.getHeight();
+                        rect.right = localCanvas.getWidth();
+                        localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
+                    }
                 }
                 
                 surfaceHolder.unlockCanvasAndPost(localCanvas);
