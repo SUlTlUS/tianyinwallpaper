@@ -22,6 +22,15 @@
         android:layout_height="45dp" />
     <TextView
         android:textColor="@color/textColor"
+        android:id="@+id/tv3"
+        android:text="设置循环播放"
+        android:gravity="center"
+        android:textSize="16sp"
+        android:background="?attr/selectableItemBackground"
+        android:layout_width="match_parent"
+        android:layout_height="45dp" />
+    <TextView
+        android:textColor="@color/textColor"
         android:id="@+id/tv2"
         android:text="删除"
         android:layout_marginBottom="20dp"

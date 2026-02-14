@@ -8,6 +8,7 @@ public class TianYinWallpaperModel {
     private String imgUri; // URI for image
     private String videoUri; // URI for video
     private int startTime=-1,endTime=-1;
+    private boolean loop=true; // Loop playback toggle for individual wallpaper
 
     public int getStartTime() {
         return startTime;
@@ -71,5 +72,13 @@ public class TianYinWallpaperModel {
 
     public void setVideoUri(String videoUri) {
         this.videoUri = videoUri;
+    }
+
+    public boolean isLoop() {
+        return loop;
+    }
+
+    public void setLoop(boolean loop) {
+        this.loop = loop;
     }
 }

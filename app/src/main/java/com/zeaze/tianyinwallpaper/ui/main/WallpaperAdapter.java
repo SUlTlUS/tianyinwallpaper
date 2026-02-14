@@ -117,6 +117,13 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
                         alertDialog.dismiss();
                     }
                 });
+                view.findViewById(R.id.tv3).setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        setLoop(i);
+                        alertDialog.dismiss();
+                    }
+                });
                 view.findViewById(R.id.tv2).setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -179,6 +186,27 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
                 if (model.getEndTime()!=-1&&model.getStartTime()==-1){
                     model.setStartTime(0);
                 }
+                tryToNotifyDataSetChanged();
+                dialog.dismiss();
+            }
+        });
+        builder.setView(view);
+        builder.setCancelable(false);
+        dialog=builder.create();
+        dialog.show();
+    }
+
+    private void setLoop(int i){
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        View view=LayoutInflater.from(context).inflate(R.layout.wallpaper_se_loop, null);
+        CheckBox loopCheckBox=view.findViewById(R.id.loopCheckBox);
+        TextView set=view.findViewById(R.id.set);
+        TianYinWallpaperModel model=list.get(i);
+        loopCheckBox.setChecked(model.isLoop());
+        set.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                model.setLoop(loopCheckBox.isChecked());
                 tryToNotifyDataSetChanged();
                 dialog.dismiss();
             }
