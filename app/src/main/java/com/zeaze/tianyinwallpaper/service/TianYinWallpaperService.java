@@ -31,6 +31,10 @@ public class TianYinWallpaperService extends WallpaperService {
     private boolean isOnlyOne=false;
     private boolean needBackgroundPlay=false;
     private boolean wallpaperScroll=false;
+    
+    // Wallpaper type constants
+    private static final int WALLPAPER_TYPE_IMAGE = 0;
+    private static final int WALLPAPER_TYPE_VIDEO = 1;
 
     @Override
     public Engine onCreateEngine() {
@@ -67,12 +71,12 @@ public class TianYinWallpaperService extends WallpaperService {
         
         // Helper method to check if current wallpaper is a video
         private boolean isCurrentWallpaperVideo() {
-            return index >= 0 && index < list.size() && list.get(index).getType() == 1;
+            return index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_VIDEO;
         }
         
         // Helper method to check if current wallpaper is a static image
         private boolean isCurrentWallpaperImage() {
-            return index >= 0 && index < list.size() && list.get(index).getType() == 0;
+            return index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_IMAGE;
         }
 
         private boolean getNextIndex(){
@@ -348,16 +352,14 @@ public class TianYinWallpaperService extends WallpaperService {
             if(visible){
                 // Check if current wallpaper is video (type 1)
                 if (isCurrentWallpaperVideo() && mediaPlayer != null) {
-                    if (index!=-1) {
-                        // Use individual wallpaper loop setting
-                        mediaPlayer.setLooping(list.get(index).isLoop());
-                        if (!mediaPlayer.isPlaying()){
-                            mediaPlayer.start();
-                        }
-                        if (isOnlyOne &&lastPlayTime>0&&needBackgroundPlay){
-                            long nowTime=(lastPlayTime+System.currentTimeMillis()-lastTime*1000)%(mediaPlayer.getDuration());
-                            mediaPlayer.seekTo((int)nowTime);
-                        }
+                    // Use individual wallpaper loop setting
+                    mediaPlayer.setLooping(list.get(index).isLoop());
+                    if (!mediaPlayer.isPlaying()){
+                        mediaPlayer.start();
+                    }
+                    if (isOnlyOne &&lastPlayTime>0&&needBackgroundPlay){
+                        long nowTime=(lastPlayTime+System.currentTimeMillis()-lastTime*1000)%(mediaPlayer.getDuration());
+                        mediaPlayer.seekTo((int)nowTime);
                     }
                 }
             }else{
