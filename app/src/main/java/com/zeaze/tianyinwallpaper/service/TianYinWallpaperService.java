@@ -358,7 +358,7 @@ public class TianYinWallpaperService extends WallpaperService {
                         mediaPlayer.start();
                     }
                     if (isOnlyOne && lastPlayTime > 0 && needBackgroundPlay){
-                        long nowTime=(lastPlayTime+System.currentTimeMillis()-lastTime*1000)%(mediaPlayer.getDuration());
+                        long nowTime = (lastPlayTime + System.currentTimeMillis() - lastTime * 1000) % (mediaPlayer.getDuration());
                         mediaPlayer.seekTo((int)nowTime);
                     }
                 }
