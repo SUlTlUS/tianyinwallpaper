@@ -30,6 +30,7 @@ public class TianYinWallpaperService extends WallpaperService {
 
     private boolean isOnlyOne=false;
     private boolean needBackgroundPlay=false;
+    private boolean wallpaperScroll=false;
 
     @Override
     public Engine onCreateEngine() {
@@ -45,6 +46,7 @@ public class TianYinWallpaperService extends WallpaperService {
         private boolean hasVideo;
 
         private boolean pageChange=false;
+        private float currentXOffset=0f;
         public TianYinSolaEngine(){
             this.mPaint = new Paint();
             String s= FileUtil.loadData(getApplicationContext(),FileUtil.wallpaperPath);
@@ -54,6 +56,7 @@ public class TianYinWallpaperService extends WallpaperService {
             pref = getSharedPreferences(App.TIANYIN,MODE_PRIVATE);
             pageChange = pref.getBoolean("pageChange",false);
             needBackgroundPlay = pref.getBoolean("needBackgroundPlay",false);
+            wallpaperScroll = pref.getBoolean("wallpaperScroll",false);
 //            for (TianYinWallpaperModel model:list){
 //                if (model.getType()==1){
 //                    hasVideo=true;
@@ -175,16 +178,63 @@ public class TianYinWallpaperService extends WallpaperService {
         private void setWallpaper(){
             Canvas localCanvas=surfaceHolder.lockCanvas();
             if (localCanvas != null) {
-                Rect rect = new Rect();
-                rect.left = rect.top = 0;
-                rect.bottom = localCanvas.getHeight();
-                rect.right = localCanvas.getWidth();
                 localCanvas.drawColor(Color.WHITE);
                 if (bitmap!=null){
                     bitmap.recycle();
                 }
                 bitmap=getBitmap();
-                localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
+                
+                if (wallpaperScroll && bitmap != null) {
+                    int canvasWidth = localCanvas.getWidth();
+                    int canvasHeight = localCanvas.getHeight();
+                    int bitmapWidth = bitmap.getWidth();
+                    int bitmapHeight = bitmap.getHeight();
+                    
+                    // Check if bitmap is wider than screen
+                    float bitmapAspect = (float) bitmapWidth / bitmapHeight;
+                    float canvasAspect = (float) canvasWidth / canvasHeight;
+                    
+                    // Calculate scaled dimensions to fit height
+                    int scaledWidth = (int) (canvasHeight * bitmapAspect);
+                    int scaledHeight = canvasHeight;
+                    
+                    // Only apply scrolling if bitmap is wider than screen
+                    if (scaledWidth > canvasWidth) {
+                        // Calculate horizontal offset based on xOffset (0.0 to 1.0)
+                        int maxOffset = scaledWidth - canvasWidth;
+                        int xOffset = (int) (maxOffset * currentXOffset);
+                        
+                        // Create source and destination rectangles
+                        Rect srcRect = new Rect();
+                        srcRect.left = (int) ((float) xOffset * bitmapWidth / scaledWidth);
+                        srcRect.top = 0;
+                        srcRect.right = (int) (((float) xOffset + canvasWidth) * bitmapWidth / scaledWidth);
+                        srcRect.bottom = bitmapHeight;
+                        
+                        Rect dstRect = new Rect();
+                        dstRect.left = 0;
+                        dstRect.top = 0;
+                        dstRect.bottom = canvasHeight;
+                        dstRect.right = canvasWidth;
+                        
+                        localCanvas.drawBitmap(bitmap, srcRect, dstRect, this.mPaint);
+                    } else {
+                        // Bitmap is not wider than screen, draw normally
+                        Rect rect = new Rect();
+                        rect.left = rect.top = 0;
+                        rect.bottom = canvasHeight;
+                        rect.right = canvasWidth;
+                        localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
+                    }
+                } else {
+                    // Scrolling disabled, draw normally
+                    Rect rect = new Rect();
+                    rect.left = rect.top = 0;
+                    rect.bottom = localCanvas.getHeight();
+                    rect.right = localCanvas.getWidth();
+                    localCanvas.drawBitmap(bitmap, null, rect, this.mPaint);
+                }
+                
                 surfaceHolder.unlockCanvasAndPost(localCanvas);
             }
         }
@@ -243,6 +293,14 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset);
+            
+            // Handle wallpaper scrolling
+            if (wallpaperScroll && !hasVideo) {
+                currentXOffset = xOffset;
+                setWallpaper();
+            }
+            
+            // Handle page change detection
             if (!pageChange){
                 return;
             }
