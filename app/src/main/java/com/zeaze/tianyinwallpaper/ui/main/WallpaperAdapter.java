@@ -9,6 +9,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -117,6 +118,13 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
                         alertDialog.dismiss();
                     }
                 });
+                view.findViewById(R.id.tv3).setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        setLoop(i);
+                        alertDialog.dismiss();
+                    }
+                });
                 view.findViewById(R.id.tv2).setOnClickListener(new View.OnClickListener() {
                     @Override
                     public void onClick(View v) {
@@ -187,6 +195,27 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
         builder.setCancelable(false);
         dialog=builder.create();
         dialog.show();
+    }
+
+    private void setLoop(int i){
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        View view=LayoutInflater.from(context).inflate(R.layout.wallpaper_se_loop, null);
+        CheckBox loopCheckBox=view.findViewById(R.id.loopCheckBox);
+        TextView set=view.findViewById(R.id.set);
+        TianYinWallpaperModel model=list.get(i);
+        loopCheckBox.setChecked(model.isLoop());
+        builder.setView(view);
+        builder.setCancelable(false);
+        AlertDialog loopDialog=builder.create();
+        set.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                model.setLoop(loopCheckBox.isChecked());
+                tryToNotifyDataSetChanged();
+                loopDialog.dismiss();
+            }
+        });
+        loopDialog.show();
     }
 
     private String getTimeString(int t){

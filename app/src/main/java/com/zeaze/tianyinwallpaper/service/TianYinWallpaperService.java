@@ -200,7 +200,8 @@ public class TianYinWallpaperService extends WallpaperService {
                     mediaPlayer.setDataSource(currentModel.getVideoPath());
                 }
                 mediaPlayer.prepare();
-                mediaPlayer.setLooping(false);
+                // Use individual wallpaper loop setting
+                mediaPlayer.setLooping(currentModel.isLoop());
                 mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
                 mediaPlayer.setVolume(0,0);
                 mediaPlayer.start();
@@ -275,7 +276,8 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (hasVideo) {
                     if (mediaPlayer != null) {
                         if (index!=-1) {
-                            mediaPlayer.setLooping(true);
+                            // Use individual wallpaper loop setting
+                            mediaPlayer.setLooping(list.get(index).isLoop());
                             if (!mediaPlayer.isPlaying()){
                                 mediaPlayer.start();
                             }

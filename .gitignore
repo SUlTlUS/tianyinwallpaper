@@ -20,3 +20,6 @@ local.properties
 
 # Release output metadata
 output-metadata.json
+
+# Compiled class files
+*.class
