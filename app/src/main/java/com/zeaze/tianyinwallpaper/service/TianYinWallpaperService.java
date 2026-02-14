@@ -31,6 +31,10 @@ public class TianYinWallpaperService extends WallpaperService {
     private boolean isOnlyOne=false;
     private boolean needBackgroundPlay=false;
     private boolean wallpaperScroll=false;
+    
+    // Wallpaper type constants
+    private static final int WALLPAPER_TYPE_IMAGE = 0;
+    private static final int WALLPAPER_TYPE_VIDEO = 1;
 
     @Override
     public Engine onCreateEngine() {
@@ -63,6 +67,16 @@ public class TianYinWallpaperService extends WallpaperService {
 //                    break;
 //                }
 //            }
+        }
+        
+        // Helper method to check if current wallpaper is a video
+        private boolean isCurrentWallpaperVideo() {
+            return list != null && index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_VIDEO;
+        }
+        
+        // Helper method to check if current wallpaper is a static image
+        private boolean isCurrentWallpaperImage() {
+            return list != null && index >= 0 && index < list.size() && list.get(index).getType() == WALLPAPER_TYPE_IMAGE;
         }
 
         private boolean getNextIndex(){
@@ -299,7 +313,8 @@ public class TianYinWallpaperService extends WallpaperService {
             super.onOffsetsChanged(xOffset, yOffset, xOffsetStep, yOffsetStep, xPixelOffset, yPixelOffset);
             
             // Handle wallpaper scrolling
-            if (wallpaperScroll && !hasVideo) {
+            // Check if current wallpaper is static image (type 0) before applying scroll
+            if (wallpaperScroll && isCurrentWallpaperImage()) {
                 currentXOffset = xOffset;
                 setWallpaper(false); // Don't reload bitmap, just redraw
             }
@@ -335,19 +350,16 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
             if(visible){
-                if (hasVideo) {
-                    if (mediaPlayer != null) {
-                        if (index!=-1) {
-                            // Use individual wallpaper loop setting
-                            mediaPlayer.setLooping(list.get(index).isLoop());
-                            if (!mediaPlayer.isPlaying()){
-                                mediaPlayer.start();
-                            }
-                            if (isOnlyOne &&lastPlayTime>0&&needBackgroundPlay){
-                                long nowTime=(lastPlayTime+System.currentTimeMillis()-lastTime*1000)%(mediaPlayer.getDuration());
-                                mediaPlayer.seekTo((int)nowTime);
-                            }
-                        }
+                // Check if current wallpaper is video (type 1)
+                if (isCurrentWallpaperVideo() && mediaPlayer != null) {
+                    // Use individual wallpaper loop setting
+                    mediaPlayer.setLooping(list.get(index).isLoop());
+                    if (!mediaPlayer.isPlaying()){
+                        mediaPlayer.start();
+                    }
+                    if (isOnlyOne && lastPlayTime > 0 && needBackgroundPlay){
+                        long nowTime = (lastPlayTime + System.currentTimeMillis() - lastTime * 1000) % (mediaPlayer.getDuration());
+                        mediaPlayer.seekTo((int)nowTime);
                     }
                 }
             }else{
@@ -355,20 +367,18 @@ public class TianYinWallpaperService extends WallpaperService {
                     lastPlayTime=mediaPlayer.getCurrentPosition();
                 }
                 if (getNextIndex()) {
-                    if (hasVideo) {
-                        if (mediaPlayer != null) {
-                            setLiveWallpaper();
-                        }
+                    // Check current wallpaper type to decide which method to call
+                    if (isCurrentWallpaperVideo() && mediaPlayer != null) {
+                        setLiveWallpaper();
                     } else {
                         this.setWallpaper();
                     }
                 }
                 else{
-                    if (hasVideo) {
-                        if (mediaPlayer != null) {
-                            mediaPlayer.setLooping(false);
-                            mediaPlayer.pause();
-                        }
+                    // Check if current wallpaper is video before pausing
+                    if (isCurrentWallpaperVideo() && mediaPlayer != null) {
+                        mediaPlayer.setLooping(false);
+                        mediaPlayer.pause();
                     }
                 }
             }
