@@ -351,6 +351,17 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
             if(visible){
+                // 首次可见时主动加载一张壁纸，避免没有内容时出现纯黑幕
+                if (index == -1 && list != null && !list.isEmpty() && getNextIndex()) {
+                    if (isCurrentWallpaperVideo()) {
+                        if (mediaPlayer != null) {
+                            setLiveWallpaper();
+                        }
+                    } else {
+                        resetSurfaceSize();
+                        setWallpaper();
+                    }
+                }
                 // Check if current wallpaper is video (type 1)
                 if (isCurrentWallpaperVideo() && mediaPlayer != null) {
                     // Use individual wallpaper loop setting
