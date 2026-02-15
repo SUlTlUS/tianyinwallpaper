@@ -76,10 +76,24 @@ public class TianYinWallpaperService extends WallpaperService {
         }
 
         @Override
+        public void onSurfaceDestroyed(SurfaceHolder holder) {
+            super.onSurfaceDestroyed(holder);
+            // 释放 MediaPlayer，避免持有无效 Surface
+            if (mediaPlayer != null) {
+                mediaPlayer.release();
+                mediaPlayer = null;
+            }
+            if (eglThread != null) {
+                eglThread.finish();
+                eglThread = null;
+            }
+        }
+
+        @Override
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
             if (visible) {
-                if (mediaPlayer != null) mediaPlayer.start();
+                // 不再手动 start，由 OnPreparedListener 自动播放
                 if (eglThread != null) eglThread.requestRender();
             } else {
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) mediaPlayer.pause();
@@ -102,27 +116,40 @@ public class TianYinWallpaperService extends WallpaperService {
 
         private void prepareVideo(TianYinWallpaperModel model) {
             try {
-                if (mediaPlayer == null) mediaPlayer = new MediaPlayer();
-                mediaPlayer.reset();
+                // 每次都重新创建 MediaPlayer，避免旧状态干扰
+                if (mediaPlayer != null) {
+                    mediaPlayer.release();
+                    mediaPlayer = null;
+                }
+                mediaPlayer = new MediaPlayer();
+
                 mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(model.getVideoUri()));
+
                 SurfaceTexture st = eglThread.getVideoST();
                 if (st == null) return;
                 Surface surface = new Surface(st);
                 mediaPlayer.setSurface(surface);
-                surface.release();
+                surface.release();  // 释放 Surface 对象，MediaPlayer 内部会持有引用
+
                 mediaPlayer.setLooping(model.isLoop());
                 mediaPlayer.setVolume(0, 0);
                 mediaPlayer.setOnPreparedListener(mp -> {
                     eglThread.setContentSize(mp.getVideoWidth(), mp.getVideoHeight());
-                    mp.start();
+                    mp.start();  // 准备好后自动开始播放
                 });
                 mediaPlayer.prepareAsync();
-                eglThread.resetVideoMatrix(); // 切换视频时重置矩阵
-            } catch (Exception e) { Log.e(TAG, "Video error", e); }
+                eglThread.resetVideoMatrix();
+            } catch (Exception e) {
+                Log.e(TAG, "Video error", e);
+            }
         }
 
         private void prepareImage(TianYinWallpaperModel model) {
-            if (mediaPlayer != null) mediaPlayer.reset();
+            // 图片不需要 MediaPlayer，释放视频资源
+            if (mediaPlayer != null) {
+                mediaPlayer.release();
+                mediaPlayer = null;
+            }
             try {
                 InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(model.getImgUri()));
                 Bitmap bitmap = BitmapFactory.decodeStream(is);
@@ -131,7 +158,9 @@ public class TianYinWallpaperService extends WallpaperService {
                     eglThread.setContentSize(bitmap.getWidth(), bitmap.getHeight());
                     eglThread.uploadBitmap(bitmap);
                 }
-            } catch (Exception e) { Log.e(TAG, "Image error", e); }
+            } catch (Exception e) {
+                Log.e(TAG, "Image error", e);
+            }
         }
 
         @Override
@@ -149,8 +178,14 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             super.onDestroy();
-            if (mediaPlayer != null) mediaPlayer.release();
-            if (eglThread != null) eglThread.finish();
+            if (mediaPlayer != null) {
+                mediaPlayer.release();
+                mediaPlayer = null;
+            }
+            if (eglThread != null) {
+                eglThread.finish();
+                eglThread = null;
+            }
         }
 
         // --- 优化后的 EGL 渲染线程 ---
