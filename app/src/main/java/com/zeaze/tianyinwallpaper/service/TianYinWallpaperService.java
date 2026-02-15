@@ -186,6 +186,7 @@ public class TianYinWallpaperService extends WallpaperService {
             if (hasVideo) {
                 mediaPlayer = new MediaPlayer();
                 mediaPlayer.setSurface(holder.getSurface());
+                mediaPlayer.setOnVideoSizeChangedListener((mp, width, height) -> applyVideoScrollSurface(width, height));
             }
         }
         Bitmap bitmap;
@@ -260,12 +261,6 @@ public class TianYinWallpaperService extends WallpaperService {
         private void setLiveWallpaper() {
             try {
                 mediaPlayer.reset();
-                mediaPlayer.setOnVideoSizeChangedListener(new MediaPlayer.OnVideoSizeChangedListener() {
-                    @Override
-                    public void onVideoSizeChanged(MediaPlayer mp, int width, int height) {
-                        applyVideoScrollSurface(width, height);
-                    }
-                });
                 TianYinWallpaperModel currentModel = list.get(index);
                 // Use URI if available, otherwise fall back to file path
                 if (currentModel.getVideoUri() != null && !currentModel.getVideoUri().isEmpty()) {
@@ -274,11 +269,6 @@ public class TianYinWallpaperService extends WallpaperService {
                     mediaPlayer.setDataSource(currentModel.getVideoPath());
                 }
                 mediaPlayer.prepare();
-                int videoWidth = mediaPlayer.getVideoWidth();
-                int videoHeight = mediaPlayer.getVideoHeight();
-                if (videoWidth > 0 && videoHeight > 0) {
-                    applyVideoScrollSurface(videoWidth, videoHeight);
-                }
                 // Use individual wallpaper loop setting
                 mediaPlayer.setLooping(currentModel.isLoop());
                 mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
@@ -424,15 +414,16 @@ public class TianYinWallpaperService extends WallpaperService {
                 return;
             }
             Rect surfaceFrame = surfaceHolder.getSurfaceFrame();
-            int surfaceHeight = surfaceFrame != null ? surfaceFrame.height() : 0;
-            if (surfaceHeight <= 0) {
-                surfaceHeight = getResources().getDisplayMetrics().heightPixels;
-            }
-            float aspect = (float) videoWidth / videoHeight;
-            int targetWidth = (int) (surfaceHeight * aspect);
-            int currentWidth = surfaceFrame != null ? surfaceFrame.width() : 0;
-            if (currentWidth > 0) {
-                targetWidth = Math.max(targetWidth, currentWidth);
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            boolean hasSurfaceFrame = surfaceFrame != null;
+            int frameHeight = hasSurfaceFrame ? surfaceFrame.height() : 0;
+            int frameWidth = hasSurfaceFrame ? surfaceFrame.width() : 0;
+            // Surface frame may report zero before layout is ready; fall back to screen height so video still scales to the visible area.
+            int surfaceHeight = frameHeight > 0 ? frameHeight : screenHeight;
+            float aspectRatio = (float) videoWidth / videoHeight;
+            int targetWidth = (int) (surfaceHeight * aspectRatio);
+            if (frameWidth > 0) {
+                targetWidth = Math.max(targetWidth, frameWidth);
             }
             surfaceHolder.setFixedSize(targetWidth, surfaceHeight);
         }
