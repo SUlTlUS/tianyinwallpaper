@@ -274,7 +274,11 @@ public class TianYinWallpaperService extends WallpaperService {
                     mediaPlayer.setDataSource(currentModel.getVideoPath());
                 }
                 mediaPlayer.prepare();
-                applyVideoScrollSurface(mediaPlayer.getVideoWidth(), mediaPlayer.getVideoHeight());
+                int videoWidth = mediaPlayer.getVideoWidth();
+                int videoHeight = mediaPlayer.getVideoHeight();
+                if (videoWidth > 0 && videoHeight > 0) {
+                    applyVideoScrollSurface(videoWidth, videoHeight);
+                }
                 // Use individual wallpaper loop setting
                 mediaPlayer.setLooping(currentModel.isLoop());
                 mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
@@ -419,13 +423,14 @@ public class TianYinWallpaperService extends WallpaperService {
             if (videoWidth <= 0 || videoHeight <= 0) {
                 return;
             }
-            int surfaceHeight = surfaceHolder.getSurfaceFrame() != null ? surfaceHolder.getSurfaceFrame().height() : 0;
+            Rect surfaceFrame = surfaceHolder.getSurfaceFrame();
+            int surfaceHeight = surfaceFrame != null ? surfaceFrame.height() : 0;
             if (surfaceHeight <= 0) {
                 surfaceHeight = getResources().getDisplayMetrics().heightPixels;
             }
             float aspect = (float) videoWidth / videoHeight;
             int targetWidth = (int) (surfaceHeight * aspect);
-            int currentWidth = surfaceHolder.getSurfaceFrame() != null ? surfaceHolder.getSurfaceFrame().width() : 0;
+            int currentWidth = surfaceFrame != null ? surfaceFrame.width() : 0;
             if (currentWidth > 0) {
                 targetWidth = Math.max(targetWidth, currentWidth);
             }
