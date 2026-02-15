@@ -37,8 +37,6 @@ import javax.microedition.khronos.egl.EGLDisplay;
 import javax.microedition.khronos.egl.EGLSurface;
 
 public class TianYinWallpaperService extends WallpaperService {
-    private final String TAG = "TianYinGL";
-
     @Override
     public Engine onCreateEngine() {
         return new TianYinSolaEngine();
@@ -49,21 +47,18 @@ public class TianYinWallpaperService extends WallpaperService {
         private EglThread eglThread;
         private List<TianYinWallpaperModel> list;
         private int index = -1;
-        private volatile float currentXOffset = 0.5f;
+        private volatile float xOffset = 0.5f;
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
-        private boolean wallpaperScroll = false;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
             super.onCreate(surfaceHolder);
-            // 必须：ColorOS 合成器强制要求
+            // 核心修复1：显式声明像素格式，解决文件夹模糊背景显示旧壁纸的问题
             surfaceHolder.setFormat(PixelFormat.RGBX_8888);
             try {
                 String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
                 list = JSON.parseArray(s, TianYinWallpaperModel.class);
             } catch (Exception ignored) {}
-            SharedPreferences pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE);
-            wallpaperScroll = pref.getBoolean("wallpaperScroll", false);
         }
 
         @Override
@@ -75,80 +70,64 @@ public class TianYinWallpaperService extends WallpaperService {
 
         @Override
         public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-            super.onSurfaceChanged(holder, format, width, height);
             if (eglThread != null) eglThread.onSizeChanged(width, height);
         }
 
         @Override
         public void onVisibilityChanged(boolean visible) {
-            super.onVisibilityChanged(visible);
             if (visible) {
                 if (mediaPlayer != null) mediaPlayer.start();
-                if (eglThread != null) eglThread.forceRender(3);
+                if (eglThread != null) eglThread.requestRender();
             } else {
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) mediaPlayer.pause();
-                nextWallpaper();
+                next();
             }
         }
 
-        private void nextWallpaper() {
+        private void next() {
             if (list == null || list.isEmpty()) return;
             index = (index + 1) % list.size();
-            if (eglThread != null) eglThread.postRunnable(this::loadContent);
+            if (eglThread != null) eglThread.post(() -> load());
         }
 
-        private void loadContent() {
-            if (index < 0 || index >= list.size()) return;
-            TianYinWallpaperModel model = list.get(index);
-            if (model.getType() == 1) prepareVideo(model);
-            else prepareImage(model);
-        }
-
-        private void prepareVideo(TianYinWallpaperModel model) {
+        private void load() {
+            TianYinWallpaperModel m = list.get(index);
             try {
-                if (mediaPlayer == null) mediaPlayer = new MediaPlayer();
-                mediaPlayer.reset();
-                mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(model.getVideoUri()));
-                
-                SurfaceTexture st = eglThread.getVideoST();
-                if (st == null) return;
-                
-                Surface surface = new Surface(st);
-                mediaPlayer.setSurface(surface);
-                surface.release();
-                
-                mediaPlayer.setLooping(model.isLoop());
-                mediaPlayer.setVolume(0, 0);
-                mediaPlayer.setOnPreparedListener(mp -> {
-                    eglThread.setContentSize(mp.getVideoWidth(), mp.getVideoHeight());
-                    mp.start();
-                    eglThread.forceRender(5);
-                });
-                mediaPlayer.prepareAsync();
-            } catch (Exception e) { Log.e(TAG, "Video error", e); }
-        }
-
-        private void prepareImage(TianYinWallpaperModel model) {
-            if (mediaPlayer != null) mediaPlayer.reset();
-            try {
-                InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(model.getImgUri()));
-                Bitmap bitmap = BitmapFactory.decodeStream(is);
-                is.close();
-                if (bitmap != null) {
-                    eglThread.setContentSize(bitmap.getWidth(), bitmap.getHeight());
-                    eglThread.uploadBitmap(bitmap);
+                if (m.getType() == 1) { // 视频
+                    if (mediaPlayer == null) mediaPlayer = new MediaPlayer();
+                    mediaPlayer.reset();
+                    mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(m.getVideoUri()));
+                    Surface s = new Surface(eglThread.getVideoST());
+                    mediaPlayer.setSurface(s);
+                    s.release();
+                    mediaPlayer.setVolume(0,0);
+                    mediaPlayer.setLooping(m.isLoop());
+                    mediaPlayer.setOnPreparedListener(mp -> {
+                        eglThread.setSourceSize(mp.getVideoWidth(), mp.getVideoHeight());
+                        mp.start();
+                    });
+                    mediaPlayer.prepareAsync();
+                } else { // 图片
+                    if (mediaPlayer != null) mediaPlayer.reset();
+                    InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(m.getImgUri()));
+                    Bitmap b = BitmapFactory.decodeStream(is);
+                    is.close();
+                    if (b != null) {
+                        eglThread.setSourceSize(b.getWidth(), b.getHeight());
+                        eglThread.updateBitmap(b);
+                    }
                 }
-            } catch (Exception e) { Log.e(TAG, "Image error", e); }
+            } catch (Exception e) { e.printStackTrace(); }
         }
 
         @Override
-        public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
-            this.currentXOffset = xOffset;
+        public void onOffsetsChanged(float x, float y, float xs, float ys, int xo, int yo) {
+            this.xOffset = x;
             if (eglThread != null) eglThread.requestRender();
         }
 
         @Override
-        public void onFrameAvailable(SurfaceTexture surfaceTexture) {
+        public void onFrameAvailable(SurfaceTexture st) {
             updateSurface.set(true);
             if (eglThread != null) eglThread.requestRender();
         }
@@ -160,39 +139,38 @@ public class TianYinWallpaperService extends WallpaperService {
             if (eglThread != null) eglThread.finish();
         }
 
-        // --- 基于 EGL10 的深度兼容渲染引擎 ---
+        // --- 内部渲染类 ---
         private class EglThread extends Thread {
             private final SurfaceHolder holder;
             private EGL10 egl;
-            private EGLDisplay display;
-            private EGLContext context;
-            private EGLSurface eglSurface;
+            private EGLDisplay dpy;
+            private EGLContext ctx;
+            private EGLSurface surf;
             private Handler handler;
-            
             private SurfaceTexture videoST;
-            private int vTexId, iTexId, vProg, iProg;
+            private int vTex, iTex, vProg, iProg;
             private FloatBuffer vBuf, tBuf;
-            private int sW, sH, cW = 1, cH = 1;
+            private int sW, sH, cW=1, cH=1;
+            private final float[] vMat = new float[16], iMat = new float[16], mvp = new float[16];
 
-            private final float[] videoStMat = new float[16];
-            private final float[] imageStMat = new float[16];
-            private final float[] mvpMat = new float[16];
-            private final AtomicBoolean isPending = new AtomicBoolean(false);
-
-            public EglThread(SurfaceHolder holder) {
-                this.holder = holder;
-                Matrix.setIdentityM(videoStMat, 0);
-                Matrix.setIdentityM(imageStMat, 0);
-                Matrix.translateM(imageStMat, 0, 0, 1, 0);
-                Matrix.scaleM(imageStMat, 0, 1, -1, 1);
-
-                float[] vData = {-1,-1, 1,-1, -1,1, 1,1};
-                vBuf = ByteBuffer.allocateDirect(vData.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(vData);
+            public EglThread(SurfaceHolder h) {
+                this.holder = h;
+                Matrix.setIdentityM(vMat, 0);
+                Matrix.setIdentityM(iMat, 0);
+                Matrix.translateM(iMat, 0, 0, 1, 0);
+                Matrix.scaleM(iMat, 0, 1, -1, 1);
+                float[] vd = {-1,-1, 1,-1, -1,1, 1,1};
+                vBuf = ByteBuffer.allocateDirect(vd.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(vd);
                 vBuf.position(0);
-                float[] tData = {0,0, 1,0, 0,1, 1,1};
-                tBuf = ByteBuffer.allocateDirect(tData.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(tData);
+                float[] td = {0,0, 1,0, 0,1, 1,1};
+                tBuf = ByteBuffer.allocateDirect(td.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(td);
                 tBuf.position(0);
             }
+
+            public void onSizeChanged(int w, int h) { sW = w; sH = h; requestRender(); }
+            public void setSourceSize(int w, int h) { cW = w; cH = h; }
+            public SurfaceTexture getVideoST() { return videoST; }
+            public void post(Runnable r) { if (handler != null) handler.post(r); }
 
             @Override
             public void run() {
@@ -200,138 +178,82 @@ public class TianYinWallpaperService extends WallpaperService {
                 initGL();
                 Looper.prepare();
                 handler = new Handler();
-                postRunnable(() -> {
-                    if (index == -1) nextWallpaper();
-                    else loadContent();
-                });
+                post(() -> { if (index == -1) next(); else load(); });
                 Looper.loop();
-                releaseEGL();
             }
-
-            public void onSizeChanged(int w, int h) { sW = w; sH = h; requestRender(); }
-            public void setContentSize(int w, int h) { cW = w > 0 ? w : 1; cH = h > 0 ? h : 1; }
-            public SurfaceTexture getVideoST() { return videoST; }
-            public void postRunnable(Runnable r) { if (handler != null) handler.post(r); }
 
             private void initEGL() {
                 egl = (EGL10) EGLContext.getEGL();
-                display = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
-                egl.eglInitialize(display, null);
-                int[] attr = { EGL10.EGL_RED_SIZE, 8, EGL10.EGL_GREEN_SIZE, 8, EGL10.EGL_BLUE_SIZE, 8, EGL10.EGL_ALPHA_SIZE, 8, EGL10.EGL_NONE };
+                dpy = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
+                egl.eglInitialize(dpy, null);
+                int[] attr = {0x3024,8, 0x3023,8, 0x3022,8, 0x3038};
                 EGLConfig[] configs = new EGLConfig[1];
-                int[] num = new int[1];
-                egl.eglChooseConfig(display, attr, configs, 1, num);
-                context = egl.eglCreateContext(display, configs[0], EGL10.EGL_NO_CONTEXT, new int[]{0x3098, 2, EGL10.EGL_NONE});
-                eglSurface = egl.eglCreateWindowSurface(display, configs[0], holder, null);
-                egl.eglMakeCurrent(display, eglSurface, eglSurface, context);
+                int[] n = new int[1];
+                egl.eglChooseConfig(dpy, attr, configs, 1, n);
+                ctx = egl.eglCreateContext(dpy, configs[0], EGL10.EGL_NO_CONTEXT, new int[]{0x3098, 2, 0x3038});
+                surf = egl.eglCreateWindowSurface(dpy, configs[0], holder, null);
+                egl.eglMakeCurrent(dpy, surf, surf, ctx);
             }
 
             private void initGL() {
                 String vs = "attribute vec4 aPos; attribute vec2 aTex; varying vec2 vTex; uniform mat4 uMVP; uniform mat4 uST; void main(){ gl_Position = uMVP * aPos; vTex = (uST * vec4(aTex,0,1)).xy; }";
-                String fsV = "#extension GL_OES_EGL_image_external : require\n precision mediump float; varying vec2 vTex; uniform samplerExternalOES sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }";
-                String fsI = "precision mediump float; varying vec2 vTex; uniform sampler2D sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }";
-                vProg = createProg(vs, fsV);
-                iProg = createProg(vs, fsI);
-                int[] tex = new int[2];
-                GLES20.glGenTextures(2, tex, 0);
-                vTexId = tex[0]; iTexId = tex[1];
-                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTexId);
-                GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-                videoST = new SurfaceTexture(vTexId);
+                String fv = "#extension GL_OES_EGL_image_external : require\n precision mediump float; varying vec2 vTex; uniform samplerExternalOES s; void main(){ gl_FragColor = texture2D(s, vTex); }";
+                String fi = "precision mediump float; varying vec2 vTex; uniform sampler2D s; void main(){ gl_FragColor = texture2D(s, vTex); }";
+                vProg = create(vs, fv); iProg = create(vs, fi);
+                int[] t = new int[2]; GLES20.glGenTextures(2, t, 0);
+                vTex = t[0]; iTex = t[1];
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTex);
+                GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 9729, 9729);
+                videoST = new SurfaceTexture(vTex);
                 videoST.setOnFrameAvailableListener(TianYinSolaEngine.this);
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId);
-                GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+                GLES20.glBindTexture(3553, iTex);
+                GLES20.glTexParameterf(3553, 9729, 9729);
             }
 
-            public void uploadBitmap(Bitmap b) {
-                postRunnable(() -> {
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId);
-                    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0);
-                    b.recycle();
-                    forceRender(3);
-                });
+            public void updateBitmap(Bitmap b) {
+                post(() -> { GLES20.glBindTexture(3553, iTex); GLUtils.texImage2D(3553, 0, b, 0); b.recycle(); requestRender(); });
             }
 
-            public void requestRender() {
-                if (isPending.compareAndSet(false, true)) {
-                    postRunnable(() -> { isPending.set(false); draw(); });
-                }
-            }
-
-            public void forceRender(int frames) {
-                for (int i = 0; i < frames; i++) requestRender();
-            }
+            public void requestRender() { post(this::draw); }
 
             private void draw() {
-                if (eglSurface == null || !egl.eglMakeCurrent(display, eglSurface, eglSurface, context)) return;
-
-                boolean isVid = (list != null && index >= 0 && index < list.size() && list.get(index).getType() == 1);
-                float[] currentStMat;
-                if (isVid) {
-                    if (updateSurface.getAndSet(false)) {
-                        try { videoST.updateTexImage(); videoST.getTransformMatrix(videoStMat); } catch (Exception ignored) {}
-                    }
-                    currentStMat = videoStMat;
-                } else {
-                    currentStMat = imageStMat;
+                if (surf == null || !egl.eglMakeCurrent(dpy, surf, surf, ctx)) return;
+                boolean isV = (list != null && index >= 0 && list.get(index).getType() == 1);
+                if (isV && updateSurface.getAndSet(false)) {
+                    try { videoST.updateTexImage(); videoST.getTransformMatrix(vMat); } catch (Exception ignored) {}
                 }
-
                 GLES20.glViewport(0, 0, sW, sH);
-                // 调试：深红色背景。如果你看到红色，说明 GL 没坏，内容坏了。
-                GLES20.glClearColor(0.2f, 0.0f, 0.0f, 1.0f); 
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-                int prog = isVid ? vProg : iProg;
-                GLES20.glUseProgram(prog);
-
-                Matrix.setIdentityM(mvpMat, 0);
-                float cAsp = (float) cW / cH;
-                float sAsp = (float) sW / sH;
-                if (cAsp > sAsp) {
-                    float scale = cAsp / sAsp;
-                    float tx = wallpaperScroll ? (scale - 1.0f) * (1.0f - currentXOffset * 2.0f) : 0;
-                    Matrix.scaleM(mvpMat, 0, scale, 1.0f, 1.0f);
-                    Matrix.translateM(mvpMat, 0, tx / scale, 0, 0);
-                } else {
-                    Matrix.scaleM(mvpMat, 0, 1.0f, sAsp / cAsp, 1.0f);
-                }
-
-                int aPos = GLES20.glGetAttribLocation(prog, "aPos");
-                int aTex = GLES20.glGetAttribLocation(prog, "aTex");
-                GLES20.glEnableVertexAttribArray(aPos);
-                GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, vBuf);
-                GLES20.glEnableVertexAttribArray(aTex);
-                GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tBuf);
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uMVP"), 1, false, mvpMat, 0);
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uST"), 1, false, currentStMat, 0);
-
-                GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-                GLES20.glBindTexture(isVid ? GLES11Ext.GL_TEXTURE_EXTERNAL_OES : GLES20.GL_TEXTURE_2D, isVid ? vTexId : iTexId);
-                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-                egl.eglSwapBuffers(display, eglSurface);
+                // 关键点：使用极深灰色，让合成器知道这里有像素输出
+                GLES20.glClearColor(0.01f, 0.01f, 0.01f, 1.0f);
+                GLES20.glClear(16384);
+                int p = isV ? vProg : iProg;
+                GLES20.glUseProgram(p);
+                Matrix.setIdentityM(mvp, 0);
+                float ca = (float)cW/cH, sa = (float)sW/sH;
+                if (ca > sa) {
+                    float s = ca/sa; float tx = (s-1f)*(1f-xOffset*2f);
+                    Matrix.scaleM(mvp, 0, s, 1f, 1f); Matrix.translateM(mvp, 0, tx/s, 0, 0);
+                } else { Matrix.scaleM(mvp, 0, 1f, sa/ca, 1f); }
+                int ap = GLES20.glGetAttribLocation(p, "aPos"), at = GLES20.glGetAttribLocation(p, "aTex");
+                GLES20.glEnableVertexAttribArray(ap); GLES20.glVertexAttribPointer(ap, 2, 5126, false, 8, vBuf);
+                GLES20.glEnableVertexAttribArray(at); GLES20.glVertexAttribPointer(at, 2, 5126, false, 8, tBuf);
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(p, "uMVP"), 1, false, mvp, 0);
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(p, "uST"), 1, false, isV ? vMat : iMat, 0);
+                GLES20.glActiveTexture(33984);
+                GLES20.glBindTexture(isV ? 36197 : 3553, isV ? vTex : iTex);
+                GLES20.glDrawArrays(5, 0, 4);
+                egl.eglSwapBuffers(dpy, surf);
             }
 
-            private int createProg(String v, String f) {
-                int vs = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER);
-                GLES20.glShaderSource(vs, v); GLES20.glCompileShader(vs);
-                int fs = GLES20.glCreateShader(GLES20.GL_FRAGMENT_SHADER);
-                GLES20.glShaderSource(fs, f); GLES20.glCompileShader(fs);
-                int p = GLES20.glCreateProgram();
-                GLES20.glAttachShader(p, vs); GLES20.glAttachShader(p, fs);
+            private int create(String v, String f) {
+                int vs = GLES20.glCreateShader(35633); GLES20.glShaderSource(vs, v); GLES20.glCompileShader(vs);
+                int fs = GLES20.glCreateShader(35632); GLES20.glShaderSource(fs, f); GLES20.glCompileShader(fs);
+                int p = GLES20.glCreateProgram(); GLES20.glAttachShader(p, vs); GLES20.glAttachShader(p, fs);
                 GLES20.glLinkProgram(p); return p;
             }
 
-            public void finish() {
-                if (handler != null) handler.getLooper().quit();
-            }
-
-            private void releaseEGL() {
-                egl.eglMakeCurrent(display, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT);
-                egl.eglDestroySurface(display, eglSurface);
-                egl.eglDestroyContext(display, context);
-                egl.eglTerminate(display);
-            }
+            public void finish() { if (handler != null) handler.getLooper().quit(); }
+            private void releaseEGL() { egl.eglMakeCurrent(dpy, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT); egl.eglDestroySurface(dpy, surf); egl.eglDestroyContext(dpy, ctx); egl.eglTerminate(dpy); }
         }
     }
 }
