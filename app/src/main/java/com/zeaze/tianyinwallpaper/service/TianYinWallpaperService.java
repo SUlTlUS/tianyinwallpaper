@@ -7,12 +7,17 @@ import android.graphics.PixelFormat;
 import android.graphics.SurfaceTexture;
 import android.media.MediaPlayer;
 import android.net.Uri;
+import android.opengl.EGL14;
+import android.opengl.EGLConfig;
+import android.opengl.EGLContext;
+import android.opengl.EGLDisplay;
+import android.opengl.EGLSurface;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
 import android.os.Handler;
-import android.os.Looper;
+import android.os.HandlerThread;
 import android.service.wallpaper.WallpaperService;
 import android.util.Log;
 import android.view.Surface;
@@ -30,13 +35,9 @@ import java.nio.FloatBuffer;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import javax.microedition.khronos.egl.EGL10;
-import javax.microedition.khronos.egl.EGLConfig;
-import javax.microedition.khronos.egl.EGLContext;
-import javax.microedition.khronos.egl.EGLDisplay;
-import javax.microedition.khronos.egl.EGLSurface;
-
 public class TianYinWallpaperService extends WallpaperService {
+    private final String TAG = "TianYinGL";
+
     @Override
     public Engine onCreateEngine() {
         return new TianYinSolaEngine();
@@ -47,14 +48,15 @@ public class TianYinWallpaperService extends WallpaperService {
         private EglThread eglThread;
         private List<TianYinWallpaperModel> list;
         private int index = -1;
-        private volatile float xOffset = 0.5f;
+        private float currentXOffset = 0.5f;
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
             super.onCreate(surfaceHolder);
-            // 核心修复1：显式声明像素格式，解决文件夹模糊背景显示旧壁纸的问题
+            // 关键修复 1: 显式设置颜色格式，否则 ColorOS 合成器可能跳过此层
             surfaceHolder.setFormat(PixelFormat.RGBX_8888);
+            
             try {
                 String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
                 list = JSON.parseArray(s, TianYinWallpaperModel.class);
@@ -64,70 +66,91 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onSurfaceCreated(SurfaceHolder holder) {
             super.onSurfaceCreated(holder);
+            // 确保旧线程销毁
+            if (eglThread != null) eglThread.finish();
             eglThread = new EglThread(holder);
             eglThread.start();
         }
 
         @Override
         public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            super.onSurfaceChanged(holder, format, width, height);
             if (eglThread != null) eglThread.onSizeChanged(width, height);
         }
 
         @Override
         public void onVisibilityChanged(boolean visible) {
+            super.onVisibilityChanged(visible);
             if (visible) {
                 if (mediaPlayer != null) mediaPlayer.start();
                 if (eglThread != null) eglThread.requestRender();
             } else {
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) mediaPlayer.pause();
-                next();
+                nextWallpaper();
             }
         }
 
-        private void next() {
+        private void nextWallpaper() {
             if (list == null || list.isEmpty()) return;
             index = (index + 1) % list.size();
-            if (eglThread != null) eglThread.post(() -> load());
+            if (eglThread != null) eglThread.postRunnable(this::loadContent);
         }
 
-        private void load() {
-            TianYinWallpaperModel m = list.get(index);
+        private void loadContent() {
+            if (index < 0 || index >= list.size()) return;
+            TianYinWallpaperModel model = list.get(index);
+            if (model.getType() == 1) prepareVideo(model);
+            else prepareImage(model);
+        }
+
+        private void prepareVideo(TianYinWallpaperModel model) {
             try {
-                if (m.getType() == 1) { // 视频
-                    if (mediaPlayer == null) mediaPlayer = new MediaPlayer();
-                    mediaPlayer.reset();
-                    mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(m.getVideoUri()));
-                    Surface s = new Surface(eglThread.getVideoST());
-                    mediaPlayer.setSurface(s);
-                    s.release();
-                    mediaPlayer.setVolume(0,0);
-                    mediaPlayer.setLooping(m.isLoop());
-                    mediaPlayer.setOnPreparedListener(mp -> {
-                        eglThread.setSourceSize(mp.getVideoWidth(), mp.getVideoHeight());
-                        mp.start();
-                    });
-                    mediaPlayer.prepareAsync();
-                } else { // 图片
-                    if (mediaPlayer != null) mediaPlayer.reset();
-                    InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(m.getImgUri()));
-                    Bitmap b = BitmapFactory.decodeStream(is);
-                    is.close();
-                    if (b != null) {
-                        eglThread.setSourceSize(b.getWidth(), b.getHeight());
-                        eglThread.updateBitmap(b);
-                    }
+                if (mediaPlayer == null) mediaPlayer = new MediaPlayer();
+                mediaPlayer.reset();
+                mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(model.getVideoUri()));
+                
+                // 必须等待视频 SurfaceTexture 准备好
+                SurfaceTexture st = eglThread.getVideoST();
+                if (st == null) return;
+                
+                Surface surface = new Surface(st);
+                mediaPlayer.setSurface(surface);
+                surface.release();
+                
+                mediaPlayer.setLooping(model.isLoop());
+                mediaPlayer.setVolume(0, 0);
+                mediaPlayer.setOnPreparedListener(mp -> {
+                    eglThread.setContentSize(mp.getVideoWidth(), mp.getVideoHeight());
+                    mp.start();
+                });
+                mediaPlayer.prepareAsync();
+
+                // 重置视频纹理矩阵，避免上一视频的残留矩阵影响新视频
+                eglThread.resetVideoMatrix();
+            } catch (Exception e) { Log.e(TAG, "Video error", e); }
+        }
+
+        private void prepareImage(TianYinWallpaperModel model) {
+            if (mediaPlayer != null) mediaPlayer.reset();
+            try {
+                InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(model.getImgUri()));
+                Bitmap bitmap = BitmapFactory.decodeStream(is);
+                is.close();
+                if (bitmap != null) {
+                    eglThread.setContentSize(bitmap.getWidth(), bitmap.getHeight());
+                    eglThread.uploadBitmap(bitmap);
                 }
-            } catch (Exception e) { e.printStackTrace(); }
+            } catch (Exception e) { Log.e(TAG, "Image error", e); }
         }
 
         @Override
-        public void onOffsetsChanged(float x, float y, float xs, float ys, int xo, int yo) {
-            this.xOffset = x;
+        public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
+            this.currentXOffset = xOffset;
             if (eglThread != null) eglThread.requestRender();
         }
 
         @Override
-        public void onFrameAvailable(SurfaceTexture st) {
+        public void onFrameAvailable(SurfaceTexture surfaceTexture) {
             updateSurface.set(true);
             if (eglThread != null) eglThread.requestRender();
         }
@@ -139,121 +162,202 @@ public class TianYinWallpaperService extends WallpaperService {
             if (eglThread != null) eglThread.finish();
         }
 
-        // --- 内部渲染类 ---
-        private class EglThread extends Thread {
+        // --- 深度适配 ColorOS 16 的 EGL14 渲染线程 ---
+        private class EglThread extends HandlerThread {
             private final SurfaceHolder holder;
-            private EGL10 egl;
-            private EGLDisplay dpy;
-            private EGLContext ctx;
-            private EGLSurface surf;
+            private EGLDisplay display = EGL14.EGL_NO_DISPLAY;
+            private EGLContext context = EGL14.EGL_NO_CONTEXT;
+            private EGLSurface eglSurface = EGL14.EGL_NO_SURFACE;
             private Handler handler;
             private SurfaceTexture videoST;
-            private int vTex, iTex, vProg, iProg;
+            private int vTexId, iTexId, vProg, iProg;
             private FloatBuffer vBuf, tBuf;
-            private int sW, sH, cW=1, cH=1;
-            private final float[] vMat = new float[16], iMat = new float[16], mvp = new float[16];
+            private int sW, sH, cW = 1, cH = 1;
 
-            public EglThread(SurfaceHolder h) {
-                this.holder = h;
-                Matrix.setIdentityM(vMat, 0);
-                Matrix.setIdentityM(iMat, 0);
-                Matrix.translateM(iMat, 0, 0, 1, 0);
-                Matrix.scaleM(iMat, 0, 1, -1, 1);
-                float[] vd = {-1,-1, 1,-1, -1,1, 1,1};
-                vBuf = ByteBuffer.allocateDirect(vd.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(vd);
+            // 用于持久化保存视频纹理变换矩阵
+            private final float[] videoSTMatrix = new float[16];
+
+            public EglThread(SurfaceHolder holder) {
+                super("TianYinEGL");
+                this.holder = holder;
+                float[] vData = {-1,-1, 1,-1, -1,1, 1,1};
+                vBuf = ByteBuffer.allocateDirect(vData.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(vData);
                 vBuf.position(0);
-                float[] td = {0,0, 1,0, 0,1, 1,1};
-                tBuf = ByteBuffer.allocateDirect(td.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(td);
+                float[] tData = {0,0, 1,0, 0,1, 1,1};
+                tBuf = ByteBuffer.allocateDirect(tData.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(tData);
                 tBuf.position(0);
             }
 
             public void onSizeChanged(int w, int h) { sW = w; sH = h; requestRender(); }
-            public void setSourceSize(int w, int h) { cW = w; cH = h; }
+            public void setContentSize(int w, int h) { cW = w > 0 ? w : 1; cH = h > 0 ? h : 1; }
             public SurfaceTexture getVideoST() { return videoST; }
-            public void post(Runnable r) { if (handler != null) handler.post(r); }
+            public void postRunnable(Runnable r) { if (handler != null) handler.post(r); }
 
-            @Override
-            public void run() {
-                initEGL();
-                initGL();
-                Looper.prepare();
-                handler = new Handler();
-                post(() -> { if (index == -1) next(); else load(); });
-                Looper.loop();
+            // 新增：重置视频纹理矩阵为单位矩阵（切换视频时调用）
+            public void resetVideoMatrix() {
+                postRunnable(() -> Matrix.setIdentityM(videoSTMatrix, 0));
             }
 
-            private void initEGL() {
-                egl = (EGL10) EGLContext.getEGL();
-                dpy = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
-                egl.eglInitialize(dpy, null);
-                int[] attr = {0x3024,8, 0x3023,8, 0x3022,8, 0x3038};
+            @Override
+            protected void onLooperPrepared() {
+                if (!initEGL()) return;
+                initGL();
+                handler = new Handler(getLooper());
+                postRunnable(() -> {
+                    if (index == -1) nextWallpaper();
+                    else loadContent();
+                });
+            }
+
+            private boolean initEGL() {
+                display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
+                int[] version = new int[2];
+                EGL14.eglInitialize(display, version, 0, version, 1);
+                
+                int[] attr = {
+                        EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
+                        EGL14.EGL_ALPHA_SIZE, 8,
+                        EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                        EGL14.EGL_NONE
+                };
                 EGLConfig[] configs = new EGLConfig[1];
-                int[] n = new int[1];
-                egl.eglChooseConfig(dpy, attr, configs, 1, n);
-                ctx = egl.eglCreateContext(dpy, configs[0], EGL10.EGL_NO_CONTEXT, new int[]{0x3098, 2, 0x3038});
-                surf = egl.eglCreateWindowSurface(dpy, configs[0], holder, null);
-                egl.eglMakeCurrent(dpy, surf, surf, ctx);
+                int[] numConfigs = new int[1];
+                EGL14.eglChooseConfig(display, attr, 0, configs, 0, 1, numConfigs, 0);
+                
+                context = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT, 
+                        new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE}, 0);
+                
+                eglSurface = EGL14.eglCreateWindowSurface(display, configs[0], holder.getSurface(), 
+                        new int[]{EGL14.EGL_NONE}, 0);
+                
+                return EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context);
             }
 
             private void initGL() {
                 String vs = "attribute vec4 aPos; attribute vec2 aTex; varying vec2 vTex; uniform mat4 uMVP; uniform mat4 uST; void main(){ gl_Position = uMVP * aPos; vTex = (uST * vec4(aTex,0,1)).xy; }";
-                String fv = "#extension GL_OES_EGL_image_external : require\n precision mediump float; varying vec2 vTex; uniform samplerExternalOES s; void main(){ gl_FragColor = texture2D(s, vTex); }";
-                String fi = "precision mediump float; varying vec2 vTex; uniform sampler2D s; void main(){ gl_FragColor = texture2D(s, vTex); }";
-                vProg = create(vs, fv); iProg = create(vs, fi);
-                int[] t = new int[2]; GLES20.glGenTextures(2, t, 0);
-                vTex = t[0]; iTex = t[1];
-                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTex);
-                GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 9729, 9729);
-                videoST = new SurfaceTexture(vTex);
+                String fsV = "#extension GL_OES_EGL_image_external : require\n precision mediump float; varying vec2 vTex; uniform samplerExternalOES sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }";
+                String fsI = "precision mediump float; varying vec2 vTex; uniform sampler2D sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }";
+                vProg = createProg(vs, fsV);
+                iProg = createProg(vs, fsI);
+                
+                int[] tex = new int[2];
+                GLES20.glGenTextures(2, tex, 0);
+                vTexId = tex[0]; iTexId = tex[1];
+                
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTexId);
+                GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+                videoST = new SurfaceTexture(vTexId);
                 videoST.setOnFrameAvailableListener(TianYinSolaEngine.this);
-                GLES20.glBindTexture(3553, iTex);
-                GLES20.glTexParameterf(3553, 9729, 9729);
+                
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId);
+                GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+
+                // 初始化视频矩阵为单位矩阵
+                Matrix.setIdentityM(videoSTMatrix, 0);
             }
 
-            public void updateBitmap(Bitmap b) {
-                post(() -> { GLES20.glBindTexture(3553, iTex); GLUtils.texImage2D(3553, 0, b, 0); b.recycle(); requestRender(); });
+            public void uploadBitmap(Bitmap b) {
+                postRunnable(() -> {
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId);
+                    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0);
+                    b.recycle();
+                    requestRender();
+                });
             }
 
-            public void requestRender() { post(this::draw); }
+            public void requestRender() {
+                if (handler != null) {
+                    handler.removeCallbacks(drawRunnable);
+                    handler.post(drawRunnable);
+                }
+            }
+
+            private final Runnable drawRunnable = this::draw;
 
             private void draw() {
-                if (surf == null || !egl.eglMakeCurrent(dpy, surf, surf, ctx)) return;
-                boolean isV = (list != null && index >= 0 && list.get(index).getType() == 1);
-                if (isV && updateSurface.getAndSet(false)) {
-                    try { videoST.updateTexImage(); videoST.getTransformMatrix(vMat); } catch (Exception ignored) {}
+                if (eglSurface == EGL14.EGL_NO_SURFACE) return;
+                EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context);
+
+                boolean isVid = (list != null && index >= 0 && index < list.size() && list.get(index).getType() == 1);
+                float[] stMat = new float[16];
+                Matrix.setIdentityM(stMat, 0);
+                
+                if (isVid) {
+                    // 如果有新帧，更新纹理并获取矩阵
+                    if (updateSurface.getAndSet(false)) {
+                        try {
+                            videoST.updateTexImage();
+                            videoST.getTransformMatrix(videoSTMatrix);
+                        } catch (Exception ignored) {}
+                    }
+                    // 始终使用持久化的视频矩阵
+                    System.arraycopy(videoSTMatrix, 0, stMat, 0, 16);
+                } else {
+                    // 图片需要翻转 Y 轴
+                    Matrix.translateM(stMat, 0, 0, 1, 0);
+                    Matrix.scaleM(stMat, 0, 1, -1, 1);
                 }
+
                 GLES20.glViewport(0, 0, sW, sH);
-                // 关键点：使用极深灰色，让合成器知道这里有像素输出
+                // 关键点：ColorOS 16 如果背景清为全黑，有时会被系统判定为“无内容”
                 GLES20.glClearColor(0.01f, 0.01f, 0.01f, 1.0f);
-                GLES20.glClear(16384);
-                int p = isV ? vProg : iProg;
-                GLES20.glUseProgram(p);
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+
+                int prog = isVid ? vProg : iProg;
+                GLES20.glUseProgram(prog);
+
+                float[] mvp = new float[16];
                 Matrix.setIdentityM(mvp, 0);
-                float ca = (float)cW/cH, sa = (float)sW/sH;
-                if (ca > sa) {
-                    float s = ca/sa; float tx = (s-1f)*(1f-xOffset*2f);
-                    Matrix.scaleM(mvp, 0, s, 1f, 1f); Matrix.translateM(mvp, 0, tx/s, 0, 0);
-                } else { Matrix.scaleM(mvp, 0, 1f, sa/ca, 1f); }
-                int ap = GLES20.glGetAttribLocation(p, "aPos"), at = GLES20.glGetAttribLocation(p, "aTex");
-                GLES20.glEnableVertexAttribArray(ap); GLES20.glVertexAttribPointer(ap, 2, 5126, false, 8, vBuf);
-                GLES20.glEnableVertexAttribArray(at); GLES20.glVertexAttribPointer(at, 2, 5126, false, 8, tBuf);
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(p, "uMVP"), 1, false, mvp, 0);
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(p, "uST"), 1, false, isV ? vMat : iMat, 0);
-                GLES20.glActiveTexture(33984);
-                GLES20.glBindTexture(isV ? 36197 : 3553, isV ? vTex : iTex);
-                GLES20.glDrawArrays(5, 0, 4);
-                egl.eglSwapBuffers(dpy, surf);
+                float cAsp = (float) cW / cH;
+                float sAsp = (float) sW / sH;
+                
+                if (cAsp > sAsp) {
+                    float scale = cAsp / sAsp;
+                    float tx = (scale - 1.0f) * (1.0f - currentXOffset * 2.0f);
+                    Matrix.scaleM(mvp, 0, scale, 1.0f, 1.0f);
+                    Matrix.translateM(mvp, 0, tx / scale, 0, 0);
+                } else {
+                    Matrix.scaleM(mvp, 0, 1.0f, sAsp / cAsp, 1.0f);
+                }
+
+                int aPos = GLES20.glGetAttribLocation(prog, "aPos");
+                int aTex = GLES20.glGetAttribLocation(prog, "aTex");
+                GLES20.glEnableVertexAttribArray(aPos);
+                GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, vBuf);
+                GLES20.glEnableVertexAttribArray(aTex);
+                GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tBuf);
+                
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uMVP"), 1, false, mvp, 0);
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uST"), 1, false, stMat, 0);
+
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+                GLES20.glBindTexture(isVid ? GLES11Ext.GL_TEXTURE_EXTERNAL_OES : GLES20.GL_TEXTURE_2D, isVid ? vTexId : iTexId);
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+
+                if (!EGL14.eglSwapBuffers(display, eglSurface)) {
+                    Log.e(TAG, "SwapBuffers failed");
+                }
             }
 
-            private int create(String v, String f) {
-                int vs = GLES20.glCreateShader(35633); GLES20.glShaderSource(vs, v); GLES20.glCompileShader(vs);
-                int fs = GLES20.glCreateShader(35632); GLES20.glShaderSource(fs, f); GLES20.glCompileShader(fs);
-                int p = GLES20.glCreateProgram(); GLES20.glAttachShader(p, vs); GLES20.glAttachShader(p, fs);
+            private int createProg(String v, String f) {
+                int vs = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER);
+                GLES20.glShaderSource(vs, v); GLES20.glCompileShader(vs);
+                int fs = GLES20.glCreateShader(GLES20.GL_FRAGMENT_SHADER);
+                GLES20.glShaderSource(fs, f); GLES20.glCompileShader(fs);
+                int p = GLES20.glCreateProgram();
+                GLES20.glAttachShader(p, vs); GLES20.glAttachShader(p, fs);
                 GLES20.glLinkProgram(p); return p;
             }
 
-            public void finish() { if (handler != null) handler.getLooper().quit(); }
-            private void releaseEGL() { egl.eglMakeCurrent(dpy, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT); egl.eglDestroySurface(dpy, surf); egl.eglDestroyContext(dpy, ctx); egl.eglTerminate(dpy); }
+            public void finish() {
+                quitSafely();
+                if (display != EGL14.EGL_NO_DISPLAY) {
+                    EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT);
+                    EGL14.eglDestroySurface(display, eglSurface);
+                    EGL14.eglDestroyContext(display, context);
+                    EGL14.eglTerminate(display);
+                }
+            }
         }
     }
 }
