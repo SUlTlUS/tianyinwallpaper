@@ -83,6 +83,7 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (eglThread != null) eglThread.requestRender();
             } else {
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) mediaPlayer.pause();
+                nextWallpaper();
             }
         }
 
