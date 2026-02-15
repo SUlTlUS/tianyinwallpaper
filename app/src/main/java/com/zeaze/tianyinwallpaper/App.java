@@ -19,7 +19,8 @@ public class App extends Application {
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
-        initPgyerSDK(this);
+        // Disabled Pgyer SDK to avoid API key errors
+        // initPgyerSDK(this);
         MultiDex.install(this);
     }
 

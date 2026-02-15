@@ -93,6 +93,9 @@ public class MainActivity extends BaseActivity  {
     @Override
     protected void onResume() {
         super.onResume();
+        // Disabled Pgyer SDK update check to avoid API key errors
+        // This prevents "Apikey error, error.code 100001" toast message
+        /*
         PgyerSDKManager.checkSoftwareUpdate(this, new CheckoutVersionCallBack() {
             @Override
             public void onSuccess(CheckSoftModel checkSoftModel) {
@@ -120,6 +123,7 @@ public class MainActivity extends BaseActivity  {
             public void onFail(String s) {
             }
         });
+        */
     }
 
     private void clearNoUseFile(){
