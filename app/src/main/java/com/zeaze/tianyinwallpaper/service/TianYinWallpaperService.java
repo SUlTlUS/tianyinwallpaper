@@ -50,6 +50,7 @@ public class TianYinWallpaperService extends WallpaperService {
         private int index = -1;
         private float currentXOffset = 0.5f;
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
+        private boolean skipFirstInvisibleSwitch = true;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
@@ -83,6 +84,10 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (eglThread != null) eglThread.requestRender();
             } else {
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) mediaPlayer.pause();
+                if (skipFirstInvisibleSwitch) {
+                    skipFirstInvisibleSwitch = false;
+                    return;
+                }
                 nextWallpaper();
             }
         }
