@@ -36,7 +36,6 @@ import com.alibaba.fastjson.JSON;
 import com.bumptech.glide.Glide;
 import com.lxj.xpopup.XPopup;
 import com.lxj.xpopup.impl.LoadingPopupView;
-import com.yaphetzhao.bitmapstomp4.YapVideoEncoder;
 import com.zeaze.tianyinwallpaper.App;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants;
@@ -195,7 +194,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         imageLaunch=registerForActivityResult(
-                new ActivityResultContracts.GetMultipleContents(), results -> {
+                new ActivityResultContracts.OpenMultipleDocuments(), results -> {
                     if (results==null||results.size()==0){
                         model=null;
                         return;
@@ -213,7 +212,7 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                 }
         );
         videoLaunch=registerForActivityResult(
-                new ActivityResultContracts.GetMultipleContents(), results -> {
+                new ActivityResultContracts.OpenMultipleDocuments(), results -> {
                     if (results==null||results.size()==0){
                         model = null;
                         return;
@@ -281,17 +280,10 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
                 model=new TianYinWallpaperModel();
                 Uri currentUri = uris.get(index);
                 if (type == 1) {
-                    bitmap = FileUtil.ImageSizeCompress(getContext(), currentUri);
                     model.setType(0);
                     model.setUuid(UUID.randomUUID().toString());
-                    // Store the URI string for direct access to original image
                     model.setImgUri(currentUri.toString());
-                    // videoPath is for YapVideoEncoder to create animated wallpaper video from static bitmap
-                    model.setVideoPath(getActivity().getExternalFilesDir(null) + FileUtil.wallpaperFilePath + model.getUuid() + ".mp4");
-                    // Start video encoder to create animated wallpaper from static image
-                    new YapVideoEncoder(MainFragment.this,
-                            new File(model.getVideoPath()), 1)
-                            .start();
+                    addModel();
                 }
                 else{
                     model.setType(1);
@@ -306,12 +298,11 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
         }).start();
     }
     public void selectWallpaper() {
-       // Intent.EXTRA_ALLOW_MULTIPLE
-        imageLaunch.launch("image/*");
+        imageLaunch.launch(new String[]{"image/*"});
     }
 
     public void selectLiveWallpaper() {
-        videoLaunch.launch("video/*");
+        videoLaunch.launch(new String[]{"video/*"});
     }
 
     ItemTouchHelper helper = new ItemTouchHelper(new ItemTouchHelper.Callback() {
