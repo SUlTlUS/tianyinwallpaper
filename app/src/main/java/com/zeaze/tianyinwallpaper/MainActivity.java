@@ -95,35 +95,33 @@ public class MainActivity extends BaseActivity  {
         super.onResume();
         // Disabled Pgyer SDK update check to avoid API key errors
         // This prevents "Apikey error, error.code 100001" toast message
-        /*
-        PgyerSDKManager.checkSoftwareUpdate(this, new CheckoutVersionCallBack() {
-            @Override
-            public void onSuccess(CheckSoftModel checkSoftModel) {
-                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
-                builder.setTitle("检测到有新版本")
-                        .setMessage(checkSoftModel.buildUpdateDescription)
-                        .setPositiveButton("更新", new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface dialog, int id) {
-                                Uri uri = Uri.parse(checkSoftModel.downloadURL);
-                                Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-                                startActivity(intent);
-                            }
-                        })
-                        .setNegativeButton("下次", new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface dialog, int id) {
-
-                            }
-                        })
-                        .setCancelable(false)
-                        .create()
-                        .show();
-            }
-
-            @Override
-            public void onFail(String s) {
-            }
-        });
-        */
+        // PgyerSDKManager.checkSoftwareUpdate(this, new CheckoutVersionCallBack() {
+        //     @Override
+        //     public void onSuccess(CheckSoftModel checkSoftModel) {
+        //         AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+        //         builder.setTitle("检测到有新版本")
+        //                 .setMessage(checkSoftModel.buildUpdateDescription)
+        //                 .setPositiveButton("更新", new DialogInterface.OnClickListener() {
+        //                     public void onClick(DialogInterface dialog, int id) {
+        //                         Uri uri = Uri.parse(checkSoftModel.downloadURL);
+        //                         Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+        //                         startActivity(intent);
+        //                     }
+        //                 })
+        //                 .setNegativeButton("下次", new DialogInterface.OnClickListener() {
+        //                     public void onClick(DialogInterface dialog, int id) {
+        //
+        //                     }
+        //                 })
+        //                 .setCancelable(false)
+        //                 .create()
+        //                 .show();
+        //     }
+        //
+        //     @Override
+        //     public void onFail(String s) {
+        //     }
+        // });
     }
 
     private void clearNoUseFile(){
