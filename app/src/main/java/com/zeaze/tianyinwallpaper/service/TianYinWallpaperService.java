@@ -32,6 +32,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.Calendar;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -47,26 +48,29 @@ public class TianYinWallpaperService extends WallpaperService {
         private MediaPlayer mediaPlayer;
         private EglThread eglThread;
         private List<TianYinWallpaperModel> list;
+        private SharedPreferences pref;
         private int index = -1;
-        private float currentXOffset = 0.5f;
+        private volatile float currentXOffset = 0.5f;
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
+        private boolean wallpaperScroll = false;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
             super.onCreate(surfaceHolder);
-            // 关键修复 1: 显式设置颜色格式，否则 ColorOS 合成器可能跳过此层
+            // 关键：声明格式，解决 ColorOS 16 文件夹模糊回退旧壁纸的问题
             surfaceHolder.setFormat(PixelFormat.RGBX_8888);
             
             try {
                 String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
                 list = JSON.parseArray(s, TianYinWallpaperModel.class);
             } catch (Exception ignored) {}
+            pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE);
+            wallpaperScroll = pref.getBoolean("wallpaperScroll", false);
         }
 
         @Override
         public void onSurfaceCreated(SurfaceHolder holder) {
             super.onSurfaceCreated(holder);
-            // 确保旧线程销毁
             if (eglThread != null) eglThread.finish();
             eglThread = new EglThread(holder);
             eglThread.start();
@@ -75,7 +79,7 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
             super.onSurfaceChanged(holder, format, width, height);
-            if (eglThread != null) eglThread.onSizeChanged(width, height);
+            if (eglThread != null) eglThread.updateScreenSize(width, height);
         }
 
         @Override
@@ -109,7 +113,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 mediaPlayer.reset();
                 mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(model.getVideoUri()));
                 
-                // 必须等待视频 SurfaceTexture 准备好
                 SurfaceTexture st = eglThread.getVideoST();
                 if (st == null) return;
                 
@@ -159,21 +162,36 @@ public class TianYinWallpaperService extends WallpaperService {
             if (eglThread != null) eglThread.finish();
         }
 
-        // --- 深度适配 ColorOS 16 的 EGL14 渲染线程 ---
+        // --- 深度适配 ColorOS 16 的 EGL 渲染引擎 ---
         private class EglThread extends HandlerThread {
             private final SurfaceHolder holder;
             private EGLDisplay display = EGL14.EGL_NO_DISPLAY;
             private EGLContext context = EGL14.EGL_NO_CONTEXT;
             private EGLSurface eglSurface = EGL14.EGL_NO_SURFACE;
             private Handler handler;
+            
             private SurfaceTexture videoST;
             private int vTexId, iTexId, vProg, iProg;
             private FloatBuffer vBuf, tBuf;
             private int sW, sH, cW = 1, cH = 1;
 
+            // 矩阵持久化，防止翻转闪烁
+            private final float[] videoStMat = new float[16];
+            private final float[] imageStMat = new float[16];
+            private final float[] mvpMat = new float[16];
+            private final AtomicBoolean isRenderPending = new AtomicBoolean(false);
+
             public EglThread(SurfaceHolder holder) {
-                super("TianYinEGL");
+                super("TianYinEGL", android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY);
                 this.holder = holder;
+                
+                // 初始化视频矩阵
+                Matrix.setIdentityM(videoStMat, 0);
+                // 初始化图片矩阵（翻转 Y 轴，因为 GL 和 Bitmap 坐标系相反）
+                Matrix.setIdentityM(imageStMat, 0);
+                Matrix.translateM(imageStMat, 0, 0, 1, 0);
+                Matrix.scaleM(imageStMat, 0, 1, -1, 1);
+
                 float[] vData = {-1,-1, 1,-1, -1,1, 1,1};
                 vBuf = ByteBuffer.allocateDirect(vData.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(vData);
                 vBuf.position(0);
@@ -182,7 +200,7 @@ public class TianYinWallpaperService extends WallpaperService {
                 tBuf.position(0);
             }
 
-            public void onSizeChanged(int w, int h) { sW = w; sH = h; requestRender(); }
+            public void updateScreenSize(int w, int h) { sW = w; sH = h; requestRender(); }
             public void setContentSize(int w, int h) { cW = w > 0 ? w : 1; cH = h > 0 ? h : 1; }
             public SurfaceTexture getVideoST() { return videoST; }
             public void postRunnable(Runnable r) { if (handler != null) handler.post(r); }
@@ -202,7 +220,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
                 int[] version = new int[2];
                 EGL14.eglInitialize(display, version, 0, version, 1);
-                
                 int[] attr = {
                         EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
                         EGL14.EGL_ALPHA_SIZE, 8,
@@ -212,13 +229,8 @@ public class TianYinWallpaperService extends WallpaperService {
                 EGLConfig[] configs = new EGLConfig[1];
                 int[] numConfigs = new int[1];
                 EGL14.eglChooseConfig(display, attr, 0, configs, 0, 1, numConfigs, 0);
-                
-                context = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT, 
-                        new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE}, 0);
-                
-                eglSurface = EGL14.eglCreateWindowSurface(display, configs[0], holder.getSurface(), 
-                        new int[]{EGL14.EGL_NONE}, 0);
-                
+                context = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT, new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE}, 0);
+                eglSurface = EGL14.eglCreateWindowSurface(display, configs[0], holder.getSurface(), new int[]{EGL14.EGL_NONE}, 0);
                 return EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context);
             }
 
@@ -228,16 +240,13 @@ public class TianYinWallpaperService extends WallpaperService {
                 String fsI = "precision mediump float; varying vec2 vTex; uniform sampler2D sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }";
                 vProg = createProg(vs, fsV);
                 iProg = createProg(vs, fsI);
-                
                 int[] tex = new int[2];
                 GLES20.glGenTextures(2, tex, 0);
                 vTexId = tex[0]; iTexId = tex[1];
-                
                 GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTexId);
                 GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
                 videoST = new SurfaceTexture(vTexId);
                 videoST.setOnFrameAvailableListener(TianYinSolaEngine.this);
-                
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId);
                 GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
             }
@@ -252,53 +261,53 @@ public class TianYinWallpaperService extends WallpaperService {
             }
 
             public void requestRender() {
-                if (handler != null) {
-                    handler.removeCallbacks(drawRunnable);
-                    handler.post(drawRunnable);
+                if (isRenderPending.compareAndSet(false, true)) {
+                    postRunnable(() -> {
+                        isRenderPending.set(false);
+                        draw();
+                    });
                 }
             }
 
-            private final Runnable drawRunnable = this::draw;
-
             private void draw() {
                 if (eglSurface == EGL14.EGL_NO_SURFACE) return;
-                EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context);
+                if (!EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) return;
 
                 boolean isVid = (list != null && index >= 0 && index < list.size() && list.get(index).getType() == 1);
-                float[] stMat = new float[16];
-                Matrix.setIdentityM(stMat, 0);
-                
-                if (isVid && updateSurface.getAndSet(false)) {
-                    try {
-                        videoST.updateTexImage();
-                        videoST.getTransformMatrix(stMat);
-                    } catch (Exception ignored) {}
-                } else if (!isVid) {
-                    // 修正图片翻转
-                    Matrix.translateM(stMat, 0, 0, 1, 0);
-                    Matrix.scaleM(stMat, 0, 1, -1, 1);
+                float[] currentStMat;
+
+                if (isVid) {
+                    if (updateSurface.getAndSet(false)) {
+                        try {
+                            videoST.updateTexImage();
+                            videoST.getTransformMatrix(videoStMat); // 只在有新帧时更新视频矩阵
+                        } catch (Exception ignored) {}
+                    }
+                    currentStMat = videoStMat;
+                } else {
+                    currentStMat = imageStMat;
                 }
 
                 GLES20.glViewport(0, 0, sW, sH);
-                // 关键点：ColorOS 16 如果背景清为全黑，有时会被系统判定为“无内容”
+                // 使用极深灰而非纯黑，防止 ColorOS 判定图层无效
                 GLES20.glClearColor(0.01f, 0.01f, 0.01f, 1.0f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
                 int prog = isVid ? vProg : iProg;
                 GLES20.glUseProgram(prog);
 
-                float[] mvp = new float[16];
-                Matrix.setIdentityM(mvp, 0);
+                Matrix.setIdentityM(mvpMat, 0);
                 float cAsp = (float) cW / cH;
                 float sAsp = (float) sW / sH;
                 
                 if (cAsp > sAsp) {
                     float scale = cAsp / sAsp;
-                    float tx = (scale - 1.0f) * (1.0f - currentXOffset * 2.0f);
-                    Matrix.scaleM(mvp, 0, scale, 1.0f, 1.0f);
-                    Matrix.translateM(mvp, 0, tx / scale, 0, 0);
+                    // 滑动平移逻辑
+                    float tx = wallpaperScroll ? (scale - 1.0f) * (1.0f - currentXOffset * 2.0f) : 0;
+                    Matrix.scaleM(mvpMat, 0, scale, 1.0f, 1.0f);
+                    Matrix.translateM(mvpMat, 0, tx / scale, 0, 0);
                 } else {
-                    Matrix.scaleM(mvp, 0, 1.0f, sAsp / cAsp, 1.0f);
+                    Matrix.scaleM(mvpMat, 0, 1.0f, sAsp / cAsp, 1.0f);
                 }
 
                 int aPos = GLES20.glGetAttribLocation(prog, "aPos");
@@ -308,8 +317,8 @@ public class TianYinWallpaperService extends WallpaperService {
                 GLES20.glEnableVertexAttribArray(aTex);
                 GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tBuf);
                 
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uMVP"), 1, false, mvp, 0);
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uST"), 1, false, stMat, 0);
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uMVP"), 1, false, mvpMat, 0);
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uST"), 1, false, currentStMat, 0);
 
                 GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
                 GLES20.glBindTexture(isVid ? GLES11Ext.GL_TEXTURE_EXTERNAL_OES : GLES20.GL_TEXTURE_2D, isVid ? vTexId : iTexId);
