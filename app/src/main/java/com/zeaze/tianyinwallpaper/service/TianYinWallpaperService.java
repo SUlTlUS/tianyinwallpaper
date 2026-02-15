@@ -260,6 +260,12 @@ public class TianYinWallpaperService extends WallpaperService {
         private void setLiveWallpaper() {
             try {
                 mediaPlayer.reset();
+                mediaPlayer.setOnVideoSizeChangedListener(new MediaPlayer.OnVideoSizeChangedListener() {
+                    @Override
+                    public void onVideoSizeChanged(MediaPlayer mp, int width, int height) {
+                        applyVideoScrollSurface(width, height);
+                    }
+                });
                 TianYinWallpaperModel currentModel = list.get(index);
                 // Use URI if available, otherwise fall back to file path
                 if (currentModel.getVideoUri() != null && !currentModel.getVideoUri().isEmpty()) {
@@ -268,6 +274,7 @@ public class TianYinWallpaperService extends WallpaperService {
                     mediaPlayer.setDataSource(currentModel.getVideoPath());
                 }
                 mediaPlayer.prepare();
+                applyVideoScrollSurface(mediaPlayer.getVideoWidth(), mediaPlayer.getVideoHeight());
                 // Use individual wallpaper loop setting
                 mediaPlayer.setLooping(currentModel.isLoop());
                 mediaPlayer.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING);
@@ -371,6 +378,7 @@ public class TianYinWallpaperService extends WallpaperService {
                     if (isCurrentWallpaperVideo() && mediaPlayer != null) {
                         setLiveWallpaper();
                     } else {
+                        resetSurfaceSize();
                         this.setWallpaper();
                     }
                 }
@@ -397,6 +405,36 @@ public class TianYinWallpaperService extends WallpaperService {
                 }
                 mediaPlayer.release();
                 mediaPlayer = null;
+            }
+        }
+
+        private void applyVideoScrollSurface(int videoWidth, int videoHeight) {
+            if (surfaceHolder == null) {
+                return;
+            }
+            if (!wallpaperScroll) {
+                resetSurfaceSize();
+                return;
+            }
+            if (videoWidth <= 0 || videoHeight <= 0) {
+                return;
+            }
+            int surfaceHeight = surfaceHolder.getSurfaceFrame() != null ? surfaceHolder.getSurfaceFrame().height() : 0;
+            if (surfaceHeight <= 0) {
+                surfaceHeight = getResources().getDisplayMetrics().heightPixels;
+            }
+            float aspect = (float) videoWidth / videoHeight;
+            int targetWidth = (int) (surfaceHeight * aspect);
+            int currentWidth = surfaceHolder.getSurfaceFrame() != null ? surfaceHolder.getSurfaceFrame().width() : 0;
+            if (currentWidth > 0) {
+                targetWidth = Math.max(targetWidth, currentWidth);
+            }
+            surfaceHolder.setFixedSize(targetWidth, surfaceHeight);
+        }
+
+        private void resetSurfaceSize() {
+            if (surfaceHolder != null) {
+                surfaceHolder.setSizeFromLayout();
             }
         }
 
