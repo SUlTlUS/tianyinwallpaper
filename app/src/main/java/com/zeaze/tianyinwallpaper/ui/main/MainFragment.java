@@ -8,11 +8,8 @@ import android.content.ComponentName;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.graphics.Bitmap;
-import android.media.ThumbnailUtils;
 import android.net.Uri;
 import android.os.Bundle;
-import android.provider.MediaStore;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -47,7 +44,6 @@ import com.zeaze.tianyinwallpaper.utils.FileUtil;
 import com.zeaze.tianyinwallpaper.R;
 import com.zeaze.tianyinwallpaper.base.BaseFragment;
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel;
-import com.zeaze.tianyinwallpaper.bitmapstomp4.IYapVideoProvider;
 
 import java.io.File;
 import java.io.IOException;
@@ -58,7 +54,7 @@ import java.util.UUID;
 
 import io.reactivex.functions.Consumer;
 
-public class MainFragment extends BaseFragment implements IYapVideoProvider {
+public class MainFragment extends BaseFragment {
     private RecyclerView rv;
     private GridLayoutManager manager;
     private WallpaperAdapter wallpaperAdapter;
@@ -67,7 +63,6 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
     private TextView select,apply;
     private List<TianYinWallpaperModel> list=new ArrayList();;
     public static int column=3;
-    private Bitmap bitmap;
     private TianYinWallpaperModel model;
     private LoadingPopupView popupView;
 
@@ -352,23 +347,6 @@ public class MainFragment extends BaseFragment implements IYapVideoProvider {
             wallpaperAdapter.tryToNotifyDataSetChanged();
         }
     });
-
-    @Override
-    public int size() {
-        return 1;
-    }
-
-    @Override
-    public Bitmap next() {
-        return bitmap;
-    }
-
-    @Override
-    public void progress(float progress) {
-        if (progress>=1){
-            addModel();
-        }
-    }
 
     private void addModel(){
         getActivity().runOnUiThread(new Runnable() {
