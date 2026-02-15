@@ -54,9 +54,7 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
             super.onCreate(surfaceHolder);
-            // 关键修复 1: 显式设置颜色格式，否则 ColorOS 合成器可能跳过此层
             surfaceHolder.setFormat(PixelFormat.RGBX_8888);
-            
             try {
                 String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
                 list = JSON.parseArray(s, TianYinWallpaperModel.class);
@@ -66,7 +64,6 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onSurfaceCreated(SurfaceHolder holder) {
             super.onSurfaceCreated(holder);
-            // 确保旧线程销毁
             if (eglThread != null) eglThread.finish();
             eglThread = new EglThread(holder);
             eglThread.start();
@@ -108,15 +105,11 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (mediaPlayer == null) mediaPlayer = new MediaPlayer();
                 mediaPlayer.reset();
                 mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(model.getVideoUri()));
-                
-                // 必须等待视频 SurfaceTexture 准备好
                 SurfaceTexture st = eglThread.getVideoST();
                 if (st == null) return;
-                
                 Surface surface = new Surface(st);
                 mediaPlayer.setSurface(surface);
                 surface.release();
-                
                 mediaPlayer.setLooping(model.isLoop());
                 mediaPlayer.setVolume(0, 0);
                 mediaPlayer.setOnPreparedListener(mp -> {
@@ -124,9 +117,7 @@ public class TianYinWallpaperService extends WallpaperService {
                     mp.start();
                 });
                 mediaPlayer.prepareAsync();
-
-                // 重置视频纹理矩阵，避免上一视频的残留矩阵影响新视频
-                eglThread.resetVideoMatrix();
+                eglThread.resetVideoMatrix(); // 切换视频时重置矩阵
             } catch (Exception e) { Log.e(TAG, "Video error", e); }
         }
 
@@ -162,7 +153,7 @@ public class TianYinWallpaperService extends WallpaperService {
             if (eglThread != null) eglThread.finish();
         }
 
-        // --- 深度适配 ColorOS 16 的 EGL14 渲染线程 ---
+        // --- 优化后的 EGL 渲染线程 ---
         private class EglThread extends HandlerThread {
             private final SurfaceHolder holder;
             private EGLDisplay display = EGL14.EGL_NO_DISPLAY;
@@ -174,8 +165,10 @@ public class TianYinWallpaperService extends WallpaperService {
             private FloatBuffer vBuf, tBuf;
             private int sW, sH, cW = 1, cH = 1;
 
-            // 用于持久化保存视频纹理变换矩阵
+            // 持久化视频纹理矩阵
             private final float[] videoSTMatrix = new float[16];
+            // 预计算的图片翻转矩阵（避免每帧计算）
+            private final float[] imageMatrix = new float[16];
 
             public EglThread(SurfaceHolder holder) {
                 super("TianYinEGL");
@@ -186,14 +179,17 @@ public class TianYinWallpaperService extends WallpaperService {
                 float[] tData = {0,0, 1,0, 0,1, 1,1};
                 tBuf = ByteBuffer.allocateDirect(tData.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(tData);
                 tBuf.position(0);
+
+                // 预计算图片矩阵：先单位阵，然后做 Y 轴翻转
+                Matrix.setIdentityM(imageMatrix, 0);
+                Matrix.translateM(imageMatrix, 0, 0, 1, 0);
+                Matrix.scaleM(imageMatrix, 0, 1, -1, 1);
             }
 
             public void onSizeChanged(int w, int h) { sW = w; sH = h; requestRender(); }
             public void setContentSize(int w, int h) { cW = w > 0 ? w : 1; cH = h > 0 ? h : 1; }
             public SurfaceTexture getVideoST() { return videoST; }
             public void postRunnable(Runnable r) { if (handler != null) handler.post(r); }
-
-            // 新增：重置视频纹理矩阵为单位矩阵（切换视频时调用）
             public void resetVideoMatrix() {
                 postRunnable(() -> Matrix.setIdentityM(videoSTMatrix, 0));
             }
@@ -213,7 +209,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
                 int[] version = new int[2];
                 EGL14.eglInitialize(display, version, 0, version, 1);
-                
                 int[] attr = {
                         EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
                         EGL14.EGL_ALPHA_SIZE, 8,
@@ -223,13 +218,10 @@ public class TianYinWallpaperService extends WallpaperService {
                 EGLConfig[] configs = new EGLConfig[1];
                 int[] numConfigs = new int[1];
                 EGL14.eglChooseConfig(display, attr, 0, configs, 0, 1, numConfigs, 0);
-                
-                context = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT, 
+                context = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT,
                         new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE}, 0);
-                
-                eglSurface = EGL14.eglCreateWindowSurface(display, configs[0], holder.getSurface(), 
+                eglSurface = EGL14.eglCreateWindowSurface(display, configs[0], holder.getSurface(),
                         new int[]{EGL14.EGL_NONE}, 0);
-                
                 return EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context);
             }
 
@@ -239,20 +231,19 @@ public class TianYinWallpaperService extends WallpaperService {
                 String fsI = "precision mediump float; varying vec2 vTex; uniform sampler2D sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }";
                 vProg = createProg(vs, fsV);
                 iProg = createProg(vs, fsI);
-                
+
                 int[] tex = new int[2];
                 GLES20.glGenTextures(2, tex, 0);
                 vTexId = tex[0]; iTexId = tex[1];
-                
+
                 GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTexId);
                 GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
                 videoST = new SurfaceTexture(vTexId);
                 videoST.setOnFrameAvailableListener(TianYinSolaEngine.this);
-                
+
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId);
                 GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
 
-                // 初始化视频矩阵为单位矩阵
                 Matrix.setIdentityM(videoSTMatrix, 0);
             }
 
@@ -280,26 +271,22 @@ public class TianYinWallpaperService extends WallpaperService {
 
                 boolean isVid = (list != null && index >= 0 && index < list.size() && list.get(index).getType() == 1);
                 float[] stMat = new float[16];
-                Matrix.setIdentityM(stMat, 0);
-                
+
                 if (isVid) {
-                    // 如果有新帧，更新纹理并获取矩阵
+                    // 视频：使用持久化矩阵，有新帧时更新
                     if (updateSurface.getAndSet(false)) {
                         try {
                             videoST.updateTexImage();
                             videoST.getTransformMatrix(videoSTMatrix);
                         } catch (Exception ignored) {}
                     }
-                    // 始终使用持久化的视频矩阵
                     System.arraycopy(videoSTMatrix, 0, stMat, 0, 16);
                 } else {
-                    // 图片需要翻转 Y 轴
-                    Matrix.translateM(stMat, 0, 0, 1, 0);
-                    Matrix.scaleM(stMat, 0, 1, -1, 1);
+                    // 图片：直接使用预计算的翻转矩阵（避免每帧矩阵运算）
+                    System.arraycopy(imageMatrix, 0, stMat, 0, 16);
                 }
 
                 GLES20.glViewport(0, 0, sW, sH);
-                // 关键点：ColorOS 16 如果背景清为全黑，有时会被系统判定为“无内容”
                 GLES20.glClearColor(0.01f, 0.01f, 0.01f, 1.0f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
@@ -310,7 +297,7 @@ public class TianYinWallpaperService extends WallpaperService {
                 Matrix.setIdentityM(mvp, 0);
                 float cAsp = (float) cW / cH;
                 float sAsp = (float) sW / sH;
-                
+
                 if (cAsp > sAsp) {
                     float scale = cAsp / sAsp;
                     float tx = (scale - 1.0f) * (1.0f - currentXOffset * 2.0f);
@@ -326,7 +313,7 @@ public class TianYinWallpaperService extends WallpaperService {
                 GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, vBuf);
                 GLES20.glEnableVertexAttribArray(aTex);
                 GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tBuf);
-                
+
                 GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uMVP"), 1, false, mvp, 0);
                 GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uST"), 1, false, stMat, 0);
 
