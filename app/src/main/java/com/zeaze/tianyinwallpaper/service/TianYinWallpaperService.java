@@ -25,6 +25,8 @@ import android.view.SurfaceHolder;
 
 import com.alibaba.fastjson.JSON;
 import com.zeaze.tianyinwallpaper.App;
+import com.zeaze.tianyinwallpaper.base.rxbus.RxBus;
+import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants;
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel;
 import com.zeaze.tianyinwallpaper.utils.FileUtil;
 
@@ -34,6 +36,8 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import io.reactivex.disposables.CompositeDisposable;
 
 public class TianYinWallpaperService extends WallpaperService {
     private final String TAG = "TianYinGL";
@@ -50,11 +54,14 @@ public class TianYinWallpaperService extends WallpaperService {
         private int index = -1;
         private float currentXOffset = 0.5f;
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
-        private boolean isMediaPlayerPrepared = false; // 新增：标记 MediaPlayer 是否已准备
+        private boolean isMediaPlayerPrepared = false;
 
-        // 滚动开关相关
+        // 滚动开关
         private SharedPreferences pref;
         private boolean wallpaperScrollEnabled = true;
+
+        // RxBus 订阅管理
+        private CompositeDisposable disposable;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
@@ -73,7 +80,24 @@ public class TianYinWallpaperService extends WallpaperService {
             try {
                 String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
                 list = JSON.parseArray(s, TianYinWallpaperModel.class);
+                // 初始化索引为0，确保首次显示第一张
+                if (list != null && !list.isEmpty()) {
+                    index = 0;
+                }
             } catch (Exception ignored) {}
+
+            // 订阅重置索引事件
+            disposable = new CompositeDisposable();
+            disposable.add(RxBus.getDefault().toObservableWithCode(RxConstants.RX_RESET_WALLPAPER_INDEX, Object.class)
+                    .subscribe(o -> {
+                        Log.d(TAG, "Received reset index event");
+                        if (list != null && !list.isEmpty()) {
+                            index = 0;
+                            if (eglThread != null) {
+                                eglThread.postRunnable(this::loadContent);
+                            }
+                        }
+                    }, throwable -> Log.e(TAG, "Rx error", throwable)));
         }
 
         @Override
@@ -94,18 +118,21 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
             if (visible) {
-                // 可见时，如果 MediaPlayer 已准备则播放
                 if (mediaPlayer != null && isMediaPlayerPrepared && !mediaPlayer.isPlaying()) {
                     mediaPlayer.start();
                 }
                 if (eglThread != null) eglThread.requestRender();
             } else {
-                // 不可见时，暂停播放并切换到下一张壁纸
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) {
                     mediaPlayer.pause();
                 }
-                // 延迟切换，避免与 pause 冲突
-                new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
+                // 延迟切换，避免短暂不可见时切换
+                new Handler(getMainLooper()).postDelayed(() -> {
+                    // 再次检查是否仍然不可见
+                    if (!isVisible()) {
+                        nextWallpaper();
+                    }
+                }, 500);
             }
         }
 
@@ -123,15 +150,14 @@ public class TianYinWallpaperService extends WallpaperService {
         private void nextWallpaper() {
             if (list == null || list.isEmpty()) return;
             index = (index + 1) % list.size();
-            // 确保在 EGL 线程中加载内容
             if (eglThread != null) eglThread.postRunnable(this::loadContent);
         }
 
         private void loadContent() {
             if (index < 0 || index >= list.size()) return;
             TianYinWallpaperModel model = list.get(index);
+            Log.d(TAG, "Loading content at index " + index + ", type=" + model.getType());
 
-            // 重置 MediaPlayer 状态
             if (mediaPlayer != null) {
                 mediaPlayer.reset();
                 isMediaPlayerPrepared = false;
@@ -157,18 +183,15 @@ public class TianYinWallpaperService extends WallpaperService {
                 mediaPlayer.setLooping(model.isLoop());
                 mediaPlayer.setVolume(0, 0);
 
-                // 添加错误监听器
                 mediaPlayer.setOnErrorListener((mp, what, extra) -> {
                     Log.e(TAG, "MediaPlayer error: what=" + what + ", extra=" + extra);
                     isMediaPlayerPrepared = false;
-                    // 切换到下一张壁纸
                     new Handler(getMainLooper()).post(() -> nextWallpaper());
                     return true;
                 });
 
                 mediaPlayer.setOnInfoListener((mp, what, extra) -> {
                     if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
-                        // 视频开始渲染，可以标记就绪
                         isMediaPlayerPrepared = true;
                     }
                     return false;
@@ -183,16 +206,14 @@ public class TianYinWallpaperService extends WallpaperService {
                         videoST.setDefaultBufferSize(w, h);
                     }
                     isMediaPlayerPrepared = true;
-                    // 如果当前可见，立即播放
                     if (isVisible()) {
                         mp.start();
                     }
                 });
                 mediaPlayer.prepareAsync();
-                eglThread.resetVideoMatrix(); // 切换视频时重置矩阵
+                eglThread.resetVideoMatrix();
             } catch (Exception e) {
                 Log.e(TAG, "Video error", e);
-                // 加载失败则尝试下一张
                 new Handler(getMainLooper()).post(() -> nextWallpaper());
             }
         }
@@ -210,7 +231,6 @@ public class TianYinWallpaperService extends WallpaperService {
                     eglThread.setContentSize(bitmap.getWidth(), bitmap.getHeight());
                     eglThread.uploadBitmap(bitmap);
                 } else {
-                    // 图片解码失败，跳过
                     new Handler(getMainLooper()).post(() -> nextWallpaper());
                 }
             } catch (Exception e) {
@@ -233,9 +253,10 @@ public class TianYinWallpaperService extends WallpaperService {
                 mediaPlayer = null;
             }
             if (eglThread != null) eglThread.finish();
+            if (disposable != null) disposable.dispose();
         }
 
-        // --- EGL 渲染线程（保持不变，与上一版相同）---
+        // --- EGL 渲染线程（优化版）---
         private class EglThread extends HandlerThread {
             private final SurfaceHolder holder;
             private EGLDisplay display = EGL14.EGL_NO_DISPLAY;
