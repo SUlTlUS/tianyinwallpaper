@@ -58,7 +58,6 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
             super.onCreate(surfaceHolder);
-            // 关键修复 1: 显式设置颜色格式，否则 ColorOS 合成器可能跳过此层
             surfaceHolder.setFormat(PixelFormat.RGBX_8888);
 
             // 初始化滚动开关
@@ -67,7 +66,6 @@ public class TianYinWallpaperService extends WallpaperService {
             pref.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
                 if ("wallpaperScroll".equals(key)) {
                     wallpaperScrollEnabled = sharedPreferences.getBoolean(key, true);
-                    // 开关变化时立即刷新一次，使新偏移生效
                     if (eglThread != null) eglThread.requestRender();
                 }
             });
@@ -81,7 +79,6 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onSurfaceCreated(SurfaceHolder holder) {
             super.onSurfaceCreated(holder);
-            // 确保旧线程销毁
             if (eglThread != null) eglThread.finish();
             eglThread = new EglThread(holder);
             eglThread.start();
@@ -111,7 +108,7 @@ public class TianYinWallpaperService extends WallpaperService {
             if (wallpaperScrollEnabled) {
                 this.currentXOffset = xOffset;
             } else {
-                this.currentXOffset = 0.5f; // 禁用滚动时居中
+                this.currentXOffset = 0.5f;
             }
             if (eglThread != null) eglThread.requestRender();
         }
@@ -125,8 +122,6 @@ public class TianYinWallpaperService extends WallpaperService {
         private void loadContent() {
             if (index < 0 || index >= list.size()) return;
             TianYinWallpaperModel model = list.get(index);
-            // 重置内容就绪标志，避免旧内容显示
-            eglThread.setContentReady(false);
             if (model.getType() == 1) prepareVideo(model);
             else prepareImage(model);
         }
@@ -137,7 +132,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 mediaPlayer.reset();
                 mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(model.getVideoUri()));
 
-                // 必须等待视频 SurfaceTexture 准备好
                 SurfaceTexture st = eglThread.getVideoST();
                 if (st == null) return;
 
@@ -148,13 +142,23 @@ public class TianYinWallpaperService extends WallpaperService {
                 mediaPlayer.setLooping(model.isLoop());
                 mediaPlayer.setVolume(0, 0);
                 mediaPlayer.setOnPreparedListener(mp -> {
-                    eglThread.setContentSize(mp.getVideoWidth(), mp.getVideoHeight());
-                    eglThread.setVideoPrepared(); // 标记视频已准备，等待第一帧
+                    int w = mp.getVideoWidth();
+                    int h = mp.getVideoHeight();
+                    eglThread.setContentSize(w, h);
+                    // 设置默认缓冲区大小，确保视频正确渲染
+                    SurfaceTexture videoST = eglThread.getVideoST();
+                    if (videoST != null) {
+                        videoST.setDefaultBufferSize(w, h);
+                    }
                     mp.start();
                 });
                 mediaPlayer.prepareAsync();
                 eglThread.resetVideoMatrix(); // 切换视频时重置矩阵
-            } catch (Exception e) { Log.e(TAG, "Video error", e); }
+            } catch (Exception e) { 
+                Log.e(TAG, "Video error", e);
+                // 加载失败则尝试下一张
+                nextWallpaper();
+            }
         }
 
         private void prepareImage(TianYinWallpaperModel model) {
@@ -166,8 +170,14 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (bitmap != null) {
                     eglThread.setContentSize(bitmap.getWidth(), bitmap.getHeight());
                     eglThread.uploadBitmap(bitmap);
+                } else {
+                    // 图片解码失败，跳过
+                    nextWallpaper();
                 }
-            } catch (Exception e) { Log.e(TAG, "Image error", e); }
+            } catch (Exception e) { 
+                Log.e(TAG, "Image error", e);
+                nextWallpaper();
+            }
         }
 
         @Override
@@ -183,7 +193,7 @@ public class TianYinWallpaperService extends WallpaperService {
             if (eglThread != null) eglThread.finish();
         }
 
-        // --- 优化后的 EGL 渲染线程（含内容就绪控制和视频矩阵持久化）---
+        // --- 优化后的 EGL 渲染线程（移除内容就绪控制，保留矩阵持久化和预计算）---
         private class EglThread extends HandlerThread {
             private final SurfaceHolder holder;
             private EGLDisplay display = EGL14.EGL_NO_DISPLAY;
@@ -199,11 +209,6 @@ public class TianYinWallpaperService extends WallpaperService {
             private final float[] videoSTMatrix = new float[16];
             // 预计算图片翻转矩阵
             private final float[] imageMatrix = new float[16];
-
-            // 内容就绪标志
-            private volatile boolean contentReady = false;
-            // 视频准备标志（MediaPlayer 已准备，但可能尚无帧）
-            private volatile boolean videoPrepared = false;
 
             public EglThread(SurfaceHolder holder) {
                 super("TianYinEGL");
@@ -228,17 +233,6 @@ public class TianYinWallpaperService extends WallpaperService {
 
             public void resetVideoMatrix() {
                 postRunnable(() -> Matrix.setIdentityM(videoSTMatrix, 0));
-            }
-
-            public void setVideoPrepared() {
-                postRunnable(() -> videoPrepared = true);
-            }
-
-            public void setContentReady(boolean ready) {
-                postRunnable(() -> {
-                    contentReady = ready;
-                    if (ready) requestRender(); // 一旦就绪立即渲染
-                });
             }
 
             @Override
@@ -303,8 +297,7 @@ public class TianYinWallpaperService extends WallpaperService {
                     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId);
                     GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0);
                     b.recycle();
-                    // 图片已就绪
-                    setContentReady(true);
+                    requestRender();
                 });
             }
 
@@ -321,33 +314,24 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (eglSurface == EGL14.EGL_NO_SURFACE) return;
                 EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context);
 
-                // 内容未就绪则不渲染，直接返回（避免黑屏）
-                if (!contentReady) return;
-
                 boolean isVid = (list != null && index >= 0 && index < list.size() && list.get(index).getType() == 1);
                 float[] stMat = new float[16];
 
                 if (isVid) {
-                    // 视频：更新矩阵并检查第一帧是否到达
+                    // 视频：更新矩阵（持久化）
                     if (updateSurface.getAndSet(false)) {
                         try {
                             videoST.updateTexImage();
                             videoST.getTransformMatrix(videoSTMatrix);
-                            // 如果视频已准备但内容尚未就绪，则现在第一帧已到达，标记就绪
-                            if (!contentReady && videoPrepared) {
-                                contentReady = true;
-                                // 继续渲染这一帧
-                            }
                         } catch (Exception ignored) {}
                     }
                     System.arraycopy(videoSTMatrix, 0, stMat, 0, 16);
                 } else {
-                    // 图片直接使用预计算矩阵
+                    // 图片：直接使用预计算矩阵
                     System.arraycopy(imageMatrix, 0, stMat, 0, 16);
                 }
 
                 GLES20.glViewport(0, 0, sW, sH);
-                // 关键点：ColorOS 16 如果背景清为全黑，有时会被系统判定为“无内容”
                 GLES20.glClearColor(0.01f, 0.01f, 0.01f, 1.0f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
