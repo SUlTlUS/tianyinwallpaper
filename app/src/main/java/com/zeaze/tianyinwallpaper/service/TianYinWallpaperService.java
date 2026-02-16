@@ -50,6 +50,7 @@ public class TianYinWallpaperService extends WallpaperService {
         private int index = -1;
         private float currentXOffset = 0.5f;
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
+        private boolean isMediaPlayerPrepared = false; // 新增：标记 MediaPlayer 是否已准备
 
         // 滚动开关相关
         private SharedPreferences pref;
@@ -60,7 +61,6 @@ public class TianYinWallpaperService extends WallpaperService {
             super.onCreate(surfaceHolder);
             surfaceHolder.setFormat(PixelFormat.RGBX_8888);
 
-            // 初始化滚动开关
             pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE);
             wallpaperScrollEnabled = pref.getBoolean("wallpaperScroll", true);
             pref.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
@@ -94,11 +94,18 @@ public class TianYinWallpaperService extends WallpaperService {
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
             if (visible) {
-                if (mediaPlayer != null) mediaPlayer.start();
+                // 可见时，如果 MediaPlayer 已准备则播放
+                if (mediaPlayer != null && isMediaPlayerPrepared && !mediaPlayer.isPlaying()) {
+                    mediaPlayer.start();
+                }
                 if (eglThread != null) eglThread.requestRender();
             } else {
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) mediaPlayer.pause();
-                nextWallpaper();
+                // 不可见时，暂停播放并切换到下一张壁纸
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    mediaPlayer.pause();
+                }
+                // 延迟切换，避免与 pause 冲突
+                new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
             }
         }
 
@@ -116,12 +123,20 @@ public class TianYinWallpaperService extends WallpaperService {
         private void nextWallpaper() {
             if (list == null || list.isEmpty()) return;
             index = (index + 1) % list.size();
+            // 确保在 EGL 线程中加载内容
             if (eglThread != null) eglThread.postRunnable(this::loadContent);
         }
 
         private void loadContent() {
             if (index < 0 || index >= list.size()) return;
             TianYinWallpaperModel model = list.get(index);
+
+            // 重置 MediaPlayer 状态
+            if (mediaPlayer != null) {
+                mediaPlayer.reset();
+                isMediaPlayerPrepared = false;
+            }
+
             if (model.getType() == 1) prepareVideo(model);
             else prepareImage(model);
         }
@@ -141,28 +156,52 @@ public class TianYinWallpaperService extends WallpaperService {
 
                 mediaPlayer.setLooping(model.isLoop());
                 mediaPlayer.setVolume(0, 0);
+
+                // 添加错误监听器
+                mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                    Log.e(TAG, "MediaPlayer error: what=" + what + ", extra=" + extra);
+                    isMediaPlayerPrepared = false;
+                    // 切换到下一张壁纸
+                    new Handler(getMainLooper()).post(() -> nextWallpaper());
+                    return true;
+                });
+
+                mediaPlayer.setOnInfoListener((mp, what, extra) -> {
+                    if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+                        // 视频开始渲染，可以标记就绪
+                        isMediaPlayerPrepared = true;
+                    }
+                    return false;
+                });
+
                 mediaPlayer.setOnPreparedListener(mp -> {
                     int w = mp.getVideoWidth();
                     int h = mp.getVideoHeight();
                     eglThread.setContentSize(w, h);
-                    // 设置默认缓冲区大小，确保视频正确渲染
                     SurfaceTexture videoST = eglThread.getVideoST();
                     if (videoST != null) {
                         videoST.setDefaultBufferSize(w, h);
                     }
-                    mp.start();
+                    isMediaPlayerPrepared = true;
+                    // 如果当前可见，立即播放
+                    if (isVisible()) {
+                        mp.start();
+                    }
                 });
                 mediaPlayer.prepareAsync();
                 eglThread.resetVideoMatrix(); // 切换视频时重置矩阵
-            } catch (Exception e) { 
+            } catch (Exception e) {
                 Log.e(TAG, "Video error", e);
                 // 加载失败则尝试下一张
-                nextWallpaper();
+                new Handler(getMainLooper()).post(() -> nextWallpaper());
             }
         }
 
         private void prepareImage(TianYinWallpaperModel model) {
-            if (mediaPlayer != null) mediaPlayer.reset();
+            if (mediaPlayer != null) {
+                mediaPlayer.reset();
+                isMediaPlayerPrepared = false;
+            }
             try {
                 InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(model.getImgUri()));
                 Bitmap bitmap = BitmapFactory.decodeStream(is);
@@ -172,11 +211,11 @@ public class TianYinWallpaperService extends WallpaperService {
                     eglThread.uploadBitmap(bitmap);
                 } else {
                     // 图片解码失败，跳过
-                    nextWallpaper();
+                    new Handler(getMainLooper()).post(() -> nextWallpaper());
                 }
-            } catch (Exception e) { 
+            } catch (Exception e) {
                 Log.e(TAG, "Image error", e);
-                nextWallpaper();
+                new Handler(getMainLooper()).post(() -> nextWallpaper());
             }
         }
 
@@ -189,11 +228,14 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             super.onDestroy();
-            if (mediaPlayer != null) mediaPlayer.release();
+            if (mediaPlayer != null) {
+                mediaPlayer.release();
+                mediaPlayer = null;
+            }
             if (eglThread != null) eglThread.finish();
         }
 
-        // --- 优化后的 EGL 渲染线程（移除内容就绪控制，保留矩阵持久化和预计算）---
+        // --- EGL 渲染线程（保持不变，与上一版相同）---
         private class EglThread extends HandlerThread {
             private final SurfaceHolder holder;
             private EGLDisplay display = EGL14.EGL_NO_DISPLAY;
@@ -204,10 +246,7 @@ public class TianYinWallpaperService extends WallpaperService {
             private int vTexId, iTexId, vProg, iProg;
             private FloatBuffer vBuf, tBuf;
             private int sW, sH, cW = 1, cH = 1;
-
-            // 持久化视频纹理矩阵
             private final float[] videoSTMatrix = new float[16];
-            // 预计算图片翻转矩阵
             private final float[] imageMatrix = new float[16];
 
             public EglThread(SurfaceHolder holder) {
@@ -220,7 +259,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 tBuf = ByteBuffer.allocateDirect(tData.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(tData);
                 tBuf.position(0);
 
-                // 预计算图片矩阵：Y轴翻转
                 Matrix.setIdentityM(imageMatrix, 0);
                 Matrix.translateM(imageMatrix, 0, 0, 1, 0);
                 Matrix.scaleM(imageMatrix, 0, 1, -1, 1);
@@ -230,10 +268,7 @@ public class TianYinWallpaperService extends WallpaperService {
             public void setContentSize(int w, int h) { cW = w > 0 ? w : 1; cH = h > 0 ? h : 1; }
             public SurfaceTexture getVideoST() { return videoST; }
             public void postRunnable(Runnable r) { if (handler != null) handler.post(r); }
-
-            public void resetVideoMatrix() {
-                postRunnable(() -> Matrix.setIdentityM(videoSTMatrix, 0));
-            }
+            public void resetVideoMatrix() { postRunnable(() -> Matrix.setIdentityM(videoSTMatrix, 0)); }
 
             @Override
             protected void onLooperPrepared() {
@@ -250,7 +285,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
                 int[] version = new int[2];
                 EGL14.eglInitialize(display, version, 0, version, 1);
-
                 int[] attr = {
                         EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
                         EGL14.EGL_ALPHA_SIZE, 8,
@@ -260,13 +294,10 @@ public class TianYinWallpaperService extends WallpaperService {
                 EGLConfig[] configs = new EGLConfig[1];
                 int[] numConfigs = new int[1];
                 EGL14.eglChooseConfig(display, attr, 0, configs, 0, 1, numConfigs, 0);
-
                 context = EGL14.eglCreateContext(display, configs[0], EGL14.EGL_NO_CONTEXT,
                         new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE}, 0);
-
                 eglSurface = EGL14.eglCreateWindowSurface(display, configs[0], holder.getSurface(),
                         new int[]{EGL14.EGL_NONE}, 0);
-
                 return EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context);
             }
 
@@ -318,7 +349,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 float[] stMat = new float[16];
 
                 if (isVid) {
-                    // 视频：更新矩阵（持久化）
                     if (updateSurface.getAndSet(false)) {
                         try {
                             videoST.updateTexImage();
@@ -327,7 +357,6 @@ public class TianYinWallpaperService extends WallpaperService {
                     }
                     System.arraycopy(videoSTMatrix, 0, stMat, 0, 16);
                 } else {
-                    // 图片：直接使用预计算矩阵
                     System.arraycopy(imageMatrix, 0, stMat, 0, 16);
                 }
 
