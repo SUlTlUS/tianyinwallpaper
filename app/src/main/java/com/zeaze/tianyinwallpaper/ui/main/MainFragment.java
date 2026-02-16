@@ -158,7 +158,6 @@ public class MainFragment extends BaseFragment {
                                 getActivity().runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
-                                        RxBus.getDefault().post(RxConstants.RX_RESET_WALLPAPER_INDEX, new Object());
                                         WallpaperManager wallpaperManager = WallpaperManager.getInstance(getContext());
                                         try {
                                             wallpaperManager.clear();
