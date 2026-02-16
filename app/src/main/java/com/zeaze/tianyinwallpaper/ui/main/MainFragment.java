@@ -483,7 +483,7 @@ public class MainFragment extends BaseFragment {
         });
 
         CheckBox checkBox4=view.findViewById(R.id.checkBox4);
-        checkBox4.setChecked(pref.getBoolean("wallpaperScroll",false));
+        checkBox4.setChecked(pref.getBoolean("wallpaperScroll",true));
         checkBox4.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {

@@ -34,11 +34,15 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class TianYinWallpaperService extends WallpaperService {
     private final String TAG = "TianYinGL";
     private static final String PREF_NAME = "wallpaper_pref";
     private static final String KEY_INDEX = "current_index";
+    private static final String KEY_WALLPAPER_SCROLL = "wallpaperScroll";
+    private static final String APP_PREF_NAME = App.TIANYIN;
+    private static final float CENTERED_OFFSET = 0.5f;
 
     @Override
     public Engine onCreateEngine() {
@@ -50,16 +54,37 @@ public class TianYinWallpaperService extends WallpaperService {
         private EglThread eglThread;
         private List<TianYinWallpaperModel> list;
         private int index = -1;
-        private float currentXOffset = 0.5f;
+        private final AtomicReference<Float> currentXOffset = new AtomicReference<>(CENTERED_OFFSET);
+        private final AtomicReference<Float> lastKnownXOffset = new AtomicReference<>(CENTERED_OFFSET);
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
         private SharedPreferences preferences;
+        private SharedPreferences appSharedPreferences;
+        private volatile boolean wallpaperScrollEnabled;
+        private volatile boolean destroyed = false;
+        private SharedPreferences.OnSharedPreferenceChangeListener settingsChangeListener;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
             super.onCreate(surfaceHolder);
             surfaceHolder.setFormat(PixelFormat.RGBX_8888);
             preferences = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+            appSharedPreferences = getSharedPreferences(APP_PREF_NAME, MODE_PRIVATE);
             index = preferences.getInt(KEY_INDEX, -1);
+            wallpaperScrollEnabled = appSharedPreferences.getBoolean(KEY_WALLPAPER_SCROLL, true);
+            settingsChangeListener = (sharedPreferences, key) -> {
+                if (destroyed) return;
+                if (KEY_WALLPAPER_SCROLL.equals(key)) {
+                    wallpaperScrollEnabled = sharedPreferences.getBoolean(KEY_WALLPAPER_SCROLL, true);
+                    setOffsetNotificationsEnabled(wallpaperScrollEnabled);
+                    if (!wallpaperScrollEnabled) {
+                        resetToCenteredOffset();
+                    } else if (eglThread != null) {
+                        currentXOffset.set(lastKnownXOffset.get());
+                        eglThread.requestRender();
+                    }
+                }
+            };
+            appSharedPreferences.registerOnSharedPreferenceChangeListener(settingsChangeListener);
 
             try {
                 String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
@@ -76,6 +101,7 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onSurfaceCreated(SurfaceHolder holder) {
             super.onSurfaceCreated(holder);
+            setOffsetNotificationsEnabled(wallpaperScrollEnabled);
             if (eglThread != null) eglThread.finish();
             eglThread = new EglThread(holder);
             eglThread.start();
@@ -115,7 +141,11 @@ public class TianYinWallpaperService extends WallpaperService {
 
         @Override
         public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
-            this.currentXOffset = xOffset;
+            lastKnownXOffset.set(xOffset);
+            if (!wallpaperScrollEnabled) {
+                return;
+            }
+            this.currentXOffset.set(xOffset);
             if (eglThread != null) eglThread.requestRender();
         }
 
@@ -128,6 +158,9 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             super.onDestroy();
+            destroyed = true;
+            appSharedPreferences.unregisterOnSharedPreferenceChangeListener(settingsChangeListener);
+            settingsChangeListener = null;
             if (eglThread != null) {
                 eglThread.finish();
                 eglThread = null;
@@ -341,7 +374,7 @@ public class TianYinWallpaperService extends WallpaperService {
 
                 if (cAsp > sAsp) {
                     float scale = cAsp / sAsp;
-                    float tx = (scale - 1.0f) * (1.0f - currentXOffset * 2.0f);
+                    float tx = (scale - 1.0f) * (1.0f - currentXOffset.get() * 2.0f);
                     Matrix.scaleM(mvp, 0, scale, 1.0f, 1.0f);
                     Matrix.translateM(mvp, 0, tx / scale, 0, 0);
                 } else {
@@ -442,6 +475,13 @@ public class TianYinWallpaperService extends WallpaperService {
                     EGL14.eglDestroyContext(display, context);
                     EGL14.eglTerminate(display);
                 }
+            }
+        }
+
+        private void resetToCenteredOffset() {
+            this.currentXOffset.set(CENTERED_OFFSET);
+            if (eglThread != null) {
+                eglThread.requestRender();
             }
         }
     }
