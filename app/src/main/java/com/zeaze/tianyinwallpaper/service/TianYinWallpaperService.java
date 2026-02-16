@@ -1,11 +1,9 @@
 package com.zeaze.tianyinwallpaper.service;
 
-import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.PixelFormat;
 import android.graphics.SurfaceTexture;
-import android.media.MediaPlayer;
 import android.net.Uri;
 import android.opengl.EGL14;
 import android.opengl.EGLConfig;
@@ -24,7 +22,10 @@ import android.view.Surface;
 import android.view.SurfaceHolder;
 
 import com.alibaba.fastjson.JSON;
-import com.zeaze.tianyinwallpaper.App;
+import com.google.android.exoplayer2.ExoPlayer;
+import com.google.android.exoplayer2.MediaItem;
+import com.google.android.exoplayer2.Player;
+import com.google.android.exoplayer2.video.VideoSize;
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel;
 import com.zeaze.tianyinwallpaper.utils.FileUtil;
 
@@ -44,13 +45,15 @@ public class TianYinWallpaperService extends WallpaperService {
     }
 
     class TianYinSolaEngine extends WallpaperService.Engine implements SurfaceTexture.OnFrameAvailableListener {
-        private MediaPlayer mediaPlayer;
+        // 使用 ExoPlayer 实现无缝循环视频播放
+        private ExoPlayer exoPlayer;
         private EglThread eglThread;
         private List<TianYinWallpaperModel> list;
         private int index = -1;
         private float currentXOffset = 0.5f;
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
-        private final AtomicBoolean skipFirstInvisibleSwitch = new AtomicBoolean(true);
+        // 标记当前加载的是视频还是图片
+        private boolean isVideoContent = false;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
@@ -77,17 +80,37 @@ public class TianYinWallpaperService extends WallpaperService {
         }
 
         @Override
+        public void onSurfaceDestroyed(SurfaceHolder holder) {
+            super.onSurfaceDestroyed(holder);
+            // 释放 ExoPlayer，避免持有无效 Surface
+            releasePlayer();
+            if (eglThread != null) {
+                eglThread.finish();
+                eglThread = null;
+            }
+        }
+
+        @Override
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
             if (visible) {
-                if (mediaPlayer != null) mediaPlayer.start();
+                if (isVideoContent && exoPlayer != null) {
+                    exoPlayer.play();
+                }
                 if (eglThread != null) eglThread.requestRender();
             } else {
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) mediaPlayer.pause();
-                if (skipFirstInvisibleSwitch.getAndSet(false)) {
-                    return;
+                if (exoPlayer != null && exoPlayer.isPlaying()) {
+                    exoPlayer.pause();
                 }
+                // 锁屏时切换壁纸（可选）
                 nextWallpaper();
+            }
+        }
+
+        private void releasePlayer() {
+            if (exoPlayer != null) {
+                exoPlayer.release();
+                exoPlayer = null;
             }
         }
 
@@ -100,33 +123,58 @@ public class TianYinWallpaperService extends WallpaperService {
         private void loadContent() {
             if (index < 0 || index >= list.size()) return;
             TianYinWallpaperModel model = list.get(index);
-            if (model.getType() == 1) prepareVideo(model);
-            else prepareImage(model);
+            if (model.getType() == 1) {
+                isVideoContent = true;
+                prepareVideo(model);
+            } else {
+                isVideoContent = false;
+                prepareImage(model);
+            }
         }
 
+        // 视频准备：使用 ExoPlayer 实现无缝循环
         private void prepareVideo(TianYinWallpaperModel model) {
             try {
-                if (mediaPlayer == null) mediaPlayer = new MediaPlayer();
-                mediaPlayer.reset();
-                mediaPlayer.setDataSource(getApplicationContext(), Uri.parse(model.getVideoUri()));
+                // 释放旧的播放器
+                releasePlayer();
+
                 SurfaceTexture st = eglThread.getVideoST();
                 if (st == null) return;
                 Surface surface = new Surface(st);
-                mediaPlayer.setSurface(surface);
-                surface.release();
-                mediaPlayer.setLooping(model.isLoop());
-                mediaPlayer.setVolume(0, 0);
-                mediaPlayer.setOnPreparedListener(mp -> {
-                    eglThread.setContentSize(mp.getVideoWidth(), mp.getVideoHeight());
-                    mp.start();
+
+                // 创建 ExoPlayer 实例
+                exoPlayer = new ExoPlayer.Builder(getApplicationContext()).build();
+                exoPlayer.setVideoSurface(surface);
+                surface.release(); // 释放 Surface 对象，ExoPlayer 内部会持有引用
+
+                // 设置媒体项并开启无缝循环
+                MediaItem mediaItem = MediaItem.fromUri(Uri.parse(model.getVideoUri()));
+                exoPlayer.setMediaItem(mediaItem);
+                exoPlayer.setRepeatMode(Player.REPEAT_MODE_ONE); // 关键：无缝循环
+                exoPlayer.setVolume(0f); // 静音
+
+                // 添加监听器获取视频尺寸
+                exoPlayer.addListener(new Player.Listener() {
+                    @Override
+                    public void onVideoSizeChanged(VideoSize videoSize) {
+                        eglThread.setContentSize(videoSize.width, videoSize.height);
+                    }
                 });
-                mediaPlayer.prepareAsync();
-                eglThread.resetVideoMatrix(); // 切换视频时重置矩阵
-            } catch (Exception e) { Log.e(TAG, "Video error", e); }
+
+                exoPlayer.prepare();
+                if (isVisible()) {
+                    exoPlayer.play();
+                }
+
+                eglThread.resetVideoMatrix();
+            } catch (Exception e) {
+                Log.e(TAG, "ExoPlayer error", e);
+            }
         }
 
         private void prepareImage(TianYinWallpaperModel model) {
-            if (mediaPlayer != null) mediaPlayer.reset();
+            // 图片不需要 ExoPlayer，释放视频资源
+            releasePlayer();
             try {
                 InputStream is = getApplicationContext().getContentResolver().openInputStream(Uri.parse(model.getImgUri()));
                 Bitmap bitmap = BitmapFactory.decodeStream(is);
@@ -135,7 +183,9 @@ public class TianYinWallpaperService extends WallpaperService {
                     eglThread.setContentSize(bitmap.getWidth(), bitmap.getHeight());
                     eglThread.uploadBitmap(bitmap);
                 }
-            } catch (Exception e) { Log.e(TAG, "Image error", e); }
+            } catch (Exception e) {
+                Log.e(TAG, "Image error", e);
+            }
         }
 
         @Override
@@ -153,11 +203,14 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             super.onDestroy();
-            if (mediaPlayer != null) mediaPlayer.release();
-            if (eglThread != null) eglThread.finish();
+            releasePlayer();
+            if (eglThread != null) {
+                eglThread.finish();
+                eglThread = null;
+            }
         }
 
-        // --- 优化后的 EGL 渲染线程 ---
+        // --- EGL 渲染线程（保持不变）---
         private class EglThread extends HandlerThread {
             private final SurfaceHolder holder;
             private EGLDisplay display = EGL14.EGL_NO_DISPLAY;
@@ -169,9 +222,7 @@ public class TianYinWallpaperService extends WallpaperService {
             private FloatBuffer vBuf, tBuf;
             private int sW, sH, cW = 1, cH = 1;
 
-            // 持久化视频纹理矩阵
             private final float[] videoSTMatrix = new float[16];
-            // 预计算的图片翻转矩阵（避免每帧计算）
             private final float[] imageMatrix = new float[16];
 
             public EglThread(SurfaceHolder holder) {
@@ -184,7 +235,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 tBuf = ByteBuffer.allocateDirect(tData.length*4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(tData);
                 tBuf.position(0);
 
-                // 预计算图片矩阵：先单位阵，然后做 Y 轴翻转
                 Matrix.setIdentityM(imageMatrix, 0);
                 Matrix.translateM(imageMatrix, 0, 0, 1, 0);
                 Matrix.scaleM(imageMatrix, 0, 1, -1, 1);
@@ -277,7 +327,6 @@ public class TianYinWallpaperService extends WallpaperService {
                 float[] stMat = new float[16];
 
                 if (isVid) {
-                    // 视频：使用持久化矩阵，有新帧时更新
                     if (updateSurface.getAndSet(false)) {
                         try {
                             videoST.updateTexImage();
@@ -286,7 +335,6 @@ public class TianYinWallpaperService extends WallpaperService {
                     }
                     System.arraycopy(videoSTMatrix, 0, stMat, 0, 16);
                 } else {
-                    // 图片：直接使用预计算的翻转矩阵（避免每帧矩阵运算）
                     System.arraycopy(imageMatrix, 0, stMat, 0, 16);
                 }
 
