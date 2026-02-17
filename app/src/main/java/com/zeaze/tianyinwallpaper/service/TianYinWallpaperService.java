@@ -140,14 +140,19 @@ public class TianYinWallpaperService extends WallpaperService {
                 scheduleNextAutoSwitch("visible");
                 if (eglThread != null) eglThread.requestRender();
             } else {
-                // 不可见时，暂停播放并切换到下一张壁纸
+                // 不可见时，暂停播放
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) {
                     mediaPlayer.pause();
                 }
-                // Only advance after the first load attempt is handled to avoid starting from the second wallpaper
+                // 仅在手动模式下才在返回桌面/锁屏时切换壁纸
+                // 固定间隔和每日时间点模式依赖定时器和补偿机制
                 if (initialLoadCompleted.get()) {
-                    // Delay switching to avoid conflicting with pause
-                    new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
+                    int mode = pref != null ? pref.getInt(PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE) : AUTO_SWITCH_MODE_NONE;
+                    if (mode == AUTO_SWITCH_MODE_NONE) {
+                        // 手动模式：在不可见时切换到下一张壁纸
+                        new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
+                    }
+                    // 固定间隔模式和每日时间点模式：不在此处切换，由定时器控制
                 }
                 scheduleNextAutoSwitch("invisible");
             }
