@@ -59,6 +59,7 @@ public class MainFragment extends BaseFragment {
     private static final String PREF_AUTO_SWITCH_MODE = TianYinWallpaperService.PREF_AUTO_SWITCH_MODE;
     private static final String PREF_AUTO_SWITCH_INTERVAL_MINUTES = TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_MINUTES;
     private static final String PREF_AUTO_SWITCH_TIME_POINTS = TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS;
+    private static final String DEFAULT_AUTO_SWITCH_TIME_POINTS = "08:00,12:00,18:00";
     private static final int AUTO_SWITCH_MODE_NONE = 0;
     private static final int AUTO_SWITCH_MODE_INTERVAL = 1;
     private static final int AUTO_SWITCH_MODE_DAILY_POINTS = 2;
@@ -531,8 +532,8 @@ public class MainFragment extends BaseFragment {
         if (mode == AUTO_SWITCH_MODE_DAILY_POINTS) modeText = "按每日时间点切换";
         modeView.setText("自动切换模式：" + modeText + "（点击修改）");
         intervalView.setText("自动切换间隔：" + pref.getLong(PREF_AUTO_SWITCH_INTERVAL_MINUTES, 60L) + "分钟（点击修改）");
-        String points = pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, "08:00,12:00,18:00");
-        if (TextUtils.isEmpty(points)) points = "08:00,12:00,18:00";
+        String points = pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, DEFAULT_AUTO_SWITCH_TIME_POINTS);
+        if (TextUtils.isEmpty(points)) points = DEFAULT_AUTO_SWITCH_TIME_POINTS;
         pointsView.setText("自动切换时间点：" + points + "（点击修改）");
     }
 
@@ -562,7 +563,12 @@ public class MainFragment extends BaseFragment {
                 .setNeutralButton("取消", null)
                 .setPositiveButton("确定", (dialog, which) -> {
                     try {
-                        long minutes = Long.parseLong(et.getText().toString().trim());
+                        String raw = et.getText().toString().trim();
+                        if (TextUtils.isEmpty(raw)) {
+                            toast("请输入分钟数");
+                            return;
+                        }
+                        long minutes = Long.parseLong(raw);
                         if (minutes <= 0) {
                             toast("请输入大于0的分钟数");
                             return;
@@ -582,7 +588,7 @@ public class MainFragment extends BaseFragment {
         View view = LayoutInflater.from(getContext()).inflate(R.layout.main_edit, null);
         AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
         final EditText et = view.findViewById(R.id.tv);
-        et.setText(pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, "08:00,12:00,18:00"));
+        et.setText(pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, DEFAULT_AUTO_SWITCH_TIME_POINTS));
         et.setHint("格式：08:00,12:00,18:00");
         builder.setView(view)
                 .setNeutralButton("取消", null)
@@ -595,14 +601,8 @@ public class MainFragment extends BaseFragment {
                     String[] items = value.split(",");
                     for (String item : items) {
                         String t = item.trim();
-                        if (!t.matches("^[0-2]?\\d:[0-5]\\d$")) {
+                        if (!t.matches("^([01]?\\d|2[0-3]):[0-5]\\d$")) {
                             toast("时间格式错误：" + t);
-                            return;
-                        }
-                        String[] hm = t.split(":");
-                        int hour = Integer.parseInt(hm[0]);
-                        if (hour < 0 || hour > 23) {
-                            toast("小时范围应为0-23");
                             return;
                         }
                     }

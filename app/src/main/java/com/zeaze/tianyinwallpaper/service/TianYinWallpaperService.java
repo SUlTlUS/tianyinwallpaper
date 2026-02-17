@@ -171,7 +171,8 @@ public class TianYinWallpaperService extends WallpaperService {
         private void advanceWallpaperBy(int step, boolean persistLastSwitchTime) {
             if (list == null || list.isEmpty() || step <= 0) return;
             synchronized (wallpaperSwitchLock) {
-                index = (index + (step % list.size())) % list.size();
+                int size = list.size();
+                index = ((index + (step % size)) % size + size) % size;
             }
             if (persistLastSwitchTime) {
                 pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, System.currentTimeMillis()).apply();
@@ -386,6 +387,7 @@ public class TianYinWallpaperService extends WallpaperService {
             if (dueCount <= 0) return;
             int step = dueCount % list.size();
             if (step == 0 && dueCount > 0) {
+                // Completed full rotation(s); no visual change is needed, only update time baseline.
                 pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, newLastSwitchAt).apply();
                 return;
             }
@@ -415,9 +417,18 @@ public class TianYinWallpaperService extends WallpaperService {
             );
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()) {
+                    boolean canUseExactAlarm = true;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            canUseExactAlarm = alarmManager.canScheduleExactAlarms();
+                        } catch (SecurityException e) {
+                            canUseExactAlarm = false;
+                        }
+                    }
+                    if (canUseExactAlarm) {
                         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, autoSwitchPendingIntent);
                     } else {
+                        Log.w(TAG, "Exact alarm permission unavailable, fallback to inexact alarm.");
                         alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, autoSwitchPendingIntent);
                     }
                 } else {
@@ -510,11 +521,10 @@ public class TianYinWallpaperService extends WallpaperService {
             List<Integer> points = new ArrayList<>();
             for (String item : items) {
                 String t = item.trim();
-                if (!t.matches("^[0-2]?\\d:[0-5]\\d$")) continue;
+                if (!t.matches("^([01]?\\d|2[0-3]):[0-5]\\d$")) continue;
                 String[] hm = t.split(":");
                 int hour = Integer.parseInt(hm[0]);
                 int minute = Integer.parseInt(hm[1]);
-                if (hour < 0 || hour > 23) continue;
                 points.add(hour * 60 + minute);
             }
             Collections.sort(points);
