@@ -81,7 +81,9 @@ public class TianYinWallpaperService extends WallpaperService {
         private PendingIntent autoSwitchPendingIntent;
         private SharedPreferences.OnSharedPreferenceChangeListener prefChangeListener;
         private BroadcastReceiver stateReceiver;
-        // 缓存的自动切换模式。使用 volatile 保证多线程可见性（只涉及简单的读写操作，不需要原子性）
+        // 缓存的自动切换模式。使用 volatile 保证多线程可见性。
+        // SharedPreferences.OnSharedPreferenceChangeListener 和 onVisibilityChanged 都在主线程调用，
+        // 因此不存在并发问题，volatile 足以保证可见性。
         private volatile int cachedAutoSwitchMode = AUTO_SWITCH_MODE_NONE;
 
         @Override
