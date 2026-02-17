@@ -452,7 +452,7 @@ public class MainFragment extends BaseFragment {
     private void wallpaperSetting(){
         AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
         View view=LayoutInflater.from(getContext()).inflate(R.layout.main_wallpaper_setting, null);
-        CheckBox checkBox=view.findViewById(R.id.checkBox);
+        CompoundButton checkBox=view.findViewById(R.id.checkBox);
         checkBox.setChecked(pref.getBoolean("rand",false));
         checkBox.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
@@ -462,7 +462,7 @@ public class MainFragment extends BaseFragment {
             }
         });
 
-        CheckBox checkBox2=view.findViewById(R.id.checkBox2);
+        CompoundButton checkBox2=view.findViewById(R.id.checkBox2);
         checkBox2.setChecked(pref.getBoolean("pageChange",false));
         checkBox2.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
@@ -472,7 +472,7 @@ public class MainFragment extends BaseFragment {
             }
         });
 
-        CheckBox checkBox3=view.findViewById(R.id.checkBox3);
+        CompoundButton checkBox3=view.findViewById(R.id.checkBox3);
         checkBox3.setChecked(pref.getBoolean("needBackgroundPlay",false));
         checkBox3.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
