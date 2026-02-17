@@ -54,6 +54,10 @@
                 android:name="android.service.wallpaper"
                 android:resource="@xml/tianyin_wallpaper" />
         </service>
+        <receiver
+            android:name=".service.AutoSwitchAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
     </application>
 

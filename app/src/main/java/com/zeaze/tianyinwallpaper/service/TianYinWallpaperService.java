@@ -1,5 +1,11 @@
 package com.zeaze.tianyinwallpaper.service;
 
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -16,6 +22,7 @@ import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.service.wallpaper.WallpaperService;
@@ -32,11 +39,24 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TianYinWallpaperService extends WallpaperService {
     private final String TAG = "TianYinGL";
+    public static final String PREF_AUTO_SWITCH_MODE = "autoSwitchMode";
+    public static final String PREF_AUTO_SWITCH_INTERVAL_MINUTES = "autoSwitchIntervalMinutes";
+    public static final String PREF_AUTO_SWITCH_TIME_POINTS = "autoSwitchTimePoints";
+    public static final String PREF_AUTO_SWITCH_LAST_SWITCH_AT = "autoSwitchLastSwitchAt";
+    public static final String PREF_AUTO_SWITCH_ANCHOR_AT = "autoSwitchAnchorAt";
+    public static final String ACTION_AUTO_SWITCH_ALARM = "com.zeaze.tianyinwallpaper.AUTO_SWITCH_ALARM";
+    public static final String ACTION_AUTO_SWITCH_ALARM_FIRED = "com.zeaze.tianyinwallpaper.AUTO_SWITCH_ALARM_FIRED";
+    private static final int AUTO_SWITCH_MODE_NONE = 0;
+    private static final int AUTO_SWITCH_MODE_INTERVAL = 1;
+    private static final int AUTO_SWITCH_MODE_DAILY_POINTS = 2;
 
     @Override
     public Engine onCreateEngine() {
@@ -47,15 +67,20 @@ public class TianYinWallpaperService extends WallpaperService {
         private MediaPlayer mediaPlayer;
         private EglThread eglThread;
         private List<TianYinWallpaperModel> list;
-        private int index = -1;
+        private volatile int index = -1;
         private float currentXOffset = 0.5f;
         private final AtomicBoolean initialLoadCompleted = new AtomicBoolean(false);
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
+        private final Object wallpaperSwitchLock = new Object();
         private boolean isMediaPlayerPrepared = false; // 新增：标记 MediaPlayer 是否已准备
 
         // 滚动开关相关
         private SharedPreferences pref;
         private boolean wallpaperScrollEnabled = true;
+        private AlarmManager alarmManager;
+        private PendingIntent autoSwitchPendingIntent;
+        private SharedPreferences.OnSharedPreferenceChangeListener prefChangeListener;
+        private BroadcastReceiver stateReceiver;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
@@ -63,13 +88,24 @@ public class TianYinWallpaperService extends WallpaperService {
             surfaceHolder.setFormat(PixelFormat.RGBX_8888);
 
             pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE);
+            alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             wallpaperScrollEnabled = pref.getBoolean("wallpaperScroll", true);
-            pref.registerOnSharedPreferenceChangeListener((sharedPreferences, key) -> {
+            prefChangeListener = (sharedPreferences, key) -> {
                 if ("wallpaperScroll".equals(key)) {
                     wallpaperScrollEnabled = sharedPreferences.getBoolean(key, true);
                     if (eglThread != null) eglThread.requestRender();
                 }
-            });
+                if (PREF_AUTO_SWITCH_MODE.equals(key) || PREF_AUTO_SWITCH_INTERVAL_MINUTES.equals(key) || PREF_AUTO_SWITCH_TIME_POINTS.equals(key)) {
+                    ensureAutoSwitchAnchor();
+                    scheduleNextAutoSwitch("pref_changed");
+                    maybeAdvanceWallpaperIfDue("pref_changed");
+                }
+            };
+            pref.registerOnSharedPreferenceChangeListener(prefChangeListener);
+            registerStateReceiver();
+            ensureAutoSwitchAnchor();
+            scheduleNextAutoSwitch("engine_create");
+            maybeAdvanceWallpaperIfDue("engine_create");
 
             try {
                 String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
@@ -100,6 +136,8 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (mediaPlayer != null && isMediaPlayerPrepared && !mediaPlayer.isPlaying()) {
                     mediaPlayer.start();
                 }
+                maybeAdvanceWallpaperIfDue("visible");
+                scheduleNextAutoSwitch("visible");
                 if (eglThread != null) eglThread.requestRender();
             } else {
                 // 不可见时，暂停播放并切换到下一张壁纸
@@ -111,6 +149,7 @@ public class TianYinWallpaperService extends WallpaperService {
                     // Delay switching to avoid conflicting with pause
                     new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
                 }
+                scheduleNextAutoSwitch("invisible");
             }
         }
 
@@ -126,8 +165,17 @@ public class TianYinWallpaperService extends WallpaperService {
         }
 
         private void nextWallpaper() {
-            if (list == null || list.isEmpty()) return;
-            index = (index + 1) % list.size();
+            advanceWallpaperBy(1, true);
+        }
+
+        private void advanceWallpaperBy(int step, boolean persistLastSwitchTime) {
+            if (list == null || list.isEmpty() || step <= 0) return;
+            synchronized (wallpaperSwitchLock) {
+                index = (index + (step % list.size())) % list.size();
+            }
+            if (persistLastSwitchTime) {
+                pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, System.currentTimeMillis()).apply();
+            }
             // 确保在 EGL 线程中加载内容
             if (eglThread != null) eglThread.postRunnable(this::loadContent);
         }
@@ -261,11 +309,224 @@ public class TianYinWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             super.onDestroy();
+            cancelAutoSwitchAlarm();
+            if (stateReceiver != null) {
+                try {
+                    unregisterReceiver(stateReceiver);
+                } catch (Exception ignored) {}
+                stateReceiver = null;
+            }
+            if (pref != null && prefChangeListener != null) {
+                pref.unregisterOnSharedPreferenceChangeListener(prefChangeListener);
+                prefChangeListener = null;
+            }
             if (mediaPlayer != null) {
                 mediaPlayer.release();
                 mediaPlayer = null;
             }
             if (eglThread != null) eglThread.finish();
+        }
+
+        private void registerStateReceiver() {
+            stateReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (intent == null || intent.getAction() == null) return;
+                    String action = intent.getAction();
+                    if (Intent.ACTION_SCREEN_ON.equals(action) || Intent.ACTION_USER_PRESENT.equals(action) || ACTION_AUTO_SWITCH_ALARM_FIRED.equals(action)) {
+                        maybeAdvanceWallpaperIfDue(action);
+                        scheduleNextAutoSwitch(action);
+                    }
+                }
+            };
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(Intent.ACTION_SCREEN_ON);
+            filter.addAction(Intent.ACTION_USER_PRESENT);
+            filter.addAction(ACTION_AUTO_SWITCH_ALARM_FIRED);
+            registerReceiver(stateReceiver, filter);
+        }
+
+        private void ensureAutoSwitchAnchor() {
+            if (pref == null) return;
+            int mode = pref.getInt(PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE);
+            if (mode == AUTO_SWITCH_MODE_NONE) return;
+            long anchorAt = pref.getLong(PREF_AUTO_SWITCH_ANCHOR_AT, 0L);
+            if (anchorAt <= 0L) {
+                pref.edit().putLong(PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis()).apply();
+            }
+        }
+
+        private void maybeAdvanceWallpaperIfDue(String reason) {
+            if (pref == null || list == null || list.isEmpty()) return;
+            int mode = pref.getInt(PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE);
+            if (mode == AUTO_SWITCH_MODE_NONE) return;
+            long now = System.currentTimeMillis();
+            long lastSwitchAt = pref.getLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L);
+            long anchorAt = pref.getLong(PREF_AUTO_SWITCH_ANCHOR_AT, now);
+            if (anchorAt <= 0L) anchorAt = now;
+
+            int dueCount = 0;
+            long newLastSwitchAt = lastSwitchAt;
+            if (mode == AUTO_SWITCH_MODE_INTERVAL) {
+                long intervalMs = Math.max(1L, pref.getLong(PREF_AUTO_SWITCH_INTERVAL_MINUTES, 60L)) * 60_000L;
+                long baseAt = lastSwitchAt > 0L ? lastSwitchAt : anchorAt;
+                if (now > baseAt) {
+                    dueCount = (int) ((now - baseAt) / intervalMs);
+                    newLastSwitchAt = baseAt + (dueCount * intervalMs);
+                }
+            } else if (mode == AUTO_SWITCH_MODE_DAILY_POINTS) {
+                List<Integer> points = parseTimePointsToMinutes(pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, ""));
+                long from = lastSwitchAt > 0L ? lastSwitchAt : anchorAt;
+                dueCount = countDailyTriggers(from, now, points);
+                if (dueCount > 0) {
+                    newLastSwitchAt = now;
+                }
+            }
+
+            if (dueCount <= 0) return;
+            int step = dueCount % list.size();
+            if (step == 0 && dueCount > 0) {
+                pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, newLastSwitchAt).apply();
+                return;
+            }
+            Log.d(TAG, "Auto switch due count=" + dueCount + ", reason=" + reason);
+            advanceWallpaperBy(step, false);
+            pref.edit()
+                    .putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, newLastSwitchAt)
+                    .apply();
+        }
+
+        private void scheduleNextAutoSwitch(String reason) {
+            if (pref == null || alarmManager == null) return;
+            cancelAutoSwitchAlarm();
+            int mode = pref.getInt(PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE);
+            if (mode == AUTO_SWITCH_MODE_NONE) return;
+            long now = System.currentTimeMillis();
+            long triggerAt = computeNextTriggerAt(now, mode);
+            if (triggerAt <= now) return;
+
+            Intent intent = new Intent(getApplicationContext(), AutoSwitchAlarmReceiver.class);
+            intent.setAction(ACTION_AUTO_SWITCH_ALARM);
+            autoSwitchPendingIntent = PendingIntent.getBroadcast(
+                    getApplicationContext(),
+                    1001,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()) {
+                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, autoSwitchPendingIntent);
+                    } else {
+                        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, autoSwitchPendingIntent);
+                    }
+                } else {
+                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, autoSwitchPendingIntent);
+                }
+                Log.d(TAG, "scheduleNextAutoSwitch(" + reason + "), triggerAt=" + triggerAt);
+            } catch (SecurityException e) {
+                Log.w(TAG, "Exact alarm unavailable, fallback to set()", e);
+                alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAt, autoSwitchPendingIntent);
+            }
+        }
+
+        private long computeNextTriggerAt(long now, int mode) {
+            long lastSwitchAt = pref.getLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L);
+            long anchorAt = pref.getLong(PREF_AUTO_SWITCH_ANCHOR_AT, now);
+            if (anchorAt <= 0L) anchorAt = now;
+
+            if (mode == AUTO_SWITCH_MODE_INTERVAL) {
+                long intervalMs = Math.max(1L, pref.getLong(PREF_AUTO_SWITCH_INTERVAL_MINUTES, 60L)) * 60_000L;
+                long baseAt = lastSwitchAt > 0L ? lastSwitchAt : anchorAt;
+                long next = baseAt + intervalMs;
+                while (next <= now) next += intervalMs;
+                return next;
+            }
+            if (mode == AUTO_SWITCH_MODE_DAILY_POINTS) {
+                List<Integer> points = parseTimePointsToMinutes(pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, ""));
+                if (points.isEmpty()) return -1L;
+                Calendar calendar = Calendar.getInstance();
+                calendar.setTimeInMillis(now);
+                int nowMinute = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE);
+                for (int minute : points) {
+                    if (minute > nowMinute) {
+                        Calendar target = Calendar.getInstance();
+                        target.setTimeInMillis(now);
+                        target.set(Calendar.HOUR_OF_DAY, minute / 60);
+                        target.set(Calendar.MINUTE, minute % 60);
+                        target.set(Calendar.SECOND, 0);
+                        target.set(Calendar.MILLISECOND, 0);
+                        return target.getTimeInMillis();
+                    }
+                }
+                Calendar tomorrow = Calendar.getInstance();
+                tomorrow.setTimeInMillis(now);
+                tomorrow.add(Calendar.DAY_OF_YEAR, 1);
+                tomorrow.set(Calendar.HOUR_OF_DAY, points.get(0) / 60);
+                tomorrow.set(Calendar.MINUTE, points.get(0) % 60);
+                tomorrow.set(Calendar.SECOND, 0);
+                tomorrow.set(Calendar.MILLISECOND, 0);
+                return tomorrow.getTimeInMillis();
+            }
+            return -1L;
+        }
+
+        private int countDailyTriggers(long fromExclusive, long toInclusive, List<Integer> points) {
+            if (points == null || points.isEmpty() || toInclusive <= fromExclusive) return 0;
+            Calendar startDay = Calendar.getInstance();
+            startDay.setTimeInMillis(fromExclusive);
+            startDay.set(Calendar.HOUR_OF_DAY, 0);
+            startDay.set(Calendar.MINUTE, 0);
+            startDay.set(Calendar.SECOND, 0);
+            startDay.set(Calendar.MILLISECOND, 0);
+
+            Calendar endDay = Calendar.getInstance();
+            endDay.setTimeInMillis(toInclusive);
+            endDay.set(Calendar.HOUR_OF_DAY, 0);
+            endDay.set(Calendar.MINUTE, 0);
+            endDay.set(Calendar.SECOND, 0);
+            endDay.set(Calendar.MILLISECOND, 0);
+
+            int count = 0;
+            Calendar cursor = (Calendar) startDay.clone();
+            while (!cursor.after(endDay)) {
+                for (int minute : points) {
+                    Calendar trigger = (Calendar) cursor.clone();
+                    trigger.set(Calendar.HOUR_OF_DAY, minute / 60);
+                    trigger.set(Calendar.MINUTE, minute % 60);
+                    long triggerAt = trigger.getTimeInMillis();
+                    if (triggerAt > fromExclusive && triggerAt <= toInclusive) {
+                        count++;
+                    }
+                }
+                cursor.add(Calendar.DAY_OF_YEAR, 1);
+            }
+            return count;
+        }
+
+        private List<Integer> parseTimePointsToMinutes(String pointsRaw) {
+            if (pointsRaw == null || pointsRaw.trim().isEmpty()) return Collections.emptyList();
+            String[] items = pointsRaw.split(",");
+            List<Integer> points = new ArrayList<>();
+            for (String item : items) {
+                String t = item.trim();
+                if (!t.matches("^[0-2]?\\d:[0-5]\\d$")) continue;
+                String[] hm = t.split(":");
+                int hour = Integer.parseInt(hm[0]);
+                int minute = Integer.parseInt(hm[1]);
+                if (hour < 0 || hour > 23) continue;
+                points.add(hour * 60 + minute);
+            }
+            Collections.sort(points);
+            return points;
+        }
+
+        private void cancelAutoSwitchAlarm() {
+            if (alarmManager != null && autoSwitchPendingIntent != null) {
+                alarmManager.cancel(autoSwitchPendingIntent);
+                autoSwitchPendingIntent.cancel();
+                autoSwitchPendingIntent = null;
+            }
         }
 
         // --- EGL 渲染线程（保持不变，与上一版相同）---

@@ -11,6 +11,7 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -55,6 +56,12 @@ import java.util.UUID;
 import io.reactivex.functions.Consumer;
 
 public class MainFragment extends BaseFragment {
+    private static final String PREF_AUTO_SWITCH_MODE = TianYinWallpaperService.PREF_AUTO_SWITCH_MODE;
+    private static final String PREF_AUTO_SWITCH_INTERVAL_MINUTES = TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_MINUTES;
+    private static final String PREF_AUTO_SWITCH_TIME_POINTS = TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS;
+    private static final int AUTO_SWITCH_MODE_NONE = 0;
+    private static final int AUTO_SWITCH_MODE_INTERVAL = 1;
+    private static final int AUTO_SWITCH_MODE_DAILY_POINTS = 2;
     private RecyclerView rv;
     private GridLayoutManager manager;
     private WallpaperAdapter wallpaperAdapter;
@@ -507,7 +514,104 @@ public class MainFragment extends BaseFragment {
         });
         builder.setView(view);
         alertDialog=builder.create();
+        TextView tvAutoSwitchMode = view.findViewById(R.id.tvAutoSwitchMode);
+        TextView tvAutoSwitchInterval = view.findViewById(R.id.tvAutoSwitchInterval);
+        TextView tvAutoSwitchPoints = view.findViewById(R.id.tvAutoSwitchPoints);
+        refreshAutoSwitchSettingView(tvAutoSwitchMode, tvAutoSwitchInterval, tvAutoSwitchPoints);
+        tvAutoSwitchMode.setOnClickListener(v -> showAutoSwitchModeDialog(() -> refreshAutoSwitchSettingView(tvAutoSwitchMode, tvAutoSwitchInterval, tvAutoSwitchPoints)));
+        tvAutoSwitchInterval.setOnClickListener(v -> setAutoSwitchInterval(() -> refreshAutoSwitchSettingView(tvAutoSwitchMode, tvAutoSwitchInterval, tvAutoSwitchPoints)));
+        tvAutoSwitchPoints.setOnClickListener(v -> setAutoSwitchPoints(() -> refreshAutoSwitchSettingView(tvAutoSwitchMode, tvAutoSwitchInterval, tvAutoSwitchPoints)));
         alertDialog.show();
+    }
+
+    private void refreshAutoSwitchSettingView(TextView modeView, TextView intervalView, TextView pointsView) {
+        int mode = pref.getInt(PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE);
+        String modeText = "手动切换";
+        if (mode == AUTO_SWITCH_MODE_INTERVAL) modeText = "按固定时间间隔切换";
+        if (mode == AUTO_SWITCH_MODE_DAILY_POINTS) modeText = "按每日时间点切换";
+        modeView.setText("自动切换模式：" + modeText + "（点击修改）");
+        intervalView.setText("自动切换间隔：" + pref.getLong(PREF_AUTO_SWITCH_INTERVAL_MINUTES, 60L) + "分钟（点击修改）");
+        String points = pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, "08:00,12:00,18:00");
+        if (TextUtils.isEmpty(points)) points = "08:00,12:00,18:00";
+        pointsView.setText("自动切换时间点：" + points + "（点击修改）");
+    }
+
+    private void showAutoSwitchModeDialog(Runnable onDismiss) {
+        String[] modeItems = new String[]{"手动切换", "按固定时间间隔切换", "按每日时间点切换"};
+        int checked = pref.getInt(PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE);
+        new AlertDialog.Builder(getContext())
+                .setTitle("选择自动切换模式")
+                .setSingleChoiceItems(modeItems, checked, (dialog, which) -> {
+                    editor.putInt(PREF_AUTO_SWITCH_MODE, which);
+                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis());
+                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L);
+                    editor.apply();
+                    dialog.dismiss();
+                })
+                .setOnDismissListener(dialog -> onDismiss.run())
+                .show();
+    }
+
+    private void setAutoSwitchInterval(Runnable onDismiss) {
+        View view = LayoutInflater.from(getContext()).inflate(R.layout.main_edit, null);
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        final EditText et = view.findViewById(R.id.tv);
+        et.setText(String.valueOf(pref.getLong(PREF_AUTO_SWITCH_INTERVAL_MINUTES, 60L)));
+        et.setHint("请输入分钟数");
+        builder.setView(view)
+                .setNeutralButton("取消", null)
+                .setPositiveButton("确定", (dialog, which) -> {
+                    try {
+                        long minutes = Long.parseLong(et.getText().toString().trim());
+                        if (minutes <= 0) {
+                            toast("请输入大于0的分钟数");
+                            return;
+                        }
+                        editor.putLong(PREF_AUTO_SWITCH_INTERVAL_MINUTES, minutes);
+                        editor.apply();
+                    } catch (Exception e) {
+                        toast("请输入整数分钟");
+                    }
+                })
+                .setCancelable(false)
+                .setOnDismissListener(dialogInterface -> onDismiss.run())
+                .show();
+    }
+
+    private void setAutoSwitchPoints(Runnable onDismiss) {
+        View view = LayoutInflater.from(getContext()).inflate(R.layout.main_edit, null);
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        final EditText et = view.findViewById(R.id.tv);
+        et.setText(pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, "08:00,12:00,18:00"));
+        et.setHint("格式：08:00,12:00,18:00");
+        builder.setView(view)
+                .setNeutralButton("取消", null)
+                .setPositiveButton("确定", (dialog, which) -> {
+                    String value = et.getText().toString().trim();
+                    if (TextUtils.isEmpty(value)) {
+                        toast("请输入至少一个时间点");
+                        return;
+                    }
+                    String[] items = value.split(",");
+                    for (String item : items) {
+                        String t = item.trim();
+                        if (!t.matches("^[0-2]?\\d:[0-5]\\d$")) {
+                            toast("时间格式错误：" + t);
+                            return;
+                        }
+                        String[] hm = t.split(":");
+                        int hour = Integer.parseInt(hm[0]);
+                        if (hour < 0 || hour > 23) {
+                            toast("小时范围应为0-23");
+                            return;
+                        }
+                    }
+                    editor.putString(PREF_AUTO_SWITCH_TIME_POINTS, value);
+                    editor.apply();
+                })
+                .setCancelable(false)
+                .setOnDismissListener(dialogInterface -> onDismiss.run())
+                .show();
     }
 
     private void setMinTime(DialogInterface.OnDismissListener onDismissListener){
