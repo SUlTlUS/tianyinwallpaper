@@ -17,7 +17,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:layout_gravity="center"
-        android:buttonTint="@color/checkColor"
+        android:buttonTint="?attr/colorControlNormal"
         android:text="将顺序切换修改为随机切换"
         android:textColor="@color/textColor"/>
 
@@ -27,7 +27,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:layout_gravity="center"
-        android:buttonTint="@color/checkColor"
+        android:buttonTint="?attr/colorControlNormal"
         android:text="滑动桌面后是否切换"
         android:textColor="@color/textColor"/>
 
@@ -37,7 +37,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:layout_gravity="center"
-        android:buttonTint="@color/checkColor"
+        android:buttonTint="?attr/colorControlNormal"
         android:text="只有一张壁纸时是否假装后台播放"
         android:textColor="@color/textColor"/>
 
@@ -47,7 +47,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:layout_gravity="center"
-        android:buttonTint="@color/checkColor"
+        android:buttonTint="?attr/colorControlNormal"
         android:text="宽度超过屏幕的壁纸跟随滑动滚动"
         android:textColor="@color/textColor"/>
 
