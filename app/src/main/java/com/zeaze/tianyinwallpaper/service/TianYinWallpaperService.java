@@ -159,8 +159,22 @@ public class TianYinWallpaperService extends WallpaperService {
                 mediaPlayer.setSurface(surface);
                 surface.release();
 
-                mediaPlayer.setLooping(model.isLoop());
                 mediaPlayer.setVolume(0, 0);
+
+                if (model.isLoop()) {
+                    mediaPlayer.setOnCompletionListener(mp -> {
+                        mp.seekTo(0);
+                        mp.setOnSeekCompleteListener(mp2 -> {
+                            if (isVisible()) {
+                                mp2.start();
+                            }
+                        });
+                    });
+                } else {
+                    mediaPlayer.setOnCompletionListener(mp ->
+                            new Handler(getMainLooper()).post(() -> nextWallpaper())
+                    );
+                }
 
                 // 添加错误监听器
                 mediaPlayer.setOnErrorListener((mp, what, extra) -> {
@@ -367,7 +381,9 @@ public class TianYinWallpaperService extends WallpaperService {
                         try {
                             videoST.updateTexImage();
                             videoST.getTransformMatrix(videoSTMatrix);
-                        } catch (Exception ignored) {}
+                        } catch (Exception e) {
+                            Log.w(TAG, "updateTexImage failed, using old frame", e);
+                        }
                     }
                     System.arraycopy(videoSTMatrix, 0, stMat, 0, 16);
                 } else {
