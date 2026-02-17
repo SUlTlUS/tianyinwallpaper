@@ -8,17 +8,17 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <color name="textColor">#99000000</color>
-    <color name="checkColor">#70000000</color>
+    <color name="textColor">#B0000000</color>
+    <color name="checkColor">#80000000</color>
 
     <color name="drawerRed">#FF4040</color>
     <color name="drawerBackground">#f6f6f6</color>
     <color name="drawerWhite">#A6ffffff</color>
 
     <color name="imgWhite">#f6f6f6</color>
-    <color name="background">#FF4040</color>
-    <color name="textWhite">#ffffff</color>
-    <color name="textStroke">#efeded</color>
+    <color name="background">#CCEEF1F7</color>
+    <color name="textWhite">#CCFFFFFF</color>
+    <color name="textStroke">#66FFFFFF</color>
     <color name="sharedBackground">#f6f6f6</color>
 
     <color name="alphaSharedBackground">#b3f6f6f6</color>

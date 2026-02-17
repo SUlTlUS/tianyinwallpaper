@@ -29,14 +29,18 @@
                 android:layout_width="0dp"
                 android:layout_height="35dp"
                 android:layout_gravity="bottom"
+                android:layout_marginStart="12dp"
+                android:layout_marginEnd="12dp"
                 android:layout_marginBottom="4dp"
                 android:layout_weight="1"
+                android:background="@drawable/edit_background"
                 app:elevation="0dp"
-                app:tabIndicatorColor="#FFFFFF"
+                app:tabIndicatorColor="@android:color/transparent"
                 app:tabIndicatorFullWidth="false"
                 app:tabMode="scrollable"
                 app:tabGravity="center"
-                app:tabTextColor="#FFFFFF" />
+                app:tabTextColor="@color/checkColor"
+                app:tabSelectedTextColor="@android:color/black" />
 
         </LinearLayout>
 
