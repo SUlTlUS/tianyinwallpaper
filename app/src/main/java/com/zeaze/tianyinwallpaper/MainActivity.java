@@ -55,7 +55,7 @@ public class MainActivity extends BaseActivity  {
         viewPager=findViewById(R.id.view_pager);
         linearLayout=findViewById(R.id.linearLayout);
 
-        linearLayout.setBackgroundResource(R.color.background);
+        linearLayout.setBackgroundResource(R.color.md3_surface_variant);
         titles=new ArrayList<>();
         fragments=new ArrayList<>();
         titles.add("壁纸");

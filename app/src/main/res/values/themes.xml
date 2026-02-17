@@ -1,6 +1,10 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
-    <style name="Theme.TianYinWallpaper" parent="Theme.AppCompat.Light.DarkActionBar">
-
+    <style name="Theme.TianYinWallpaper" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/md3_primary</item>
+        <item name="colorSecondary">@color/md3_primary</item>
+        <item name="colorSurface">@color/md3_surface</item>
+        <item name="colorOnSurface">@color/md3_on_surface</item>
+        <item name="android:windowBackground">@color/md3_surface_variant</item>
     </style>
 </resources>

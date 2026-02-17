@@ -21,22 +21,25 @@
             android:id="@+id/linearLayout"
             android:layout_width="match_parent"
             android:layout_height="65dp"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="12dp">
 
             <com.google.android.material.tabs.TabLayout
-                android:textColor="@color/textColor"
                 android:id="@+id/tab_layout"
                 android:layout_width="0dp"
-                android:layout_height="35dp"
+                android:layout_height="40dp"
                 android:layout_gravity="bottom"
                 android:layout_marginBottom="4dp"
                 android:layout_weight="1"
+                android:background="@drawable/edit_background"
                 app:elevation="0dp"
-                app:tabIndicatorColor="#FFFFFF"
+                app:tabIndicatorColor="@color/md3_primary"
                 app:tabIndicatorFullWidth="false"
                 app:tabMode="scrollable"
                 app:tabGravity="center"
-                app:tabTextColor="#FFFFFF" />
+                app:tabSelectedTextColor="@color/md3_primary"
+                app:tabTextColor="@color/md3_on_surface" />
 
         </LinearLayout>
 

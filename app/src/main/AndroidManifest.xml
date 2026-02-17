@@ -18,7 +18,7 @@
         android:supportsRtl="true"
         android:requestLegacyExternalStorage="true"
         android:name=".App"
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        android:theme="@style/Theme.TianYinWallpaper">
 
         <meta-data
             android:name="PGYER_API_KEY"
