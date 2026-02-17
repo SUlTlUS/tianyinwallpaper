@@ -81,6 +81,10 @@ public class TianYinWallpaperService extends WallpaperService {
         private PendingIntent autoSwitchPendingIntent;
         private SharedPreferences.OnSharedPreferenceChangeListener prefChangeListener;
         private BroadcastReceiver stateReceiver;
+        // 缓存的自动切换模式。使用 volatile 保证多线程可见性。
+        // SharedPreferences.OnSharedPreferenceChangeListener 和 onVisibilityChanged 都在主线程调用，
+        // 因此不存在并发问题，volatile 足以保证可见性。
+        private volatile int cachedAutoSwitchMode = AUTO_SWITCH_MODE_NONE;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
@@ -90,12 +94,15 @@ public class TianYinWallpaperService extends WallpaperService {
             pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE);
             alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             wallpaperScrollEnabled = pref.getBoolean("wallpaperScroll", true);
+            cachedAutoSwitchMode = pref.getInt(PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE);
             prefChangeListener = (sharedPreferences, key) -> {
                 if ("wallpaperScroll".equals(key)) {
                     wallpaperScrollEnabled = sharedPreferences.getBoolean(key, true);
                     if (eglThread != null) eglThread.requestRender();
-                }
-                if (PREF_AUTO_SWITCH_MODE.equals(key) || PREF_AUTO_SWITCH_INTERVAL_MINUTES.equals(key) || PREF_AUTO_SWITCH_TIME_POINTS.equals(key)) {
+                } else if (PREF_AUTO_SWITCH_MODE.equals(key) || PREF_AUTO_SWITCH_INTERVAL_MINUTES.equals(key) || PREF_AUTO_SWITCH_TIME_POINTS.equals(key)) {
+                    if (PREF_AUTO_SWITCH_MODE.equals(key)) {
+                        cachedAutoSwitchMode = sharedPreferences.getInt(key, AUTO_SWITCH_MODE_NONE);
+                    }
                     ensureAutoSwitchAnchor();
                     scheduleNextAutoSwitch("pref_changed");
                     maybeAdvanceWallpaperIfDue("pref_changed");
@@ -140,13 +147,13 @@ public class TianYinWallpaperService extends WallpaperService {
                 scheduleNextAutoSwitch("visible");
                 if (eglThread != null) eglThread.requestRender();
             } else {
-                // 不可见时，暂停播放并切换到下一张壁纸
+                // 不可见时，暂停播放
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) {
                     mediaPlayer.pause();
                 }
-                // Only advance after the first load attempt is handled to avoid starting from the second wallpaper
-                if (initialLoadCompleted.get()) {
-                    // Delay switching to avoid conflicting with pause
+                // 仅在手动模式下才在返回桌面/锁屏时切换壁纸
+                // 固定间隔和每日时间点模式依赖定时器和补偿机制
+                if (initialLoadCompleted.get() && cachedAutoSwitchMode == AUTO_SWITCH_MODE_NONE) {
                     new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
                 }
                 scheduleNextAutoSwitch("invisible");
