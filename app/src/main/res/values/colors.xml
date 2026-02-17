@@ -36,6 +36,7 @@
     <color name="rankYellow">#DAA520</color>
 
     <color name="md3_primary">#6750A4</color>
+    <color name="md3_secondary">#625B71</color>
     <color name="md3_surface">#FFFFFFFF</color>
     <color name="md3_surface_variant">#FFF8F5FF</color>
     <color name="md3_on_surface">#FF1D1B20</color>

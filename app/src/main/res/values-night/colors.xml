@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="md3_primary">#FFD0BCFF</color>
     <color name="md3_surface">#FF1D1B20</color>
     <color name="md3_surface_variant">#FF141218</color>
     <color name="md3_on_surface">#FFE6E1E5</color>
+    <color name="md3_secondary">#FFCCC2DC</color>
     <color name="md3_outline">#FF49454F</color>
 </resources>
