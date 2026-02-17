@@ -152,10 +152,8 @@ public class TianYinWallpaperService extends WallpaperService {
                 // 仅在手动模式下才在返回桌面/锁屏时切换壁纸
                 // 固定间隔和每日时间点模式依赖定时器和补偿机制
                 if (initialLoadCompleted.get() && cachedAutoSwitchMode == AUTO_SWITCH_MODE_NONE) {
-                    // 手动模式：在不可见时切换到下一张壁纸
                     new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
                 }
-                // 固定间隔模式和每日时间点模式：不在此处切换，由定时器控制
                 scheduleNextAutoSwitch("invisible");
             }
         }
