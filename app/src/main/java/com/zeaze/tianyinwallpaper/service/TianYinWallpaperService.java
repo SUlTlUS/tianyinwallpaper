@@ -149,7 +149,8 @@ public class TianYinWallpaperService extends WallpaperService {
                     // Delay switching to avoid conflicting with pause
                     new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
                 }
-                scheduleNextAutoSwitch("invisible");
+                // 不可见时取消自动切换定时任务，避免在后台浪费资源
+                cancelAutoSwitchAlarm();
             }
         }
 
