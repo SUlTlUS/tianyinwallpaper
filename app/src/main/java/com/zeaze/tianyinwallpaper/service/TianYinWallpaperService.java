@@ -49,6 +49,7 @@ public class TianYinWallpaperService extends WallpaperService {
         private List<TianYinWallpaperModel> list;
         private int index = -1;
         private float currentXOffset = 0.5f;
+        private final AtomicBoolean initialLoadCompleted = new AtomicBoolean(false);
         private final AtomicBoolean updateSurface = new AtomicBoolean(false);
         private boolean isMediaPlayerPrepared = false; // 新增：标记 MediaPlayer 是否已准备
 
@@ -74,6 +75,7 @@ public class TianYinWallpaperService extends WallpaperService {
                 String s = FileUtil.loadData(getApplicationContext(), FileUtil.wallpaperPath);
                 list = JSON.parseArray(s, TianYinWallpaperModel.class);
             } catch (Exception ignored) {}
+            initialLoadCompleted.set(false);
         }
 
         @Override
@@ -104,8 +106,11 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (mediaPlayer != null && mediaPlayer.isPlaying()) {
                     mediaPlayer.pause();
                 }
-                // 延迟切换，避免与 pause 冲突
-                new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
+                // Only advance after the first load attempt is handled to avoid starting from the second wallpaper
+                if (initialLoadCompleted.get()) {
+                    // Delay switching to avoid conflicting with pause
+                    new Handler(getMainLooper()).postDelayed(() -> nextWallpaper(), 100);
+                }
             }
         }
 
@@ -187,12 +192,14 @@ public class TianYinWallpaperService extends WallpaperService {
                     if (isVisible()) {
                         mp.start();
                     }
+                    markInitialLoadComplete();
                 });
                 mediaPlayer.prepareAsync();
                 eglThread.resetVideoMatrix(); // 切换视频时重置矩阵
             } catch (Exception e) {
                 Log.e(TAG, "Video error", e);
                 // 加载失败则尝试下一张
+                markInitialLoadComplete();
                 new Handler(getMainLooper()).post(() -> nextWallpaper());
             }
         }
@@ -209,14 +216,21 @@ public class TianYinWallpaperService extends WallpaperService {
                 if (bitmap != null) {
                     eglThread.setContentSize(bitmap.getWidth(), bitmap.getHeight());
                     eglThread.uploadBitmap(bitmap);
+                    markInitialLoadComplete();
                 } else {
-                    // 图片解码失败，跳过
+                    // Image decode failed, skip
+                    markInitialLoadComplete();
                     new Handler(getMainLooper()).post(() -> nextWallpaper());
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Image error", e);
+                markInitialLoadComplete();
                 new Handler(getMainLooper()).post(() -> nextWallpaper());
             }
+        }
+
+        private void markInitialLoadComplete() {
+            initialLoadCompleted.set(true);
         }
 
         @Override
