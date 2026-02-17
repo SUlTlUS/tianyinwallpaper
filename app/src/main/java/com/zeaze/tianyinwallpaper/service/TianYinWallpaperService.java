@@ -354,6 +354,7 @@ public class TianYinWallpaperService extends WallpaperService {
             }
 
             private final Runnable drawRunnable = this::draw;
+            private final Runnable videoRenderRunnable = this::draw;
 
             private void draw() {
                 if (eglSurface == EGL14.EGL_NO_SURFACE) return;
@@ -411,6 +412,11 @@ public class TianYinWallpaperService extends WallpaperService {
 
                 if (!EGL14.eglSwapBuffers(display, eglSurface)) {
                     Log.e(TAG, "SwapBuffers failed");
+                }
+
+                if (isVid && handler != null && isVisible() && mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    handler.removeCallbacks(videoRenderRunnable);
+                    handler.postDelayed(videoRenderRunnable, 16);
                 }
             }
 
