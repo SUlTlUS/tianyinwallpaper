@@ -162,15 +162,14 @@ public class TianYinWallpaperService extends WallpaperService {
                 mediaPlayer.setVolume(0, 0);
 
                 if (model.isLoop()) {
-                    mediaPlayer.setOnCompletionListener(mp -> {
-                        mp.seekTo(0);
-                        mp.setOnSeekCompleteListener(mp2 -> {
-                            if (isVisible()) {
-                                mp2.start();
-                            }
-                        });
+                    mediaPlayer.setOnSeekCompleteListener(mp -> {
+                        if (isVisible()) {
+                            mp.start();
+                        }
                     });
+                    mediaPlayer.setOnCompletionListener(mp -> mp.seekTo(0));
                 } else {
+                    mediaPlayer.setOnSeekCompleteListener(null);
                     mediaPlayer.setOnCompletionListener(mp ->
                             new Handler(getMainLooper()).post(() -> nextWallpaper())
                     );
