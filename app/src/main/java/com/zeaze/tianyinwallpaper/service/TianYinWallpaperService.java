@@ -167,7 +167,13 @@ public class TianYinWallpaperService extends WallpaperService {
                             mp.start();
                         }
                     });
-                    mediaPlayer.setOnCompletionListener(mp -> mp.seekTo(0));
+                    mediaPlayer.setOnCompletionListener(mp -> {
+                        try {
+                            mp.seekTo(0);
+                        } catch (IllegalStateException e) {
+                            Log.w(TAG, "seekTo(0) failed on loop completion", e);
+                        }
+                    });
                 } else {
                     mediaPlayer.setOnSeekCompleteListener(null);
                     mediaPlayer.setOnCompletionListener(mp ->
