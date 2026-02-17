@@ -81,7 +81,8 @@ public class TianYinWallpaperService extends WallpaperService {
         private PendingIntent autoSwitchPendingIntent;
         private SharedPreferences.OnSharedPreferenceChangeListener prefChangeListener;
         private BroadcastReceiver stateReceiver;
-        private volatile int cachedAutoSwitchMode = AUTO_SWITCH_MODE_NONE; // 缓存的自动切换模式
+        // 缓存的自动切换模式。使用 volatile 保证多线程可见性（只涉及简单的读写操作，不需要原子性）
+        private volatile int cachedAutoSwitchMode = AUTO_SWITCH_MODE_NONE;
 
         @Override
         public void onCreate(SurfaceHolder surfaceHolder) {
@@ -96,11 +97,10 @@ public class TianYinWallpaperService extends WallpaperService {
                 if ("wallpaperScroll".equals(key)) {
                     wallpaperScrollEnabled = sharedPreferences.getBoolean(key, true);
                     if (eglThread != null) eglThread.requestRender();
-                }
-                if (PREF_AUTO_SWITCH_MODE.equals(key)) {
-                    cachedAutoSwitchMode = sharedPreferences.getInt(key, AUTO_SWITCH_MODE_NONE);
-                }
-                if (PREF_AUTO_SWITCH_MODE.equals(key) || PREF_AUTO_SWITCH_INTERVAL_MINUTES.equals(key) || PREF_AUTO_SWITCH_TIME_POINTS.equals(key)) {
+                } else if (PREF_AUTO_SWITCH_MODE.equals(key) || PREF_AUTO_SWITCH_INTERVAL_MINUTES.equals(key) || PREF_AUTO_SWITCH_TIME_POINTS.equals(key)) {
+                    if (PREF_AUTO_SWITCH_MODE.equals(key)) {
+                        cachedAutoSwitchMode = sharedPreferences.getInt(key, AUTO_SWITCH_MODE_NONE);
+                    }
                     ensureAutoSwitchAnchor();
                     scheduleNextAutoSwitch("pref_changed");
                     maybeAdvanceWallpaperIfDue("pref_changed");
