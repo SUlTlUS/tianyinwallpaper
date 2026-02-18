@@ -194,15 +194,18 @@ class MainFragment : BaseFragment() {
         val canvas = Canvas(topScrimBitmap!!)
         rv!!.draw(canvas)
         topScrim!!.setImageBitmap(topScrimBitmap)
-        topScrimBlurRadius = calculateTopScrimBlurRadius()
+        val newBlurRadius = calculateTopScrimBlurRadius()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            topScrim!!.setRenderEffect(RenderEffect.createBlurEffect(topScrimBlurRadius, topScrimBlurRadius, Shader.TileMode.CLAMP))
+            if (kotlin.math.abs(newBlurRadius - topScrimBlurRadius) >= TOP_SCRIM_BLUR_RADIUS_EPSILON) {
+                topScrimBlurRadius = newBlurRadius
+                topScrim!!.setRenderEffect(RenderEffect.createBlurEffect(topScrimBlurRadius, topScrimBlurRadius, Shader.TileMode.CLAMP))
+            }
         }
     }
 
     private fun calculateTopScrimBlurRadius(): Float {
         val scrollOffset = rv?.computeVerticalScrollOffset()?.toFloat() ?: 0f
-        val blurProgress = (scrollOffset / TOP_SCRIM_MAX_SCROLL_FOR_BLUR).coerceIn(0f, 1f)
+        val blurProgress = (scrollOffset / TOP_SCRIM_MAX_SCROLL_FOR_FULL_BLUR_PX).coerceIn(0f, 1f)
         return TOP_SCRIM_MAX_BLUR_RADIUS * blurProgress
     }
 
@@ -580,7 +583,8 @@ class MainFragment : BaseFragment() {
         private const val AUTO_SWITCH_MODE_NONE = 0
         private val AUTO_SWITCH_MODE_ITEMS = arrayOf("手动切换", "按固定时间间隔切换", "按每日时间点切换")
         private const val TOP_SCRIM_MAX_BLUR_RADIUS = 24f
-        private const val TOP_SCRIM_MAX_SCROLL_FOR_BLUR = 300f
+        private const val TOP_SCRIM_MAX_SCROLL_FOR_FULL_BLUR_PX = 300f
+        private const val TOP_SCRIM_BLUR_RADIUS_EPSILON = 0.5f
         var column = 3
     }
 }
