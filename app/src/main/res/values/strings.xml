@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">天音壁纸</string>
+    <string name="select_wallpaper_action">增加壁纸</string>
+    <string name="apply_group_action">应用本组</string>
+    <string name="select_wallpaper_symbol">+</string>
+    <string name="apply_group_symbol">✓</string>
 </resources>
