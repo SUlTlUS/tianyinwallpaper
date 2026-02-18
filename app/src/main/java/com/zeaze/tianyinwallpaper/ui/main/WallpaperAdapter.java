@@ -29,7 +29,9 @@ import com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout;
 import com.zeaze.tianyinwallpaper.R;
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.ViewHolder> {
     private Context context;
@@ -41,6 +43,9 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
     private int widthPixels,heightPixels;
     private AlertDialog alertDialog;
     private AlertDialog dialog;
+    private boolean selectionMode = false;
+    private Set<Integer> selectedPositions = new HashSet<>();
+    private OnWallpaperClickListener onWallpaperClickListener;
 
     public WallpaperAdapter(Context context, List<TianYinWallpaperModel> list, EditText tv) {
         DisplayMetrics displayMetrics=context.getResources().getDisplayMetrics();
@@ -106,9 +111,14 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
             holder.time.setVisibility(View.VISIBLE);
         }
         final int i=position;
+        holder.selectMask.setVisibility(selectionMode && selectedPositions.contains(i) ? View.VISIBLE : View.GONE);
+        holder.selectMark.setVisibility(selectionMode && selectedPositions.contains(i) ? View.VISIBLE : View.GONE);
         holder.itemView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (onWallpaperClickListener != null && onWallpaperClickListener.onWallpaperClick(i)) {
+                    return;
+                }
                 AlertDialog.Builder builder = new AlertDialog.Builder(context);
                 View view=LayoutInflater.from(context).inflate(R.layout.wallpaper_item, null);
                 view.findViewById(R.id.tv1).setOnClickListener(new View.OnClickListener() {
@@ -280,17 +290,59 @@ public class WallpaperAdapter extends RecyclerView.Adapter<WallpaperAdapter.View
         notifyDataSetChanged();
     }
 
+    public void setSelectionMode(boolean selectionMode) {
+        this.selectionMode = selectionMode;
+        if (!selectionMode) {
+            selectedPositions.clear();
+        }
+        notifyDataSetChanged();
+    }
+
+    public boolean isSelectionMode() {
+        return selectionMode;
+    }
+
+    public void toggleSelected(int position) {
+        if (selectedPositions.contains(position)) {
+            selectedPositions.remove(position);
+        } else {
+            selectedPositions.add(position);
+        }
+        notifyItemChanged(position);
+    }
+
+    public Set<Integer> getSelectedPositions() {
+        return new HashSet<>(selectedPositions);
+    }
+
+    public void clearSelected() {
+        selectedPositions.clear();
+        notifyDataSetChanged();
+    }
+
+    public void setOnWallpaperClickListener(OnWallpaperClickListener onWallpaperClickListener) {
+        this.onWallpaperClickListener = onWallpaperClickListener;
+    }
+
     class ViewHolder extends RecyclerView.ViewHolder{
         public TextView tr,time;
         public ImageView iv;
         public View root;
+        public View selectMask;
+        public TextView selectMark;
         public ViewHolder(@NonNull View itemView) {
             super(itemView);
             tr=itemView.findViewById(R.id.tr);
             iv=itemView.findViewById(R.id.iv);
             time=itemView.findViewById(R.id.time);
             root=itemView.findViewById(R.id.root);
+            selectMask=itemView.findViewById(R.id.select_mask);
+            selectMark=itemView.findViewById(R.id.select_mark);
         }
+    }
+
+    public interface OnWallpaperClickListener {
+        boolean onWallpaperClick(int position);
     }
 
 }

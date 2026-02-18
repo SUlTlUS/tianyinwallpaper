@@ -8,79 +8,116 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <FrameLayout
-        android:id="@+id/fl"
-        android:layout_width="match_parent"
-        android:layout_height="35dp"
-        android:layout_marginTop="30dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        >
-
-        <EditText
-            android:id="@+id/tv"
-            android:layout_width="wrap_content"
-            android:layout_height="35dp"
-            android:layout_gravity="center"
-            android:background="@drawable/edit_background"
-            android:gravity="center"
-            android:hint="输入壁纸组的名称"
-            android:paddingHorizontal="16dp"
-            android:textColor="@color/textColor"
-            android:textSize="14sp" />
-
-        <ImageView
-            android:id="@+id/upload"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:layout_marginTop="1dp"
-            android:layout_gravity="center_vertical|right"
-            android:layout_marginRight="32dp" />
-
-    </FrameLayout>
-
-
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:layout_marginStart="8dp"
         android:layout_marginEnd="8dp"
-        android:layout_marginBottom="90dp"
-        android:layout_marginTop="15dp"
+        android:layout_marginBottom="0dp"
+        android:layout_marginTop="0dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/fl" />
+        app:layout_constraintTop_toTopOf="parent" />
 
-    <LinearLayout
-        android:orientation="horizontal"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="30dp"
+    <ImageView
+        android:id="@+id/top_scrim"
+        android:layout_width="0dp"
+        android:layout_height="72dp"
+        android:background="@drawable/top_blur_gradient"
+        android:elevation="4dp"
+        android:scaleType="centerCrop"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <FrameLayout
+        android:id="@+id/fl"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:elevation="8dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <EditText
+            android:id="@+id/tv"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_gravity="center"
+            android:background="@drawable/top_input_background"
+            android:gravity="center"
+            android:hint="输入壁纸组的名称"
+            android:paddingHorizontal="16dp"
+            android:textColor="@color/textColor"
+            android:textSize="14sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/select"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|start"
+            android:background="@drawable/top_circle_button_background"
+            android:contentDescription="@string/select_wallpaper_action"
+            android:gravity="center"
+            android:text="@string/select_wallpaper_symbol"
+            android:textColor="@color/textColor"
+            android:textSize="@dimen/main_top_symbol_size" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/apply"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|end"
+            android:layout_marginEnd="@dimen/main_top_apply_margin_end"
+            android:background="@drawable/top_circle_button_background"
+            android:contentDescription="@string/apply_group_action"
+            android:gravity="center"
+            android:text="@string/apply_group_symbol"
+            android:textColor="@color/textColor"
+            android:textSize="@dimen/main_top_symbol_size" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/more"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|end"
+            android:background="@drawable/top_circle_button_background"
+            android:contentDescription="@string/more_action"
+            android:gravity="center"
+            android:text="@string/more_symbol"
+            android:textColor="@color/textColor"
+            android:textSize="20sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/cancel_select"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="top|end"
+            android:background="@drawable/top_circle_button_background"
+            android:contentDescription="@string/cancel_select_action"
+            android:gravity="center"
+            android:text="@string/cancel_symbol"
+            android:textColor="@color/textColor"
+            android:textSize="@dimen/main_top_symbol_size"
+            android:visibility="gone" />
+
+    </FrameLayout>
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/delete_selected"
+        android:layout_width="58dp"
+        android:layout_height="58dp"
+        android:layout_marginBottom="90dp"
+        android:background="@drawable/top_circle_button_background"
+        android:contentDescription="@string/delete_selected_action"
+        android:text="@string/delete_symbol"
+        android:textColor="@color/textColor"
+        android:textSize="26sp"
+        android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
-        <TextView
-            android:textColor="@color/textColor"
-            android:id="@+id/select"
-            android:layout_width="120dp"
-            android:layout_height="30dp"
-            android:background="@drawable/edit_background"
-            android:gravity="center"
-            android:layout_marginRight="30dp"
-            android:text="增加壁纸"
-           />
-        <TextView
-            android:textColor="@color/textColor"
-            android:id="@+id/apply"
-            android:layout_width="120dp"
-            android:layout_height="30dp"
-            android:background="@drawable/edit_background"
-            android:gravity="center"
-            android:text="应用本组" />
-    </LinearLayout>
-
+        app:layout_constraintStart_toStartOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

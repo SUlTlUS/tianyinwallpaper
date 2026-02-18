@@ -16,7 +16,6 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.WindowManager;
-import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import com.alibaba.fastjson.JSON;
@@ -30,6 +29,7 @@ import com.zeaze.tianyinwallpaper.base.BaseFragmentAdapter;
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel;
 import com.zeaze.tianyinwallpaper.ui.about.AboutFragment;
 import com.zeaze.tianyinwallpaper.ui.main.MainFragment;
+import com.zeaze.tianyinwallpaper.ui.setting.SettingFragment;
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData;
 import com.zeaze.tianyinwallpaper.utils.FileUtil;
 import com.zeaze.tianyinwallpaper.widget.NoScrollViewPager;
@@ -41,7 +41,7 @@ import java.util.List;
 
 public class MainActivity extends BaseActivity  {
     private final static int REQUEST_CODE_SET_WALLPAPER = 0x001;
-    private LinearLayout linearLayout;
+    private final static int SETTINGS_TAB_INDEX = 2;
     private TabLayout tabLayout;
     private NoScrollViewPager viewPager;
     private List<String> titles;
@@ -53,15 +53,15 @@ public class MainActivity extends BaseActivity  {
         setContentView(R.layout.activity_main);
         tabLayout=findViewById(R.id.tab_layout);
         viewPager=findViewById(R.id.view_pager);
-        linearLayout=findViewById(R.id.linearLayout);
 
-        linearLayout.setBackgroundResource(R.color.background);
         titles=new ArrayList<>();
         fragments=new ArrayList<>();
         titles.add("壁纸");
-        titles.add("关于");
+        titles.add("壁纸组");
+        titles.add("设置");
         fragments.add(new MainFragment());
         fragments.add(new AboutFragment());
+        fragments.add(new SettingFragment());
         BaseFragmentAdapter adapter=new BaseFragmentAdapter(getSupportFragmentManager(),titles,fragments);
         viewPager.setAdapter(adapter);
         viewPager.setOffscreenPageLimit(100);
@@ -76,6 +76,12 @@ public class MainActivity extends BaseActivity  {
         permission();
         clearNoUseFile();
 
+    }
+
+    public void openSettingPage() {
+        if (viewPager != null) {
+            viewPager.setCurrentItem(SETTINGS_TAB_INDEX, true);
+        }
     }
 
     @Override

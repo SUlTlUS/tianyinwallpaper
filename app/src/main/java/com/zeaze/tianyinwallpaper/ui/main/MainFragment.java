@@ -8,13 +8,20 @@ import android.content.ComponentName;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.PopupMenu;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
@@ -23,24 +30,24 @@ import android.widget.TextView;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.alibaba.fastjson.JSON;
-import com.bumptech.glide.Glide;
 import com.lxj.xpopup.XPopup;
 import com.lxj.xpopup.impl.LoadingPopupView;
 import com.zeaze.tianyinwallpaper.App;
+import com.zeaze.tianyinwallpaper.MainActivity;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants;
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService;
-import com.zeaze.tianyinwallpaper.ui.commom.CommomSave;
-import com.zeaze.tianyinwallpaper.ui.commom.SaveAdapter;
-import com.zeaze.tianyinwallpaper.ui.commom.SaveData;
 import com.zeaze.tianyinwallpaper.utils.FileUtil;
 import com.zeaze.tianyinwallpaper.R;
 import com.zeaze.tianyinwallpaper.base.BaseFragment;
@@ -51,6 +58,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import io.reactivex.functions.Consumer;
@@ -60,13 +68,25 @@ public class MainFragment extends BaseFragment {
     private static final String DEFAULT_AUTO_SWITCH_TIME_POINTS = "08:00,12:00,18:00,22:00";
     private static final int AUTO_SWITCH_MODE_NONE = 0;
     private static final String[] AUTO_SWITCH_MODE_ITEMS = new String[]{"手动切换", "按固定时间间隔切换", "按每日时间点切换"};
+    private static final float TOP_SCRIM_BLUR_RADIUS = 24f;
+    private static final int TOP_SCRIM_SCROLL_THRESHOLD = 2;
     private RecyclerView rv;
     private GridLayoutManager manager;
     private WallpaperAdapter wallpaperAdapter;
-    private ImageView upload;
     private EditText tv;
-    private TextView select,apply;
-    private List<TianYinWallpaperModel> list=new ArrayList();;
+    private TextView select,apply,more,cancelSelect,deleteSelected;
+    private ImageView topScrim;
+    private Bitmap topScrimBitmap;
+    private boolean topScrimUpdatePending = false;
+    private final RecyclerView.OnScrollListener topScrimScrollListener = new RecyclerView.OnScrollListener() {
+        @Override
+        public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+            if (Math.abs(dy) < TOP_SCRIM_SCROLL_THRESHOLD) return;
+            requestTopScrimBlurUpdate();
+        }
+    };
+    private boolean selectionMode = false;
+    private List<TianYinWallpaperModel> list = new ArrayList();
     public static int column=3;
     private TianYinWallpaperModel model;
     private LoadingPopupView popupView;
@@ -98,23 +118,43 @@ public class MainFragment extends BaseFragment {
         );
 
         rv=view.findViewById(R.id.rv);
-        upload =view.findViewById(R.id.upload);
         select =view.findViewById(R.id.select);
         apply =view.findViewById(R.id.apply);
+        more =view.findViewById(R.id.more);
+        cancelSelect =view.findViewById(R.id.cancel_select);
+        deleteSelected =view.findViewById(R.id.delete_selected);
+        topScrim = view.findViewById(R.id.top_scrim);
         tv =view.findViewById(R.id.tv);
+        if (topScrim != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            topScrim.setRenderEffect(RenderEffect.createBlurEffect(TOP_SCRIM_BLUR_RADIUS, TOP_SCRIM_BLUR_RADIUS, Shader.TileMode.CLAMP));
+        }
+        View topBar = view.findViewById(R.id.fl);
+        if (topBar != null) {
+            ViewCompat.setOnApplyWindowInsetsListener(topBar, (v, insets) -> {
+                v.setTranslationY(insets.getInsets(WindowInsetsCompat.Type.statusBars()).top);
+                return insets;
+            });
+        }
 
         manager=new GridLayoutManager(getContext(),column);
         rv.setLayoutManager(manager);
         wallpaperAdapter=new WallpaperAdapter(getContext(),list,tv);
         rv.setAdapter(wallpaperAdapter);
+        wallpaperAdapter.setOnWallpaperClickListener(position -> {
+            if (!selectionMode) {
+                return false;
+            }
+            wallpaperAdapter.toggleSelected(position);
+            return true;
+        });
         wallpaperAdapter.tryToNotifyDataSetChanged();
         helper.attachToRecyclerView(rv);
+        rv.addOnScrollListener(topScrimScrollListener);
+        requestTopScrimBlurUpdate();
 
         pref = getContext().getSharedPreferences(App.TIANYIN,MODE_PRIVATE);
         editor = getContext().getSharedPreferences(App.TIANYIN,MODE_PRIVATE).edit();
 
-        Glide.with(getContext()).load(R.drawable.setting).into(upload);
-        initUpload();
         select.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -180,6 +220,36 @@ public class MainFragment extends BaseFragment {
                     }
                 }).start();
             }
+        });
+        more.setOnClickListener(v -> showMoreMenu(v));
+        cancelSelect.setOnClickListener(v -> exitSelectionMode());
+        deleteSelected.setOnClickListener(v -> deleteSelectedWallpapers());
+    }
+
+    private void updateTopScrimBlur() {
+        if (topScrim == null || rv == null) return;
+        if (rv.getWidth() <= 0 || topScrim.getHeight() <= 0) return;
+        if (topScrimBitmap == null || topScrimBitmap.getWidth() != rv.getWidth() || topScrimBitmap.getHeight() != topScrim.getHeight()) {
+            if (topScrimBitmap != null && !topScrimBitmap.isRecycled()) {
+                topScrimBitmap.recycle();
+            }
+            topScrimBitmap = Bitmap.createBitmap(rv.getWidth(), topScrim.getHeight(), Bitmap.Config.RGB_565);
+        }
+        topScrimBitmap.eraseColor(Color.TRANSPARENT);
+        Canvas canvas = new Canvas(topScrimBitmap);
+        rv.draw(canvas);
+        topScrim.setImageBitmap(topScrimBitmap);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            topScrim.setRenderEffect(RenderEffect.createBlurEffect(TOP_SCRIM_BLUR_RADIUS, TOP_SCRIM_BLUR_RADIUS, Shader.TileMode.CLAMP));
+        }
+    }
+
+    private void requestTopScrimBlurUpdate() {
+        if (rv == null || topScrimUpdatePending) return;
+        topScrimUpdatePending = true;
+        rv.post(() -> {
+            topScrimUpdatePending = false;
+            updateTopScrimBlur();
         });
     }
 
@@ -305,6 +375,86 @@ public class MainFragment extends BaseFragment {
         videoLaunch.launch(new String[]{"video/*"});
     }
 
+    private void showMoreMenu(View anchor){
+        PopupMenu popupMenu = new PopupMenu(getContext(), anchor);
+        popupMenu.getMenu().add(getString(R.string.menu_select_mode));
+        popupMenu.getMenu().add(getString(R.string.menu_setting));
+        popupMenu.setOnMenuItemClickListener(item -> {
+            if (getString(R.string.menu_select_mode).contentEquals(item.getTitle())) {
+                enterSelectionMode();
+                return true;
+            }
+            if (getString(R.string.menu_setting).contentEquals(item.getTitle())) {
+                if (getActivity() instanceof MainActivity) {
+                    ((MainActivity) getActivity()).openSettingPage();
+                }
+                return true;
+            }
+            return false;
+        });
+        popupMenu.show();
+    }
+
+    private void enterSelectionMode() {
+        selectionMode = true;
+        wallpaperAdapter.setSelectionMode(true);
+        select.setVisibility(View.GONE);
+        apply.setVisibility(View.GONE);
+        tv.setVisibility(View.GONE);
+        more.setVisibility(View.GONE);
+        cancelSelect.setVisibility(View.VISIBLE);
+        deleteSelected.setVisibility(View.VISIBLE);
+        View bottomBar = getActivity() == null ? null : getActivity().findViewById(R.id.linearLayout);
+        if (bottomBar != null) {
+            bottomBar.setVisibility(View.GONE);
+        }
+        if (topScrim != null) {
+            topScrim.setVisibility(View.GONE);
+        }
+        toast(getString(R.string.select_mode_tip));
+    }
+
+    private void exitSelectionMode() {
+        selectionMode = false;
+        wallpaperAdapter.setSelectionMode(false);
+        select.setVisibility(View.VISIBLE);
+        apply.setVisibility(View.VISIBLE);
+        tv.setVisibility(View.VISIBLE);
+        more.setVisibility(View.VISIBLE);
+        cancelSelect.setVisibility(View.GONE);
+        deleteSelected.setVisibility(View.GONE);
+        View bottomBar = getActivity() == null ? null : getActivity().findViewById(R.id.linearLayout);
+        if (bottomBar != null) {
+            bottomBar.setVisibility(View.VISIBLE);
+        }
+        if (topScrim != null) {
+            topScrim.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void deleteSelectedWallpapers() {
+        Set<Integer> selected = wallpaperAdapter.getSelectedPositions();
+        if (selected.isEmpty()) {
+            toast(getString(R.string.no_selected_tip));
+            return;
+        }
+        new AlertDialog.Builder(getContext())
+                .setMessage(getString(R.string.delete_selected_confirm))
+                .setNegativeButton(getString(R.string.common_cancel), null)
+                .setPositiveButton(getString(R.string.common_delete), (dialog, which) -> {
+                    List<Integer> indexes = new ArrayList<>(selected);
+                    Collections.sort(indexes, Collections.reverseOrder());
+                    for (int index : indexes) {
+                        if (index >= 0 && index < list.size()) {
+                            list.remove(index);
+                        }
+                    }
+                    wallpaperAdapter.tryToNotifyDataSetChanged();
+                    exitSelectionMode();
+                })
+                .show();
+    }
+
     ItemTouchHelper helper = new ItemTouchHelper(new ItemTouchHelper.Callback() {
         @Override
         public int getMovementFlags(RecyclerView recyclerView, RecyclerView.ViewHolder viewHolder) {
@@ -337,7 +487,7 @@ public class MainFragment extends BaseFragment {
         }
         @Override
         public boolean isLongPressDragEnabled() {
-            return true;
+            return !selectionMode;
         }
         @Override
         public void onSelectedChanged(RecyclerView.ViewHolder viewHolder, int actionState) {
@@ -369,86 +519,6 @@ public class MainFragment extends BaseFragment {
                     exchange(now);
                     popupView.setTitle("转化壁纸中,进度"+now+"/"+uris.size());
                 }
-            }
-        });
-    }
-
-    private void initUpload(){
-        upload.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                new CommomSave().saveDialog(getContext(), FileUtil.dataPath,new String[]{"保存","壁纸通用设置","清空当前壁纸组"}, new CommomSave.onClickListener() {
-                    @Override
-                    public void onBtnClick(CommomSave save,int i) {
-                        if (i==0){
-                            if (tv.getText().toString().equals("")){
-                                toast("请先输入表名称");
-                                return;
-                            }
-                            SaveData saveData=new SaveData();
-                            saveData.setName(tv.getText().toString());
-                            saveData.setS(JSON.toJSONString(list));
-                            SaveAdapter.getSaveDataList().add(0,saveData);
-                            new Thread(new Runnable() {
-                                @Override
-                                public void run() {
-                                    FileUtil.save(getContext(), JSON.toJSONString(SaveAdapter.getSaveDataList()),FileUtil.dataPath, new FileUtil.onSave() {
-                                        @Override
-                                        public void onSave() {
-                                            getActivity().runOnUiThread(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    toast("保存成功");
-                                                    save.adapter.notifyDataSetChanged();
-                                                }
-                                            });
-                                        }
-                                    });
-                                }
-                            }).start();
-                        }
-                        if (i==1){
-                            wallpaperSetting();
-                        }
-                        if (i==2){
-                            TextView textView =(TextView) LayoutInflater.from(getContext()).inflate(R.layout.textview, null);
-                            textView.setText("是否清空表格");
-                            AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
-                            builder.setView(textView)
-                                    .setPositiveButton("确定", new DialogInterface.OnClickListener() {
-                                        public void onClick(DialogInterface dialog, int id) {
-                                            tv.setText("");
-                                            list.clear();
-                                            wallpaperAdapter.tryToNotifyDataSetChanged();
-                                            toast("清空成功");
-                                        }
-                                    })
-                                    .setNeutralButton("取消", new DialogInterface.OnClickListener() {
-                                        @Override
-                                        public void onClick(DialogInterface dialog, int which) {
-
-                                        }
-                                    })
-                                    .create()
-                                    .show();
-                        }
-                    }
-
-                    @Override
-                    public void onListClick(String s, String name, CommomSave save) {
-                        list.clear();
-                        list.addAll(JSON.parseArray(s,TianYinWallpaperModel.class));
-                        wallpaperAdapter.tryToNotifyDataSetChanged();
-                        tv.setText(name);
-                        save.alertDialog.dismiss();
-                    }
-
-                    @Override
-                    public void onListChange() {
-                        toast("操作成功");
-                    }
-                });
-
             }
         });
     }
@@ -573,5 +643,17 @@ public class MainFragment extends BaseFragment {
                 })
                 .setOnDismissListener(dialog -> onDismiss.run())
                 .show();
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (rv != null) {
+            rv.removeOnScrollListener(topScrimScrollListener);
+        }
+        if (topScrimBitmap != null && !topScrimBitmap.isRecycled()) {
+            topScrimBitmap.recycle();
+            topScrimBitmap = null;
+        }
+        super.onDestroyView();
     }
 }
