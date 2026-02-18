@@ -29,7 +29,7 @@
             android:layout_width="wrap_content"
             android:layout_height="16dp"
             android:layout_gravity="top|right"
-            android:textSize="10dp"/>
+            android:textSize="10sp"/>
         <TextView
             android:textColor="@color/textColor"
             android:id="@+id/time"
@@ -40,6 +40,24 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|center_horizontal"
-            android:textSize="10dp"/>
+            android:textSize="10sp"/>
+        <View
+            android:id="@+id/select_mask"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#66000000"
+            android:visibility="gone" />
+        <TextView
+            android:id="@+id/select_mark"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_gravity="top|start"
+            android:layout_margin="8dp"
+            android:background="@drawable/top_circle_button_background"
+            android:gravity="center"
+            android:text="✓"
+            android:textColor="@color/textColor"
+            android:textSize="14sp"
+            android:visibility="gone" />
     </FrameLayout>
 </FrameLayout>

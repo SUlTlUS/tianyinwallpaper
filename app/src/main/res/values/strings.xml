@@ -4,4 +4,17 @@
     <string name="apply_group_action">应用本组</string>
     <string name="select_wallpaper_symbol">+</string>
     <string name="apply_group_symbol">✓</string>
+    <string name="more_action">更多</string>
+    <string name="more_symbol">…</string>
+    <string name="cancel_select_action">取消选择</string>
+    <string name="cancel_symbol">×</string>
+    <string name="delete_selected_action">删除选中壁纸</string>
+    <string name="delete_symbol">🗑</string>
+    <string name="menu_select_mode">选择</string>
+    <string name="menu_setting">设置</string>
+    <string name="select_mode_tip">已进入多选模式</string>
+    <string name="no_selected_tip">请先选择要删除的壁纸</string>
+    <string name="delete_selected_confirm">确认删除选中的壁纸？</string>
+    <string name="common_cancel">取消</string>
+    <string name="common_delete">删除</string>
 </resources>

@@ -15,6 +15,7 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.PopupMenu;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
@@ -35,6 +36,7 @@ import com.alibaba.fastjson.JSON;
 import com.lxj.xpopup.XPopup;
 import com.lxj.xpopup.impl.LoadingPopupView;
 import com.zeaze.tianyinwallpaper.App;
+import com.zeaze.tianyinwallpaper.MainActivity;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants;
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService;
@@ -48,6 +50,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import io.reactivex.functions.Consumer;
@@ -61,8 +64,10 @@ public class MainFragment extends BaseFragment {
     private GridLayoutManager manager;
     private WallpaperAdapter wallpaperAdapter;
     private EditText tv;
-    private TextView select,apply;
-    private List<TianYinWallpaperModel> list=new ArrayList();;
+    private TextView select,apply,more,cancelSelect,deleteSelected;
+    private View topScrim;
+    private boolean selectionMode = false;
+    private List<TianYinWallpaperModel> list = new ArrayList();
     public static int column=3;
     private TianYinWallpaperModel model;
     private LoadingPopupView popupView;
@@ -96,6 +101,10 @@ public class MainFragment extends BaseFragment {
         rv=view.findViewById(R.id.rv);
         select =view.findViewById(R.id.select);
         apply =view.findViewById(R.id.apply);
+        more =view.findViewById(R.id.more);
+        cancelSelect =view.findViewById(R.id.cancel_select);
+        deleteSelected =view.findViewById(R.id.delete_selected);
+        topScrim = view.findViewById(R.id.top_scrim);
         tv =view.findViewById(R.id.tv);
         View topBar = view.findViewById(R.id.fl);
         if (topBar != null) {
@@ -109,6 +118,13 @@ public class MainFragment extends BaseFragment {
         rv.setLayoutManager(manager);
         wallpaperAdapter=new WallpaperAdapter(getContext(),list,tv);
         rv.setAdapter(wallpaperAdapter);
+        wallpaperAdapter.setOnWallpaperClickListener(position -> {
+            if (!selectionMode) {
+                return false;
+            }
+            wallpaperAdapter.toggleSelected(position);
+            return true;
+        });
         wallpaperAdapter.tryToNotifyDataSetChanged();
         helper.attachToRecyclerView(rv);
 
@@ -181,6 +197,9 @@ public class MainFragment extends BaseFragment {
                 }).start();
             }
         });
+        more.setOnClickListener(v -> showMoreMenu(v));
+        cancelSelect.setOnClickListener(v -> exitSelectionMode());
+        deleteSelected.setOnClickListener(v -> deleteSelectedWallpapers());
     }
 
     @Override
@@ -305,6 +324,86 @@ public class MainFragment extends BaseFragment {
         videoLaunch.launch(new String[]{"video/*"});
     }
 
+    private void showMoreMenu(View anchor){
+        PopupMenu popupMenu = new PopupMenu(getContext(), anchor);
+        popupMenu.getMenu().add(getString(R.string.menu_select_mode));
+        popupMenu.getMenu().add(getString(R.string.menu_setting));
+        popupMenu.setOnMenuItemClickListener(item -> {
+            if (getString(R.string.menu_select_mode).contentEquals(item.getTitle())) {
+                enterSelectionMode();
+                return true;
+            }
+            if (getString(R.string.menu_setting).contentEquals(item.getTitle())) {
+                if (getActivity() instanceof MainActivity) {
+                    ((MainActivity) getActivity()).openSettingPage();
+                }
+                return true;
+            }
+            return false;
+        });
+        popupMenu.show();
+    }
+
+    private void enterSelectionMode() {
+        selectionMode = true;
+        wallpaperAdapter.setSelectionMode(true);
+        select.setVisibility(View.GONE);
+        apply.setVisibility(View.GONE);
+        tv.setVisibility(View.GONE);
+        more.setVisibility(View.GONE);
+        cancelSelect.setVisibility(View.VISIBLE);
+        deleteSelected.setVisibility(View.VISIBLE);
+        View bottomBar = getActivity() == null ? null : getActivity().findViewById(R.id.linearLayout);
+        if (bottomBar != null) {
+            bottomBar.setVisibility(View.GONE);
+        }
+        if (topScrim != null) {
+            topScrim.setVisibility(View.GONE);
+        }
+        toast(getString(R.string.select_mode_tip));
+    }
+
+    private void exitSelectionMode() {
+        selectionMode = false;
+        wallpaperAdapter.setSelectionMode(false);
+        select.setVisibility(View.VISIBLE);
+        apply.setVisibility(View.VISIBLE);
+        tv.setVisibility(View.VISIBLE);
+        more.setVisibility(View.VISIBLE);
+        cancelSelect.setVisibility(View.GONE);
+        deleteSelected.setVisibility(View.GONE);
+        View bottomBar = getActivity() == null ? null : getActivity().findViewById(R.id.linearLayout);
+        if (bottomBar != null) {
+            bottomBar.setVisibility(View.VISIBLE);
+        }
+        if (topScrim != null) {
+            topScrim.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void deleteSelectedWallpapers() {
+        Set<Integer> selected = wallpaperAdapter.getSelectedPositions();
+        if (selected.isEmpty()) {
+            toast(getString(R.string.no_selected_tip));
+            return;
+        }
+        new AlertDialog.Builder(getContext())
+                .setMessage(getString(R.string.delete_selected_confirm))
+                .setNegativeButton(getString(R.string.common_cancel), null)
+                .setPositiveButton(getString(R.string.common_delete), (dialog, which) -> {
+                    List<Integer> indexes = new ArrayList<>(selected);
+                    Collections.sort(indexes, Collections.reverseOrder());
+                    for (int index : indexes) {
+                        if (index >= 0 && index < list.size()) {
+                            list.remove(index);
+                        }
+                    }
+                    wallpaperAdapter.tryToNotifyDataSetChanged();
+                    exitSelectionMode();
+                })
+                .show();
+    }
+
     ItemTouchHelper helper = new ItemTouchHelper(new ItemTouchHelper.Callback() {
         @Override
         public int getMovementFlags(RecyclerView recyclerView, RecyclerView.ViewHolder viewHolder) {
@@ -337,7 +436,7 @@ public class MainFragment extends BaseFragment {
         }
         @Override
         public boolean isLongPressDragEnabled() {
-            return true;
+            return !selectionMode;
         }
         @Override
         public void onSelectedChanged(RecyclerView.ViewHolder viewHolder, int actionState) {
