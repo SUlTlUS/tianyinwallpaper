@@ -24,6 +24,8 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -95,6 +97,13 @@ public class MainFragment extends BaseFragment {
         select =view.findViewById(R.id.select);
         apply =view.findViewById(R.id.apply);
         tv =view.findViewById(R.id.tv);
+        View topBar = view.findViewById(R.id.fl);
+        if (topBar != null) {
+            ViewCompat.setOnApplyWindowInsetsListener(topBar, (v, insets) -> {
+                v.setTranslationY(insets.getInsets(WindowInsetsCompat.Type.statusBars()).top);
+                return insets;
+            });
+        }
 
         manager=new GridLayoutManager(getContext(),column);
         rv.setLayoutManager(manager);
