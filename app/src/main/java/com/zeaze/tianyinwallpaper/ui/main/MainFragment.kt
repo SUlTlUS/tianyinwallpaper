@@ -156,9 +156,12 @@ class MainFragment : BaseFragment() {
             Thread {
                 FileUtil.save(requireContext(), JSON.toJSONString(list), FileUtil.wallpaperPath, object : FileUtil.OnSave {
                     override fun onSave() {
-                        val hostActivity = activity ?: return
+                        val hostActivity = activity ?: run {
+                            Log.w("MainFragment", "onSave skipped: activity is null")
+                            return
+                        }
                         hostActivity.runOnUiThread {
-                            val wallpaperManager = WallpaperManager.getInstance(context)
+                            val wallpaperManager = WallpaperManager.getInstance(hostActivity)
                             try {
                                 wallpaperManager.clear()
                             } catch (e: IOException) {
