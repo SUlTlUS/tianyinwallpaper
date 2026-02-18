@@ -11,6 +11,7 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -55,6 +56,10 @@ import java.util.UUID;
 import io.reactivex.functions.Consumer;
 
 public class MainFragment extends BaseFragment {
+    private static final long DEFAULT_AUTO_SWITCH_INTERVAL_MINUTES = 60L;
+    private static final String DEFAULT_AUTO_SWITCH_TIME_POINTS = "08:00,12:00,18:00,22:00";
+    private static final int AUTO_SWITCH_MODE_NONE = 0;
+    private static final String[] AUTO_SWITCH_MODE_ITEMS = new String[]{"手动切换", "按固定时间间隔切换", "按每日时间点切换"};
     private RecyclerView rv;
     private GridLayoutManager manager;
     private WallpaperAdapter wallpaperAdapter;
@@ -505,6 +510,13 @@ public class MainFragment extends BaseFragment {
                 });
             }
         });
+
+        TextView autoSwitchModeView = view.findViewById(R.id.autoSwitchModeView);
+        TextView autoSwitchIntervalView = view.findViewById(R.id.autoSwitchIntervalView);
+        TextView autoSwitchPointsView = view.findViewById(R.id.autoSwitchPointsView);
+        refreshAutoSwitchSettingView(autoSwitchModeView, autoSwitchIntervalView, autoSwitchPointsView);
+        autoSwitchModeView.setOnClickListener(v -> showAutoSwitchModeDialog(() ->
+                refreshAutoSwitchSettingView(autoSwitchModeView, autoSwitchIntervalView, autoSwitchPointsView)));
         builder.setView(view);
         alertDialog=builder.create();
         alertDialog.show();
@@ -533,6 +545,33 @@ public class MainFragment extends BaseFragment {
                 })
                 .setCancelable(false)
                 .setOnDismissListener(onDismissListener)
+                .show();
+    }
+
+    private void refreshAutoSwitchSettingView(TextView modeView, TextView intervalView, TextView pointsView) {
+        int mode = pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE);
+        String modeText = (mode >= AUTO_SWITCH_MODE_NONE && mode < AUTO_SWITCH_MODE_ITEMS.length)
+                ? AUTO_SWITCH_MODE_ITEMS[mode]
+                : AUTO_SWITCH_MODE_ITEMS[AUTO_SWITCH_MODE_NONE];
+        modeView.setText("自动切换模式：" + modeText + "（点击修改）");
+        intervalView.setText("自动切换间隔：" + pref.getLong(TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_MINUTES, DEFAULT_AUTO_SWITCH_INTERVAL_MINUTES) + "分钟（点击修改）");
+        String points = pref.getString(TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS, DEFAULT_AUTO_SWITCH_TIME_POINTS);
+        points = TextUtils.isEmpty(points) ? DEFAULT_AUTO_SWITCH_TIME_POINTS : points;
+        pointsView.setText("自动切换时间点：" + points + "（点击修改）");
+    }
+
+    private void showAutoSwitchModeDialog(Runnable onDismiss) {
+        int checked = pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE);
+        new AlertDialog.Builder(getContext())
+                .setTitle("选择自动切换模式")
+                .setSingleChoiceItems(AUTO_SWITCH_MODE_ITEMS, checked, (dialog, which) -> {
+                    editor.putInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, which);
+                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis());
+                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L);
+                    editor.apply();
+                    dialog.dismiss();
+                })
+                .setOnDismissListener(dialog -> onDismiss.run())
                 .show();
     }
 }

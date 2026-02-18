@@ -52,6 +52,37 @@
         android:textColor="@color/textColor"/>
 
     <TextView
+        android:id="@+id/autoSwitchModeView"
+        android:layout_width="match_parent"
+        android:layout_height="45dp"
+        android:layout_marginTop="10dp"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center"
+        android:text="自动切换模式：手动切换（点击修改）"
+        android:textColor="@color/textColor"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/autoSwitchIntervalView"
+        android:layout_width="match_parent"
+        android:layout_height="45dp"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center"
+        android:text="自动切换间隔：60分钟（点击修改）"
+        android:textColor="@color/textColor"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/autoSwitchPointsView"
+        android:layout_width="match_parent"
+        android:layout_height="45dp"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center"
+        android:text="自动切换时间点：08:00,12:00,18:00,22:00（点击修改）"
+        android:textColor="@color/textColor"
+        android:textSize="16sp" />
+
+    <TextView
         android:textColor="@color/textColor"
         android:id="@+id/tv"
         android:text="点击修改壁纸最小切换时间"
