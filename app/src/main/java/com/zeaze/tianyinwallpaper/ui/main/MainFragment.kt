@@ -64,6 +64,7 @@ class MainFragment : BaseFragment() {
     private var topScrim: ImageView? = null
     private var topScrimBitmap: Bitmap? = null
     private var topScrimUpdatePending = false
+    private var topScrimBlurRadius = 0f
     private var selectionMode = false
     private val list: MutableList<TianYinWallpaperModel> = ArrayList()
     private var model: TianYinWallpaperModel? = null
@@ -78,7 +79,6 @@ class MainFragment : BaseFragment() {
 
     private val topScrimScrollListener: RecyclerView.OnScrollListener = object : RecyclerView.OnScrollListener() {
         override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-            if (kotlin.math.abs(dy) < TOP_SCRIM_SCROLL_THRESHOLD) return
             requestTopScrimBlurUpdate()
         }
     }
@@ -103,9 +103,6 @@ class MainFragment : BaseFragment() {
         deleteSelected = rootView.findViewById(R.id.delete_selected)
         topScrim = rootView.findViewById(R.id.top_scrim)
         tv = rootView.findViewById(R.id.tv)
-        if (topScrim != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            topScrim?.setRenderEffect(RenderEffect.createBlurEffect(TOP_SCRIM_BLUR_RADIUS, TOP_SCRIM_BLUR_RADIUS, Shader.TileMode.CLAMP))
-        }
         val topBar: View? = rootView.findViewById(R.id.fl)
         if (topBar != null) {
             ViewCompat.setOnApplyWindowInsetsListener(topBar) { v, insets ->
@@ -197,9 +194,16 @@ class MainFragment : BaseFragment() {
         val canvas = Canvas(topScrimBitmap!!)
         rv!!.draw(canvas)
         topScrim!!.setImageBitmap(topScrimBitmap)
+        topScrimBlurRadius = calculateTopScrimBlurRadius()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            topScrim!!.setRenderEffect(RenderEffect.createBlurEffect(TOP_SCRIM_BLUR_RADIUS, TOP_SCRIM_BLUR_RADIUS, Shader.TileMode.CLAMP))
+            topScrim!!.setRenderEffect(RenderEffect.createBlurEffect(topScrimBlurRadius, topScrimBlurRadius, Shader.TileMode.CLAMP))
         }
+    }
+
+    private fun calculateTopScrimBlurRadius(): Float {
+        val scrollOffset = rv?.computeVerticalScrollOffset()?.toFloat() ?: 0f
+        val blurProgress = (scrollOffset / TOP_SCRIM_MAX_SCROLL_FOR_BLUR).coerceIn(0f, 1f)
+        return TOP_SCRIM_MAX_BLUR_RADIUS * blurProgress
     }
 
     private fun requestTopScrimBlurUpdate() {
@@ -575,8 +579,8 @@ class MainFragment : BaseFragment() {
         private const val DEFAULT_AUTO_SWITCH_TIME_POINTS = "08:00,12:00,18:00,22:00"
         private const val AUTO_SWITCH_MODE_NONE = 0
         private val AUTO_SWITCH_MODE_ITEMS = arrayOf("手动切换", "按固定时间间隔切换", "按每日时间点切换")
-        private const val TOP_SCRIM_BLUR_RADIUS = 24f
-        private const val TOP_SCRIM_SCROLL_THRESHOLD = 2
+        private const val TOP_SCRIM_MAX_BLUR_RADIUS = 24f
+        private const val TOP_SCRIM_MAX_SCROLL_FOR_BLUR = 300f
         var column = 3
     }
 }
