@@ -79,7 +79,7 @@ class WallpaperAdapter(context: Context, private val list: MutableList<TianYinWa
         } else {
             holder.tr.text = "动态"
         }
-        if (model.startTime == -1 or (model.endTime == -1)) {
+        if (model.startTime == -1 || model.endTime == -1) {
             holder.time.visibility = View.INVISIBLE
         } else {
             holder.time.text = getTimeString(model.startTime) + " - " + getTimeString(model.endTime)

@@ -152,7 +152,7 @@ class SettingFragment : BaseFragment() {
 
     private fun refreshAutoSwitchSettingView(modeView: TextView, intervalView: TextView, pointsView: TextView) {
         val mode = pref?.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE) ?: AUTO_SWITCH_MODE_NONE
-        val modeText = if (mode in AUTO_SWITCH_MODE_NONE until AUTO_SWITCH_MODE_ITEMS.size) {
+        val modeText = if (mode >= AUTO_SWITCH_MODE_NONE && mode < AUTO_SWITCH_MODE_ITEMS.size) {
             AUTO_SWITCH_MODE_ITEMS[mode]
         } else {
             AUTO_SWITCH_MODE_ITEMS[AUTO_SWITCH_MODE_NONE]

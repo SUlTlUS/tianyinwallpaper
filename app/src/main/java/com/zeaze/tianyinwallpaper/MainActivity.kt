@@ -118,7 +118,7 @@ class MainActivity : BaseActivity() {
                 }
             }
             val cache = getSharedPreferences("tianyin", MODE_PRIVATE).getString("wallpaperCache", "")
-            if (cache != "") {
+            if (!cache.isNullOrEmpty()) {
                 list = JSON.parseArray(cache, TianYinWallpaperModel::class.java)
                 for (model in list) {
                     uuids.add(model.uuid)
