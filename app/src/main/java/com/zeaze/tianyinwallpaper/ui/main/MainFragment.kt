@@ -156,7 +156,8 @@ class MainFragment : BaseFragment() {
             Thread {
                 FileUtil.save(requireContext(), JSON.toJSONString(list), FileUtil.wallpaperPath, object : FileUtil.OnSave {
                     override fun onSave() {
-                        activity?.runOnUiThread {
+                        val hostActivity = activity ?: return
+                        hostActivity.runOnUiThread {
                             val wallpaperManager = WallpaperManager.getInstance(context)
                             try {
                                 wallpaperManager.clear()
@@ -167,7 +168,7 @@ class MainFragment : BaseFragment() {
                             intent.action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
                             intent.putExtra(
                                 WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                                ComponentName(activity, TianYinWallpaperService::class.java)
+                                ComponentName(hostActivity, TianYinWallpaperService::class.java)
                             )
                             wallpaperLaunch.launch(intent)
                         }
