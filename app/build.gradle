@@ -5,7 +5,7 @@ android {
     compileSdk 33
     defaultConfig {
         applicationId "com.zeaze.tianyinwallpaper"
-        minSdk 20
+        minSdk 21
         targetSdk 33
         versionCode 30
         versionName "3.0"
