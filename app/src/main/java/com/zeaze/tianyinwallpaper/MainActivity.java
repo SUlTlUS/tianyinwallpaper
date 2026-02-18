@@ -57,7 +57,7 @@ public class MainActivity extends BaseActivity  {
         fragments=new ArrayList<>();
         titles.add("壁纸");
         titles.add("设置");
-        titles.add("关于");
+        titles.add("壁纸组");
         fragments.add(new MainFragment());
         fragments.add(new SettingFragment());
         fragments.add(new AboutFragment());
