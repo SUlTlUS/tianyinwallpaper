@@ -11,40 +11,32 @@
         android:background="@color/imgWhite"
         android:scaleType="centerCrop"/>
 
-    <LinearLayout
-        android:orientation="vertical"
+    <com.zeaze.tianyinwallpaper.widget.NoScrollViewPager
+        android:id="@+id/view_pager"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:id="@+id/main">
+        android:layout_height="match_parent"/>
 
-        <com.zeaze.tianyinwallpaper.widget.NoScrollViewPager
-            android:id="@+id/view_pager"
+    <FrameLayout
+        android:id="@+id/linearLayout"
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="10dp"
+        android:padding="10dp">
+
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/tab_layout"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"/>
+            android:layout_height="match_parent"
+            android:background="@drawable/tab_glass_background"
+            app:elevation="0dp"
+            app:tabGravity="fill"
+            app:tabIndicatorColor="#991A2433"
+            app:tabIndicatorFullWidth="false"
+            app:tabIndicatorHeight="2dp"
+            app:tabMode="fixed"
+            app:tabTextColor="@color/tab_text_color" />
 
-        <LinearLayout
-            android:id="@+id/linearLayout"
-            android:layout_width="match_parent"
-            android:layout_height="72dp"
-            android:orientation="horizontal"
-            android:padding="10dp">
-
-            <com.google.android.material.tabs.TabLayout
-                android:id="@+id/tab_layout"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@drawable/tab_glass_background"
-                app:elevation="0dp"
-                app:tabGravity="fill"
-                app:tabIndicatorColor="#991A2433"
-                app:tabIndicatorFullWidth="false"
-                app:tabIndicatorHeight="2dp"
-                app:tabMode="fixed"
-                app:tabTextColor="@color/tab_text_color" />
-
-        </LinearLayout>
-
-    </LinearLayout>
+    </FrameLayout>
 
 </FrameLayout>
