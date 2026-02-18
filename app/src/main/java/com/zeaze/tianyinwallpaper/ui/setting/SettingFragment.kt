@@ -4,6 +4,7 @@ import android.content.DialogInterface
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
 import android.text.Html
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -12,88 +13,200 @@ import android.text.method.LinkMovementMethod
 import android.text.style.URLSpan
 import android.view.LayoutInflater
 import android.view.View
-import android.widget.CheckBox
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.core.content.ContextCompat
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.Checkbox
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.fragment.app.Fragment
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
-import com.zeaze.tianyinwallpaper.base.BaseFragment
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 
-class SettingFragment : BaseFragment() {
-    private var pref: SharedPreferences? = null
-    private var editor: SharedPreferences.Editor? = null
+class SettingFragment : Fragment() {
+    private lateinit var pref: SharedPreferences
+    private lateinit var editor: SharedPreferences.Editor
 
-    override fun init() {
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
         pref = requireContext().getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE)
-        editor = pref?.edit()
-        bindWallpaperSetting()
-        bindAboutInfo()
-    }
-
-    override fun getLayout(): Int {
-        return R.layout.setting_fragment
-    }
-
-    private fun bindWallpaperSetting() {
-        val checkBox: CheckBox = rootView.findViewById(R.id.checkBox)
-        checkBox.isChecked = pref?.getBoolean("rand", false) == true
-        checkBox.setOnCheckedChangeListener { _, isChecked ->
-            editor?.putBoolean("rand", isChecked)
-            editor?.apply()
-        }
-
-        val checkBox2: CheckBox = rootView.findViewById(R.id.checkBox2)
-        checkBox2.isChecked = pref?.getBoolean("pageChange", false) == true
-        checkBox2.setOnCheckedChangeListener { _, isChecked ->
-            editor?.putBoolean("pageChange", isChecked)
-            editor?.apply()
-        }
-
-        val checkBox3: CheckBox = rootView.findViewById(R.id.checkBox3)
-        checkBox3.isChecked = pref?.getBoolean("needBackgroundPlay", false) == true
-        checkBox3.setOnCheckedChangeListener { _, isChecked ->
-            editor?.putBoolean("needBackgroundPlay", isChecked)
-            editor?.apply()
-        }
-
-        val checkBox4: CheckBox = rootView.findViewById(R.id.checkBox4)
-        checkBox4.isChecked = pref?.getBoolean("wallpaperScroll", false) == true
-        checkBox4.setOnCheckedChangeListener { _, isChecked ->
-            editor?.putBoolean("wallpaperScroll", isChecked)
-            editor?.apply()
-        }
-
-        val minTimeView: TextView = rootView.findViewById(R.id.tv)
-        minTimeView.text = "壁纸最小切换时间:${pref?.getInt("minTime", 1)}秒（点击修改）"
-        minTimeView.setOnClickListener {
-            setMinTime(DialogInterface.OnDismissListener {
-                minTimeView.text = "壁纸最小切换时间:${pref?.getInt("minTime", 1)}秒"
-            })
-        }
-
-        val autoSwitchModeView: TextView = rootView.findViewById(R.id.autoSwitchModeView)
-        val autoSwitchIntervalView: TextView = rootView.findViewById(R.id.autoSwitchIntervalView)
-        val autoSwitchPointsView: TextView = rootView.findViewById(R.id.autoSwitchPointsView)
-        refreshAutoSwitchSettingView(autoSwitchModeView, autoSwitchIntervalView, autoSwitchPointsView)
-        autoSwitchModeView.setOnClickListener {
-            showAutoSwitchModeDialog(Runnable {
-                refreshAutoSwitchSettingView(autoSwitchModeView, autoSwitchIntervalView, autoSwitchPointsView)
-            })
+        editor = pref.edit()
+        return ComposeView(requireContext()).apply {
+            setContent {
+                MaterialTheme {
+                    SettingScreen()
+                }
+            }
         }
     }
 
-    private fun bindAboutInfo() {
-        val about: TextView = rootView.findViewById(R.id.about)
-        about.movementMethod = LinkMovementMethod.getInstance()
+    @Composable
+    private fun SettingScreen() {
+        var rand by remember { mutableStateOf(pref.getBoolean("rand", false)) }
+        var pageChange by remember { mutableStateOf(pref.getBoolean("pageChange", false)) }
+        var needBackgroundPlay by remember { mutableStateOf(pref.getBoolean("needBackgroundPlay", false)) }
+        var wallpaperScroll by remember { mutableStateOf(pref.getBoolean("wallpaperScroll", false)) }
+        var minTime by remember { mutableStateOf(pref.getInt("minTime", 1)) }
+        var autoSwitchMode by remember {
+            mutableStateOf(
+                pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE)
+            )
+        }
+        var autoSwitchInterval by remember {
+            mutableStateOf(
+                pref.getLong(
+                    TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_MINUTES,
+                    DEFAULT_AUTO_SWITCH_INTERVAL_MINUTES
+                )
+            )
+        }
+        var autoSwitchPoints by remember {
+            mutableStateOf(
+                pref.getString(TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS, DEFAULT_AUTO_SWITCH_TIME_POINTS)
+                    .takeUnless { TextUtils.isEmpty(it) } ?: DEFAULT_AUTO_SWITCH_TIME_POINTS
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .background(MaterialTheme.colors.background)
+                .verticalScroll(rememberScrollState())
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SettingCheckItem("随机切换壁纸", rand) {
+                rand = it
+                editor.putBoolean("rand", it).apply()
+            }
+            SettingCheckItem("进入桌面切换壁纸", pageChange) {
+                pageChange = it
+                editor.putBoolean("pageChange", it).apply()
+            }
+            SettingCheckItem("后台播放动态壁纸", needBackgroundPlay) {
+                needBackgroundPlay = it
+                editor.putBoolean("needBackgroundPlay", it).apply()
+            }
+            SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll) {
+                wallpaperScroll = it
+                editor.putBoolean("wallpaperScroll", it).apply()
+            }
+            SettingTextItem("壁纸最小切换时间:${minTime}秒（点击修改）") {
+                setMinTime(DialogInterface.OnDismissListener {
+                    minTime = pref.getInt("minTime", 1)
+                })
+            }
+            val modeText = if (autoSwitchMode >= AUTO_SWITCH_MODE_NONE && autoSwitchMode < AUTO_SWITCH_MODE_ITEMS.size) {
+                AUTO_SWITCH_MODE_ITEMS[autoSwitchMode]
+            } else {
+                AUTO_SWITCH_MODE_ITEMS[AUTO_SWITCH_MODE_NONE]
+            }
+            SettingTextItem("自动切换模式：$modeText（点击修改）") {
+                showAutoSwitchModeDialog(Runnable {
+                    autoSwitchMode =
+                        pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE)
+                    autoSwitchInterval =
+                        pref.getLong(
+                            TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_MINUTES,
+                            DEFAULT_AUTO_SWITCH_INTERVAL_MINUTES
+                        )
+                    autoSwitchPoints =
+                        pref.getString(TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS, DEFAULT_AUTO_SWITCH_TIME_POINTS)
+                            .takeUnless { TextUtils.isEmpty(it) } ?: DEFAULT_AUTO_SWITCH_TIME_POINTS
+                })
+            }
+            Text(
+                text = "自动切换间隔：${autoSwitchInterval}分钟",
+                style = MaterialTheme.typography.body2,
+                color = MaterialTheme.colors.onBackground
+            )
+            Text(
+                text = "自动切换时间点：$autoSwitchPoints",
+                style = MaterialTheme.typography.body2,
+                color = MaterialTheme.colors.onBackground
+            )
+            AndroidView(
+                factory = { context ->
+                    TextView(context).apply {
+                        movementMethod = LinkMovementMethod.getInstance()
+                        setTextColor(ContextCompat.getColor(context, R.color.textColor))
+                        textSize = 12f
+                        setPadding(10, 10, 10, 10)
+                        background = ContextCompat.getDrawable(context, R.drawable.edit_background)
+                    }
+                },
+                update = {
+                    it.text = getAboutText()
+                }
+            )
+        }
+    }
+
+    @Composable
+    private fun SettingCheckItem(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.body1,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onCheckedChange(!checked) }
+            )
+            Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
+
+    @Composable
+    private fun SettingTextItem(label: String, onClick: () -> Unit) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.body1,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onClick() }
+                .padding(vertical = 6.dp)
+        )
+    }
+
+    private fun getAboutText(): CharSequence {
         var verName = "获取失败"
         try {
             verName = requireActivity().packageManager.getPackageInfo(requireActivity().packageName, 0).versionName
         } catch (e: PackageManager.NameNotFoundException) {
             e.printStackTrace()
         }
-        about.text = getClickableHtml(
+        return getClickableHtml(
             "天音壁纸是一个用来设置壁纸的软件>_< <br>\n" +
                 "点击“增加壁纸”，可以增加当前壁纸组的壁纸<br>\n" +
                 "点击“应用本组”，会把当前壁纸组设置为手机壁纸，每次进入桌面，都会更新显示壁纸组里的下一张壁纸<br>\n" +
@@ -131,7 +244,7 @@ class SettingFragment : BaseFragment() {
     private fun setMinTime(onDismissListener: DialogInterface.OnDismissListener) {
         val editView = LayoutInflater.from(context).inflate(R.layout.main_edit, null)
         val et: EditText = editView.findViewById(R.id.tv)
-        et.setText((pref?.getInt("minTime", 1) ?: 1).toString())
+        et.setText(pref.getInt("minTime", 1).toString())
         et.hint = "请输入整数"
         AlertDialog.Builder(requireContext())
             .setView(editView)
@@ -139,10 +252,10 @@ class SettingFragment : BaseFragment() {
             .setPositiveButton("确定") { _, _ ->
                 try {
                     val i = et.text.toString().toInt()
-                    editor?.putInt("minTime", i)
-                    editor?.apply()
+                    editor.putInt("minTime", i)
+                    editor.apply()
                 } catch (e: Exception) {
-                    toast("请输入整数")
+                    Toast.makeText(requireContext(), "请输入整数", Toast.LENGTH_SHORT).show()
                 }
             }
             .setCancelable(false)
@@ -150,29 +263,15 @@ class SettingFragment : BaseFragment() {
             .show()
     }
 
-    private fun refreshAutoSwitchSettingView(modeView: TextView, intervalView: TextView, pointsView: TextView) {
-        val mode = pref?.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE) ?: AUTO_SWITCH_MODE_NONE
-        val modeText = if (mode >= AUTO_SWITCH_MODE_NONE && mode < AUTO_SWITCH_MODE_ITEMS.size) {
-            AUTO_SWITCH_MODE_ITEMS[mode]
-        } else {
-            AUTO_SWITCH_MODE_ITEMS[AUTO_SWITCH_MODE_NONE]
-        }
-        modeView.text = "自动切换模式：$modeText（点击修改）"
-        intervalView.text = "自动切换间隔：${pref?.getLong(TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_MINUTES, DEFAULT_AUTO_SWITCH_INTERVAL_MINUTES)}分钟（点击修改）"
-        var points = pref?.getString(TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS, DEFAULT_AUTO_SWITCH_TIME_POINTS)
-        points = if (TextUtils.isEmpty(points)) DEFAULT_AUTO_SWITCH_TIME_POINTS else points
-        pointsView.text = "自动切换时间点：$points（点击修改）"
-    }
-
     private fun showAutoSwitchModeDialog(onDismiss: Runnable) {
-        val checked = pref?.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE) ?: AUTO_SWITCH_MODE_NONE
+        val checked = pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE)
         AlertDialog.Builder(requireContext())
             .setTitle("选择自动切换模式")
             .setSingleChoiceItems(AUTO_SWITCH_MODE_ITEMS, checked) { dialog, which ->
-                editor?.putInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, which)
-                editor?.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
-                editor?.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
-                editor?.apply()
+                editor.putInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, which)
+                editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
+                editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
+                editor.apply()
                 dialog.dismiss()
             }
             .setOnDismissListener { onDismiss.run() }
