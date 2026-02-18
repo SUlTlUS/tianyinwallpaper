@@ -18,7 +18,6 @@ import android.view.View;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
-import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -31,17 +30,12 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.alibaba.fastjson.JSON;
-import com.bumptech.glide.Glide;
 import com.lxj.xpopup.XPopup;
 import com.lxj.xpopup.impl.LoadingPopupView;
-import com.zeaze.tianyinwallpaper.MainActivity;
 import com.zeaze.tianyinwallpaper.App;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants;
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService;
-import com.zeaze.tianyinwallpaper.ui.commom.CommomSave;
-import com.zeaze.tianyinwallpaper.ui.commom.SaveAdapter;
-import com.zeaze.tianyinwallpaper.ui.commom.SaveData;
 import com.zeaze.tianyinwallpaper.utils.FileUtil;
 import com.zeaze.tianyinwallpaper.R;
 import com.zeaze.tianyinwallpaper.base.BaseFragment;
@@ -64,7 +58,6 @@ public class MainFragment extends BaseFragment {
     private RecyclerView rv;
     private GridLayoutManager manager;
     private WallpaperAdapter wallpaperAdapter;
-    private ImageView upload;
     private EditText tv;
     private TextView select,apply;
     private List<TianYinWallpaperModel> list=new ArrayList();;
@@ -99,7 +92,6 @@ public class MainFragment extends BaseFragment {
         );
 
         rv=view.findViewById(R.id.rv);
-        upload =view.findViewById(R.id.upload);
         select =view.findViewById(R.id.select);
         apply =view.findViewById(R.id.apply);
         tv =view.findViewById(R.id.tv);
@@ -114,8 +106,6 @@ public class MainFragment extends BaseFragment {
         pref = getContext().getSharedPreferences(App.TIANYIN,MODE_PRIVATE);
         editor = getContext().getSharedPreferences(App.TIANYIN,MODE_PRIVATE).edit();
 
-        Glide.with(getContext()).load(R.drawable.setting).into(upload);
-        initUpload();
         select.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -370,88 +360,6 @@ public class MainFragment extends BaseFragment {
                     exchange(now);
                     popupView.setTitle("转化壁纸中,进度"+now+"/"+uris.size());
                 }
-            }
-        });
-    }
-
-    private void initUpload(){
-        upload.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                new CommomSave().saveDialog(getContext(), FileUtil.dataPath,new String[]{"保存","壁纸通用设置","清空当前壁纸组"}, new CommomSave.onClickListener() {
-                    @Override
-                    public void onBtnClick(CommomSave save,int i) {
-                        if (i==0){
-                            if (tv.getText().toString().equals("")){
-                                toast("请先输入表名称");
-                                return;
-                            }
-                            SaveData saveData=new SaveData();
-                            saveData.setName(tv.getText().toString());
-                            saveData.setS(JSON.toJSONString(list));
-                            SaveAdapter.getSaveDataList().add(0,saveData);
-                            new Thread(new Runnable() {
-                                @Override
-                                public void run() {
-                                    FileUtil.save(getContext(), JSON.toJSONString(SaveAdapter.getSaveDataList()),FileUtil.dataPath, new FileUtil.onSave() {
-                                        @Override
-                                        public void onSave() {
-                                            getActivity().runOnUiThread(new Runnable() {
-                                                @Override
-                                                public void run() {
-                                                    toast("保存成功");
-                                                    save.adapter.notifyDataSetChanged();
-                                                }
-                                            });
-                                        }
-                                    });
-                                }
-                            }).start();
-                        }
-                        if (i==1){
-                            if (getActivity() instanceof MainActivity) {
-                                ((MainActivity) getActivity()).openSettingPage();
-                            }
-                        }
-                        if (i==2){
-                            TextView textView =(TextView) LayoutInflater.from(getContext()).inflate(R.layout.textview, null);
-                            textView.setText("是否清空表格");
-                            AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
-                            builder.setView(textView)
-                                    .setPositiveButton("确定", new DialogInterface.OnClickListener() {
-                                        public void onClick(DialogInterface dialog, int id) {
-                                            tv.setText("");
-                                            list.clear();
-                                            wallpaperAdapter.tryToNotifyDataSetChanged();
-                                            toast("清空成功");
-                                        }
-                                    })
-                                    .setNeutralButton("取消", new DialogInterface.OnClickListener() {
-                                        @Override
-                                        public void onClick(DialogInterface dialog, int which) {
-
-                                        }
-                                    })
-                                    .create()
-                                    .show();
-                        }
-                    }
-
-                    @Override
-                    public void onListClick(String s, String name, CommomSave save) {
-                        list.clear();
-                        list.addAll(JSON.parseArray(s,TianYinWallpaperModel.class));
-                        wallpaperAdapter.tryToNotifyDataSetChanged();
-                        tv.setText(name);
-                        save.alertDialog.dismiss();
-                    }
-
-                    @Override
-                    public void onListChange() {
-                        toast("操作成功");
-                    }
-                });
-
             }
         });
     }

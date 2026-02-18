@@ -41,6 +41,7 @@ import java.util.List;
 
 public class MainActivity extends BaseActivity  {
     private final static int REQUEST_CODE_SET_WALLPAPER = 0x001;
+    private final static int SETTINGS_TAB_INDEX = 2;
     private TabLayout tabLayout;
     private NoScrollViewPager viewPager;
     private List<String> titles;
@@ -56,11 +57,11 @@ public class MainActivity extends BaseActivity  {
         titles=new ArrayList<>();
         fragments=new ArrayList<>();
         titles.add("壁纸");
-        titles.add("设置");
         titles.add("壁纸组");
+        titles.add("设置");
         fragments.add(new MainFragment());
-        fragments.add(new SettingFragment());
         fragments.add(new AboutFragment());
+        fragments.add(new SettingFragment());
         BaseFragmentAdapter adapter=new BaseFragmentAdapter(getSupportFragmentManager(),titles,fragments);
         viewPager.setAdapter(adapter);
         viewPager.setOffscreenPageLimit(100);
@@ -79,7 +80,7 @@ public class MainActivity extends BaseActivity  {
 
     public void openSettingPage() {
         if (viewPager != null) {
-            viewPager.setCurrentItem(1, true);
+            viewPager.setCurrentItem(SETTINGS_TAB_INDEX, true);
         }
     }
 

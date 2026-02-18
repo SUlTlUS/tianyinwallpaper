@@ -30,14 +30,6 @@
             android:textColor="@color/textColor"
             android:textSize="14sp" />
 
-        <ImageView
-            android:id="@+id/upload"
-            android:layout_width="30dp"
-            android:layout_height="30dp"
-            android:layout_marginTop="1dp"
-            android:layout_gravity="center_vertical|end"
-            android:layout_marginEnd="@dimen/main_top_upload_margin_end" />
-
         <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/select"
             android:layout_width="48dp"
