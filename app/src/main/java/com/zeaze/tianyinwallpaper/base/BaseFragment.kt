@@ -5,8 +5,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.Fragment
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.disposables.Disposable
@@ -21,10 +21,13 @@ abstract class BaseFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         super.onCreateView(inflater, container, savedInstanceState)
-        rootView = inflater.inflate(getLayout(), container, false)
         return ComposeView(requireContext()).apply {
             setContent {
-                AndroidView(factory = { rootView })
+                AndroidView(factory = { context ->
+                    LayoutInflater.from(context).inflate(getLayout(), container, false).also {
+                        rootView = it
+                    }
+                })
             }
         }
     }

@@ -8,6 +8,7 @@ import android.graphics.Point
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -37,16 +38,35 @@ class MainActivity : BaseActivity() {
     private var viewPager: NoScrollViewPager? = null
     private var titles: MutableList<String>? = null
     private var fragments: MutableList<BaseFragment>? = null
+    private var tabsInitialized = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val rootView = LayoutInflater.from(this).inflate(R.layout.activity_main, null, false)
+        val parent = window.decorView.findViewById<ViewGroup>(android.R.id.content)
         setContent {
-            AndroidView(factory = { rootView })
+            AndroidView(factory = { context ->
+                LayoutInflater.from(context).inflate(R.layout.activity_main, parent, false).also { rootView ->
+                    tabLayout = rootView.findViewById(R.id.tab_layout)
+                    viewPager = rootView.findViewById(R.id.view_pager)
+                    setupTabs()
+                }
+            })
         }
-        tabLayout = rootView.findViewById(R.id.tab_layout)
-        viewPager = rootView.findViewById(R.id.view_pager)
 
+        val wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val point = Point()
+        wm.defaultDisplay.getRealSize(point)
+        FileUtil.width = point.x
+        FileUtil.height = point.y
+        permission()
+        clearNoUseFile()
+    }
+
+    private fun setupTabs() {
+        if (tabsInitialized) {
+            return
+        }
+        tabsInitialized = true
         titles = ArrayList()
         fragments = ArrayList()
         titles?.add("壁纸")
@@ -59,14 +79,6 @@ class MainActivity : BaseActivity() {
         viewPager?.adapter = adapter
         viewPager?.offscreenPageLimit = 100
         tabLayout?.setupWithViewPager(viewPager)
-
-        val wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val point = Point()
-        wm.defaultDisplay.getRealSize(point)
-        FileUtil.width = point.x
-        FileUtil.height = point.y
-        permission()
-        clearNoUseFile()
     }
 
     fun openSettingPage() {
