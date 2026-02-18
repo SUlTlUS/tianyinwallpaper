@@ -21,13 +21,10 @@ abstract class BaseFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View {
         super.onCreateView(inflater, container, savedInstanceState)
+        rootView = inflater.inflate(getLayout(), container, false)
         return ComposeView(requireContext()).apply {
             setContent {
-                AndroidView(factory = { context ->
-                    LayoutInflater.from(context).inflate(getLayout(), container, false).also {
-                        rootView = it
-                    }
-                })
+                AndroidView(factory = { rootView })
             }
         }
     }

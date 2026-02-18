@@ -7,7 +7,7 @@ import androidx.fragment.app.FragmentPagerAdapter
 class BaseFragmentAdapter(
     fm: FragmentManager,
     private val titles: List<String>,
-    private val fragments: List<BaseFragment>
+    private val fragments: List<Fragment>
 ) : FragmentPagerAdapter(fm) {
     override fun getPageTitle(position: Int): CharSequence {
         return titles[position]

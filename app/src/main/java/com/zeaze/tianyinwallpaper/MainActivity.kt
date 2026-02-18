@@ -16,13 +16,13 @@ import androidx.appcompat.app.AlertDialog
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.Fragment
 import com.alibaba.fastjson.JSON
 import com.google.android.material.tabs.TabLayout
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.zeaze.tianyinwallpaper.base.BaseActivity
-import com.zeaze.tianyinwallpaper.base.BaseFragment
 import com.zeaze.tianyinwallpaper.base.BaseFragmentAdapter
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.about.AboutFragment
@@ -37,7 +37,7 @@ class MainActivity : BaseActivity() {
     private var tabLayout: TabLayout? = null
     private var viewPager: NoScrollViewPager? = null
     private var titles: MutableList<String>? = null
-    private var fragments: MutableList<BaseFragment>? = null
+    private var fragments: MutableList<Fragment>? = null
     private var tabsInitialized = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
