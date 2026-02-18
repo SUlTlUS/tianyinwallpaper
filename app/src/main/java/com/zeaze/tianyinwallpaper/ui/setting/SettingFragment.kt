@@ -78,9 +78,9 @@ class SettingFragment : BaseFragment() {
         val autoSwitchPointsView: TextView = rootView.findViewById(R.id.autoSwitchPointsView)
         refreshAutoSwitchSettingView(autoSwitchModeView, autoSwitchIntervalView, autoSwitchPointsView)
         autoSwitchModeView.setOnClickListener {
-            showAutoSwitchModeDialog {
+            showAutoSwitchModeDialog(Runnable {
                 refreshAutoSwitchSettingView(autoSwitchModeView, autoSwitchIntervalView, autoSwitchPointsView)
-            }
+            })
         }
     }
 

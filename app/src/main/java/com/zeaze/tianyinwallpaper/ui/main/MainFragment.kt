@@ -322,11 +322,11 @@ class MainFragment : BaseFragment() {
         popupMenu.menu.add(getString(R.string.menu_select_mode))
         popupMenu.menu.add(getString(R.string.menu_setting))
         popupMenu.setOnMenuItemClickListener { item ->
-            if (getString(R.string.menu_select_mode).contentEquals(item.title)) {
+            if (getString(R.string.menu_select_mode).contentEquals(item.title ?: "")) {
                 enterSelectionMode()
                 return@setOnMenuItemClickListener true
             }
-            if (getString(R.string.menu_setting).contentEquals(item.title)) {
+            if (getString(R.string.menu_setting).contentEquals(item.title ?: "")) {
                 if (activity is MainActivity) {
                     (activity as MainActivity).openSettingPage()
                 }

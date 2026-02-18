@@ -115,7 +115,7 @@ class TianYinWallpaperService : WallpaperService() {
         private fun nextWallpaper() {
             if (list.isNullOrEmpty()) return
             index = (index + 1) % list!!.size
-            eglThread?.postRunnable { loadContent() }
+            eglThread?.postRunnable(Runnable { loadContent() })
         }
 
         private fun loadContent() {
@@ -348,12 +348,12 @@ class TianYinWallpaperService : WallpaperService() {
                 iTexId = tex[1]
 
                 GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTexId)
-                GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
                 videoST = SurfaceTexture(vTexId)
                 videoST?.setOnFrameAvailableListener(this@TianYinSolaEngine)
 
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId)
-                GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
 
                 Matrix.setIdentityM(videoSTMatrix, 0)
             }
