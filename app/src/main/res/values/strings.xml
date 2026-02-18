@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">天音壁纸</string>
+    <string name="auto_switch_settings_title">自动切换模式相关设定</string>
+    <string name="other_display_settings_title">其他显示设定</string>
+    <string name="modify_auto_switch_min_time">点击修改自动切换最小时间</string>
+    <string name="auto_switch_min_time_display">自动切换最小时间:%1$d秒（点击修改）</string>
+    <string name="auto_switch_min_time_display_plain">自动切换最小时间:%1$d秒</string>
 </resources>

@@ -13,6 +13,13 @@
         android:textSize="16sp"
         android:layout_width="match_parent"
         android:layout_height="45dp" />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="@string/auto_switch_settings_title"
+        android:textColor="@color/textColor"
+        android:textSize="14sp" />
     <androidx.appcompat.widget.SwitchCompat
         android:id="@+id/checkBox"
         android:layout_width="wrap_content"
@@ -49,6 +56,15 @@
         android:text="只有一张壁纸时是否假装后台播放"
         android:textColor="@color/textColor"/>
 
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="center"
+        android:text="@string/other_display_settings_title"
+        android:textColor="@color/textColor"
+        android:textSize="14sp" />
+
     <CheckBox
         android:id="@+id/checkBox4"
         android:layout_width="wrap_content"
@@ -62,7 +78,7 @@
     <TextView
         android:textColor="@color/textColor"
         android:id="@+id/tv"
-        android:text="点击修改壁纸最小切换时间"
+        android:text="@string/modify_auto_switch_min_time"
         android:layout_marginBottom="20dp"
         android:gravity="center"
         android:textSize="16sp"

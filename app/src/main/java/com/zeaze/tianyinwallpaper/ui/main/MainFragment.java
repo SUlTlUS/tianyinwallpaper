@@ -493,14 +493,14 @@ public class MainFragment extends BaseFragment {
         });
 
         TextView tv=view.findViewById(R.id.tv);
-        tv.setText("壁纸最小切换时间:"+pref.getInt("minTime",1)+"秒（点击修改）");
+        tv.setText(getString(R.string.auto_switch_min_time_display,pref.getInt("minTime",1)));
         tv.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 setMinTime(new DialogInterface.OnDismissListener() {
                     @Override
                     public void onDismiss(DialogInterface dialogInterface) {
-                        tv.setText("壁纸最小切换时间:"+pref.getInt("minTime",1)+"秒");
+                        tv.setText(getString(R.string.auto_switch_min_time_display_plain,pref.getInt("minTime",1)));
                     }
                 });
             }
