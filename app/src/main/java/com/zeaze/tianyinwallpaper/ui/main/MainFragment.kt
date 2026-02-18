@@ -70,7 +70,7 @@ class MainFragment : BaseFragment() {
     private var popupView: LoadingPopupView? = null
 
     private var now = 0
-    private var uris: MutableList<Uri>? = null
+    private var uris: List<Uri>? = null
     private var type = 1
 
     private var pref: SharedPreferences? = null
@@ -439,7 +439,7 @@ class MainFragment : BaseFragment() {
             model = null
             now += 1
             if (now >= (uris?.size ?: 0)) {
-                uris?.clear()
+                uris = null
                 popupView?.dismiss()
             } else {
                 exchange(now)
