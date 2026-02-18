@@ -8,22 +8,22 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <color name="textColor">#99000000</color>
-    <color name="checkColor">#70000000</color>
+    <color name="textColor">#CC1F2A37</color>
+    <color name="checkColor">#991F2A37</color>
 
-    <color name="drawerRed">#FF4040</color>
-    <color name="drawerBackground">#f6f6f6</color>
-    <color name="drawerWhite">#A6ffffff</color>
+    <color name="drawerRed">#80C97F88</color>
+    <color name="drawerBackground">#E6F7F8FB</color>
+    <color name="drawerWhite">#CCFFFFFF</color>
 
-    <color name="imgWhite">#f6f6f6</color>
-    <color name="background">#FF4040</color>
-    <color name="textWhite">#ffffff</color>
-    <color name="textStroke">#efeded</color>
-    <color name="sharedBackground">#f6f6f6</color>
+    <color name="imgWhite">#F1F4F8</color>
+    <color name="background">#99E4EBF4</color>
+    <color name="textWhite">#CCFFFFFF</color>
+    <color name="textStroke">#80FFFFFF</color>
+    <color name="sharedBackground">#CCFFFFFF</color>
 
-    <color name="alphaSharedBackground">#b3f6f6f6</color>
-    <color name="alphaTextWhite">#B3ffffff</color>
-    <color name="alphaTextStroke">#b3efeded</color>
+    <color name="alphaSharedBackground">#B3FFFFFF</color>
+    <color name="alphaTextWhite">#E6FFFFFF</color>
+    <color name="alphaTextStroke">#99FFFFFF</color>
     <color name="alphaTextRankTopRight">#E6ffffff</color>
 
     <color name="segmentingLine">#b3DBDBDB</color>

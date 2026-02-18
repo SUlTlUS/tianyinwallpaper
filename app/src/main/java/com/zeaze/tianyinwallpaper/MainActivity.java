@@ -30,6 +30,7 @@ import com.zeaze.tianyinwallpaper.base.BaseFragmentAdapter;
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel;
 import com.zeaze.tianyinwallpaper.ui.about.AboutFragment;
 import com.zeaze.tianyinwallpaper.ui.main.MainFragment;
+import com.zeaze.tianyinwallpaper.ui.setting.SettingFragment;
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData;
 import com.zeaze.tianyinwallpaper.utils.FileUtil;
 import com.zeaze.tianyinwallpaper.widget.NoScrollViewPager;
@@ -59,8 +60,10 @@ public class MainActivity extends BaseActivity  {
         titles=new ArrayList<>();
         fragments=new ArrayList<>();
         titles.add("壁纸");
+        titles.add("设置");
         titles.add("关于");
         fragments.add(new MainFragment());
+        fragments.add(new SettingFragment());
         fragments.add(new AboutFragment());
         BaseFragmentAdapter adapter=new BaseFragmentAdapter(getSupportFragmentManager(),titles,fragments);
         viewPager.setAdapter(adapter);
@@ -76,6 +79,12 @@ public class MainActivity extends BaseActivity  {
         permission();
         clearNoUseFile();
 
+    }
+
+    public void openSettingPage() {
+        if (viewPager != null) {
+            viewPager.setCurrentItem(1, true);
+        }
     }
 
     @Override

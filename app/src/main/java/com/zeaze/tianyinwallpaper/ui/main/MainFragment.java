@@ -34,6 +34,7 @@ import com.alibaba.fastjson.JSON;
 import com.bumptech.glide.Glide;
 import com.lxj.xpopup.XPopup;
 import com.lxj.xpopup.impl.LoadingPopupView;
+import com.zeaze.tianyinwallpaper.MainActivity;
 import com.zeaze.tianyinwallpaper.App;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus;
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants;
@@ -408,7 +409,9 @@ public class MainFragment extends BaseFragment {
                             }).start();
                         }
                         if (i==1){
-                            wallpaperSetting();
+                            if (getActivity() instanceof MainActivity) {
+                                ((MainActivity) getActivity()).openSettingPage();
+                            }
                         }
                         if (i==2){
                             TextView textView =(TextView) LayoutInflater.from(getContext()).inflate(R.layout.textview, null);
