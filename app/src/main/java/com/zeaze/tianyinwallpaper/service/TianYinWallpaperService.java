@@ -36,6 +36,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class TianYinWallpaperService extends WallpaperService {
+    public static final String PREF_AUTO_SWITCH_ANCHOR_AT = "autoSwitchAnchorAt";
+    public static final String PREF_AUTO_SWITCH_LAST_SWITCH_AT = "autoSwitchLastSwitchAt";
     private final String TAG = "TianYinGL";
 
     @Override
