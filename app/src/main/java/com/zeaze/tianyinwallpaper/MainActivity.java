@@ -16,7 +16,6 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.WindowManager;
-import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import com.alibaba.fastjson.JSON;
@@ -42,7 +41,6 @@ import java.util.List;
 
 public class MainActivity extends BaseActivity  {
     private final static int REQUEST_CODE_SET_WALLPAPER = 0x001;
-    private LinearLayout linearLayout;
     private TabLayout tabLayout;
     private NoScrollViewPager viewPager;
     private List<String> titles;
@@ -54,7 +52,6 @@ public class MainActivity extends BaseActivity  {
         setContentView(R.layout.activity_main);
         tabLayout=findViewById(R.id.tab_layout);
         viewPager=findViewById(R.id.view_pager);
-        linearLayout=findViewById(R.id.linearLayout);
 
         titles=new ArrayList<>();
         fragments=new ArrayList<>();
