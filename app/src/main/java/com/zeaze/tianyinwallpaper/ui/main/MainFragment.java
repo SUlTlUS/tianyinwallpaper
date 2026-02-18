@@ -8,6 +8,9 @@ import android.content.ComponentName;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.net.Uri;
@@ -22,10 +25,12 @@ import android.widget.PopupMenu;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.view.ViewCompat;
@@ -64,12 +69,22 @@ public class MainFragment extends BaseFragment {
     private static final int AUTO_SWITCH_MODE_NONE = 0;
     private static final String[] AUTO_SWITCH_MODE_ITEMS = new String[]{"手动切换", "按固定时间间隔切换", "按每日时间点切换"};
     private static final float TOP_SCRIM_BLUR_RADIUS = 24f;
+    private static final int TOP_SCRIM_SCROLL_THRESHOLD = 2;
     private RecyclerView rv;
     private GridLayoutManager manager;
     private WallpaperAdapter wallpaperAdapter;
     private EditText tv;
     private TextView select,apply,more,cancelSelect,deleteSelected;
-    private View topScrim;
+    private ImageView topScrim;
+    private Bitmap topScrimBitmap;
+    private boolean topScrimUpdatePending = false;
+    private final RecyclerView.OnScrollListener topScrimScrollListener = new RecyclerView.OnScrollListener() {
+        @Override
+        public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+            if (Math.abs(dy) < TOP_SCRIM_SCROLL_THRESHOLD) return;
+            requestTopScrimBlurUpdate();
+        }
+    };
     private boolean selectionMode = false;
     private List<TianYinWallpaperModel> list = new ArrayList();
     public static int column=3;
@@ -134,6 +149,8 @@ public class MainFragment extends BaseFragment {
         });
         wallpaperAdapter.tryToNotifyDataSetChanged();
         helper.attachToRecyclerView(rv);
+        rv.addOnScrollListener(topScrimScrollListener);
+        requestTopScrimBlurUpdate();
 
         pref = getContext().getSharedPreferences(App.TIANYIN,MODE_PRIVATE);
         editor = getContext().getSharedPreferences(App.TIANYIN,MODE_PRIVATE).edit();
@@ -207,6 +224,33 @@ public class MainFragment extends BaseFragment {
         more.setOnClickListener(v -> showMoreMenu(v));
         cancelSelect.setOnClickListener(v -> exitSelectionMode());
         deleteSelected.setOnClickListener(v -> deleteSelectedWallpapers());
+    }
+
+    private void updateTopScrimBlur() {
+        if (topScrim == null || rv == null) return;
+        if (rv.getWidth() <= 0 || topScrim.getHeight() <= 0) return;
+        if (topScrimBitmap == null || topScrimBitmap.getWidth() != rv.getWidth() || topScrimBitmap.getHeight() != topScrim.getHeight()) {
+            if (topScrimBitmap != null && !topScrimBitmap.isRecycled()) {
+                topScrimBitmap.recycle();
+            }
+            topScrimBitmap = Bitmap.createBitmap(rv.getWidth(), topScrim.getHeight(), Bitmap.Config.RGB_565);
+        }
+        topScrimBitmap.eraseColor(Color.TRANSPARENT);
+        Canvas canvas = new Canvas(topScrimBitmap);
+        rv.draw(canvas);
+        topScrim.setImageBitmap(topScrimBitmap);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            topScrim.setRenderEffect(RenderEffect.createBlurEffect(TOP_SCRIM_BLUR_RADIUS, TOP_SCRIM_BLUR_RADIUS, Shader.TileMode.CLAMP));
+        }
+    }
+
+    private void requestTopScrimBlurUpdate() {
+        if (rv == null || topScrimUpdatePending) return;
+        topScrimUpdatePending = true;
+        rv.post(() -> {
+            topScrimUpdatePending = false;
+            updateTopScrimBlur();
+        });
     }
 
     @Override
@@ -599,5 +643,17 @@ public class MainFragment extends BaseFragment {
                 })
                 .setOnDismissListener(dialog -> onDismiss.run())
                 .show();
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (rv != null) {
+            rv.removeOnScrollListener(topScrimScrollListener);
+        }
+        if (topScrimBitmap != null && !topScrimBitmap.isRecycled()) {
+            topScrimBitmap.recycle();
+            topScrimBitmap = null;
+        }
+        super.onDestroyView();
     }
 }
