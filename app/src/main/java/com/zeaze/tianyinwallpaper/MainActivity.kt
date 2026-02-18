@@ -7,9 +7,12 @@ import android.content.pm.PackageManager
 import android.graphics.Point
 import android.net.Uri
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.alibaba.fastjson.JSON
@@ -37,9 +40,12 @@ class MainActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        tabLayout = findViewById(R.id.tab_layout)
-        viewPager = findViewById(R.id.view_pager)
+        val rootView = LayoutInflater.from(this).inflate(R.layout.activity_main, null, false)
+        setContent {
+            AndroidView(factory = { rootView })
+        }
+        tabLayout = rootView.findViewById(R.id.tab_layout)
+        viewPager = rootView.findViewById(R.id.view_pager)
 
         titles = ArrayList()
         fragments = ArrayList()
