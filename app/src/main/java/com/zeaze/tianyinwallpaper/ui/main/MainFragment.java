@@ -8,7 +8,10 @@ import android.content.ComponentName;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -60,6 +63,7 @@ public class MainFragment extends BaseFragment {
     private static final String DEFAULT_AUTO_SWITCH_TIME_POINTS = "08:00,12:00,18:00,22:00";
     private static final int AUTO_SWITCH_MODE_NONE = 0;
     private static final String[] AUTO_SWITCH_MODE_ITEMS = new String[]{"手动切换", "按固定时间间隔切换", "按每日时间点切换"};
+    private static final float TOP_SCRIM_BLUR_RADIUS = 24f;
     private RecyclerView rv;
     private GridLayoutManager manager;
     private WallpaperAdapter wallpaperAdapter;
@@ -106,6 +110,9 @@ public class MainFragment extends BaseFragment {
         deleteSelected =view.findViewById(R.id.delete_selected);
         topScrim = view.findViewById(R.id.top_scrim);
         tv =view.findViewById(R.id.tv);
+        if (topScrim != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            topScrim.setRenderEffect(RenderEffect.createBlurEffect(TOP_SCRIM_BLUR_RADIUS, TOP_SCRIM_BLUR_RADIUS, Shader.TileMode.CLAMP));
+        }
         View topBar = view.findViewById(R.id.fl);
         if (topBar != null) {
             ViewCompat.setOnApplyWindowInsetsListener(topBar, (v, insets) -> {
