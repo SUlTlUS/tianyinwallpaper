@@ -1,29 +1,49 @@
 package com.zeaze.tianyinwallpaper.ui.about
 
-import android.view.LayoutInflater
+import android.content.Context
+import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.Fragment
 import com.alibaba.fastjson.JSON
 import com.bumptech.glide.Glide
 import com.zeaze.tianyinwallpaper.R
-import com.zeaze.tianyinwallpaper.base.BaseFragment
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 
-class AboutFragment : BaseFragment() {
-    private val saveDataList: MutableList<SaveData> = ArrayList()
-    private lateinit var adapter: GroupAdapter
+class AboutFragment : Fragment() {
+    private val saveDataList = mutableStateListOf<SaveData>()
 
-    override fun init() {
-        val rv: RecyclerView = rootView.findViewById(R.id.rv)
-        rv.layoutManager = LinearLayoutManager(context)
-        adapter = GroupAdapter()
-        rv.adapter = adapter
+    override fun onCreateView(
+        inflater: android.view.LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        return ComposeView(requireContext()).apply {
+            setContent {
+                MaterialTheme {
+                    AboutScreen()
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -38,59 +58,106 @@ class AboutFragment : BaseFragment() {
             activity?.runOnUiThread {
                 saveDataList.clear()
                 saveDataList.addAll(list)
-                adapter.notifyDataSetChanged()
             }
         }.start()
     }
 
-    override fun getLayout(): Int {
-        return R.layout.about_fragment
-    }
-
-    private inner class GroupAdapter : RecyclerView.Adapter<GroupAdapter.ViewHolder>() {
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val itemView = LayoutInflater.from(parent.context).inflate(R.layout.about_group_item, parent, false)
-            return ViewHolder(itemView)
-        }
-
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val data = saveDataList[position]
-            val name = data.name
-            holder.name.text = if (name.isNullOrEmpty()) "未命名壁纸组" else name
-            val wallPapers = JSON.parseArray(data.s, TianYinWallpaperModel::class.java)
-            bindPreview(holder.previews, wallPapers)
-        }
-
-        override fun getItemCount(): Int {
-            return saveDataList.size
-        }
-
-        inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-            val name: TextView = itemView.findViewById(R.id.name)
-            val previews: Array<ImageView> = arrayOf(
-                itemView.findViewById(R.id.preview1),
-                itemView.findViewById(R.id.preview2),
-                itemView.findViewById(R.id.preview3),
-                itemView.findViewById(R.id.preview4)
-            )
-        }
-    }
-
-    private fun bindPreview(previews: Array<ImageView>, wallpapers: List<TianYinWallpaperModel>?) {
-        for (i in previews.indices) {
-            val imageView = previews[i]
-            if (wallpapers != null && i < wallpapers.size) {
-                val model = wallpapers[i]
-                var path = if (model.type == 1) model.videoUri else model.imgUri
-                if (path.isNullOrEmpty()) {
-                    path = model.imgPath
-                }
-                imageView.visibility = View.VISIBLE
-                Glide.with(imageView.context).load(path).into(imageView)
-            } else {
-                imageView.setImageDrawable(null)
-                imageView.visibility = View.INVISIBLE
+    @Composable
+    private fun AboutScreen() {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(saveDataList, key = { "${it.name ?: ""}\u0000${it.s ?: ""}" }) { data ->
+                AboutGroupItem(data)
             }
         }
+    }
+
+    @Composable
+    private fun AboutGroupItem(data: SaveData) {
+        val wallpapers = remember(data.s) {
+            JSON.parseArray(data.s, TianYinWallpaperModel::class.java) ?: emptyList()
+        }
+        AndroidView(
+            modifier = Modifier.fillMaxWidth(),
+            factory = { context ->
+                val root = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(10, 10, 10, 10)
+                    background = ContextCompat.getDrawable(context, R.drawable.edit_background)
+                }
+                val nameView = TextView(context).apply {
+                    id = View.generateViewId()
+                    setTextColor(ContextCompat.getColor(context, R.color.textColor))
+                    textSize = 14f
+                    maxLines = 1
+                }
+                root.addView(
+                    nameView,
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    )
+                )
+                val previewsRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                }
+                root.setTag(R.id.name, nameView)
+                root.setTag(R.id.about_previews_row_tag, previewsRow)
+                val rowParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ITEM_PREVIEW_HEIGHT_DP.dpToPx(context)
+                ).apply {
+                    topMargin = ITEM_PREVIEW_TOP_MARGIN_DP.dpToPx(context)
+                }
+                root.addView(previewsRow, rowParams)
+                repeat(PREVIEW_COUNT) { index ->
+                    val imageView = ImageView(context).apply {
+                        scaleType = ImageView.ScaleType.CENTER_CROP
+                        background = ContextCompat.getDrawable(context, R.drawable.edit_background)
+                    }
+                    val params = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                    if (index > 0) {
+                        params.marginStart = ITEM_PREVIEW_SPACING_DP.dpToPx(context)
+                    }
+                    previewsRow.addView(imageView, params)
+                }
+                root
+            },
+            update = { view ->
+                val nameView = view.getTag(R.id.name) as TextView
+                val name = data.name
+                nameView.text = if (name.isNullOrEmpty()) "未命名壁纸组" else name
+                val previewsRow = view.getTag(R.id.about_previews_row_tag) as LinearLayout
+                for (i in 0 until previewsRow.childCount) {
+                    val preview = previewsRow.getChildAt(i) as ImageView
+                    val model = wallpapers.getOrNull(i)
+                    if (model != null) {
+                        var path = if (model.type == 1) model.videoUri else model.imgUri
+                        if (path.isNullOrEmpty()) {
+                            path = model.imgPath
+                        }
+                        preview.visibility = View.VISIBLE
+                        Glide.with(preview.context).load(path).into(preview)
+                    } else {
+                        preview.visibility = View.INVISIBLE
+                    }
+                }
+            }
+        )
+    }
+
+    companion object {
+        private const val ITEM_PREVIEW_HEIGHT_DP = 68
+        private const val ITEM_PREVIEW_TOP_MARGIN_DP = 8
+        private const val ITEM_PREVIEW_SPACING_DP = 6
+        private const val PREVIEW_COUNT = 4
+    }
+
+    private fun Int.dpToPx(context: Context): Int {
+        return (this * context.resources.displayMetrics.density).toInt()
     }
 }
