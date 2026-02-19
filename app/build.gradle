@@ -3,6 +3,7 @@ apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 android {
     namespace 'com.zeaze.tianyinwallpaper'
     compileSdk = 35
+    def releaseKeystore = file(System.getProperty('user.home') + '/.android/debug.keystore')
     defaultConfig {
         applicationId "com.zeaze.tianyinwallpaper"
         minSdk = 21
@@ -17,9 +18,8 @@ android {
         release {
             // Use debug keystore for CI/CD builds
             // For production releases, override with actual signing credentials
-            def keystorePath = System.getProperty('user.home') + '/.android/debug.keystore'
-            if (file(keystorePath).exists()) {
-                storeFile file(keystorePath)
+            if (releaseKeystore.exists()) {
+                storeFile releaseKeystore
                 storePassword "android"
                 keyAlias "androiddebugkey"
                 keyPassword "android"
@@ -32,7 +32,7 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Only use signing config if keystore exists
-            if (file(System.getProperty('user.home') + '/.android/debug.keystore').exists()) {
+            if (signingConfigs.release.storeFile != null) {
                 signingConfig signingConfigs.release
             }
         }
