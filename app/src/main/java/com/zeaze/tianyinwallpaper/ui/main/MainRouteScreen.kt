@@ -93,6 +93,8 @@ private data class ThumbnailCacheKey(
 )
 
 private const val THUMBNAIL_CACHE_MEMORY_DIVISOR = 8L
+private const val THUMBNAIL_VIDEO_WIDTH = 360
+private const val THUMBNAIL_VIDEO_HEIGHT = 640
 private val THUMBNAIL_CACHE = object : LruCache<ThumbnailCacheKey, Bitmap>(
     (Runtime.getRuntime().maxMemory() / THUMBNAIL_CACHE_MEMORY_DIVISOR / 1024L).toInt()
 ) {
@@ -112,23 +114,35 @@ private fun buildThumbnailCacheKey(model: TianYinWallpaperModel): ThumbnailCache
 }
 
 private fun loadThumbnailBitmap(context: android.content.Context, model: TianYinWallpaperModel): Bitmap? {
+    val options = BitmapFactory.Options().apply {
+        inPreferredConfig = Bitmap.Config.RGB_565
+    }
     return runCatching {
         when {
             model.type == 0 && !model.imgUri.isNullOrEmpty() -> {
                 context.contentResolver.openInputStream(Uri.parse(model.imgUri))?.use {
-                    BitmapFactory.decodeStream(it)
+                    BitmapFactory.decodeStream(it, null, options)
                 }
             }
             model.type == 1 && !model.videoUri.isNullOrEmpty() -> {
                 val retriever = MediaMetadataRetriever()
                 try {
                     retriever.setDataSource(context, Uri.parse(model.videoUri))
-                    retriever.getFrameAtTime(0)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+                        retriever.getScaledFrameAtTime(
+                            0,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                            THUMBNAIL_VIDEO_WIDTH,
+                            THUMBNAIL_VIDEO_HEIGHT
+                        )
+                    } else {
+                        retriever.getFrameAtTime(0)
+                    }
                 } finally {
                     retriever.release()
                 }
             }
-            !model.imgPath.isNullOrEmpty() -> BitmapFactory.decodeFile(model.imgPath)
+            !model.imgPath.isNullOrEmpty() -> BitmapFactory.decodeFile(model.imgPath, options)
             else -> null
         }
     }.getOrNull()
@@ -265,18 +279,6 @@ fun MainRouteScreen(
 
     LaunchedEffect(selectionMode) {
         onBottomBarVisibleChange(!selectionMode)
-    }
-
-    LaunchedEffect(wallpapers.size) {
-        val snapshot = wallpapers.toList()
-        withContext(Dispatchers.IO) {
-            snapshot.forEach { model ->
-                val key = buildThumbnailCacheKey(model)
-                if (THUMBNAIL_CACHE.get(key) == null) {
-                    loadThumbnailBitmap(context, model)?.let { THUMBNAIL_CACHE.put(key, it) }
-                }
-            }
-        }
     }
 
     DisposableEffect(Unit) {
@@ -819,7 +821,7 @@ private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWall
         cacheKey
     ) {
         val loaded = withContext(Dispatchers.IO) {
-            loadThumbnailBitmap(context, model)
+            THUMBNAIL_CACHE.get(cacheKey) ?: loadThumbnailBitmap(context, model)
         }
         value = loaded
         loaded?.let { THUMBNAIL_CACHE.put(cacheKey, it) }
