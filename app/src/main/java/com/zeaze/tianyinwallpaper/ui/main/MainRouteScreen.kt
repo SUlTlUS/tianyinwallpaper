@@ -632,10 +632,10 @@ private fun TopMask(statusBarTopPaddingDp: androidx.compose.ui.unit.Dp) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(statusBarTopPaddingDp + 96.dp)
+            .height(statusBarTopPaddingDp + 34.dp)
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xD9F6F8FB), Color(0x66F6F8FB), Color.Transparent)
+                    colors = listOf(Color(0xF2F6F8FB), Color(0x8CF6F8FB), Color.Transparent)
                 )
             )
     )
