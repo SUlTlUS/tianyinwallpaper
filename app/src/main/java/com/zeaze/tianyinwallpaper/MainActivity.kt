@@ -12,7 +12,6 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,9 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,6 +43,12 @@ import com.alibaba.fastjson.JSON
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import com.zeaze.tianyinwallpaper.base.BaseActivity
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.about.AboutRouteScreen
@@ -92,9 +95,11 @@ class MainActivity : BaseActivity() {
             }
             pendingRoute = null
         }
+        val liquidBackdrop = rememberLayerBackdrop()
         Box(modifier = Modifier
             .fillMaxSize()
-            .background(APP_BACKGROUND_COLOR)) {
+            .background(APP_BACKGROUND_COLOR)
+            .layerBackdrop(liquidBackdrop)) {
             NavHost(
                 navController = navController,
                 startDestination = ROUTE_MAIN,
@@ -118,13 +123,16 @@ class MainActivity : BaseActivity() {
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(horizontal = 24.dp, vertical = 14.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
-                            )
+                        .drawBackdrop(
+                            backdrop = liquidBackdrop,
+                            shape = { RoundedCornerShape(26.dp) },
+                            effects = {
+                                vibrancy()
+                                blur(10.dp.toPx())
+                                lens(22.dp.toPx(), 22.dp.toPx())
+                            },
+                            onDrawSurface = { drawRect(Color(0x47FFFFFF)) }
                         )
-                        .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically

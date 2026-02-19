@@ -241,7 +241,7 @@ private fun LinkText(label: String, url: String) {
 private fun getVersionName(context: Context): String {
     var verName = "获取失败"
     try {
-        verName = context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        verName = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "获取失败"
     } catch (e: PackageManager.NameNotFoundException) {
         e.printStackTrace()
     }
