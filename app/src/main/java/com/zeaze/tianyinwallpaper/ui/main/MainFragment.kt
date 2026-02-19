@@ -6,11 +6,6 @@ import android.content.ComponentName
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.SharedPreferences
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -61,9 +56,6 @@ class MainFragment : BaseFragment() {
     private var more: TextView? = null
     private var cancelSelect: TextView? = null
     private var deleteSelected: TextView? = null
-    private var topScrim: ImageView? = null
-    private var topScrimBitmap: Bitmap? = null
-    private var topScrimUpdatePending = false
     private var selectionMode = false
     private val list: MutableList<TianYinWallpaperModel> = ArrayList()
     private var model: TianYinWallpaperModel? = null
@@ -75,13 +67,6 @@ class MainFragment : BaseFragment() {
 
     private var pref: SharedPreferences? = null
     private var editor: SharedPreferences.Editor? = null
-
-    private val topScrimScrollListener: RecyclerView.OnScrollListener = object : RecyclerView.OnScrollListener() {
-        override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-            if (kotlin.math.abs(dy) < TOP_SCRIM_SCROLL_THRESHOLD) return
-            requestTopScrimBlurUpdate()
-        }
-    }
 
     override fun init() {
         addDisposable(
@@ -101,11 +86,9 @@ class MainFragment : BaseFragment() {
         more = rootView.findViewById(R.id.more)
         cancelSelect = rootView.findViewById(R.id.cancel_select)
         deleteSelected = rootView.findViewById(R.id.delete_selected)
-        topScrim = rootView.findViewById(R.id.top_scrim)
+        val topScrim: ImageView? = rootView.findViewById(R.id.top_scrim)
+        topScrim?.visibility = View.GONE
         tv = rootView.findViewById(R.id.tv)
-        if (topScrim != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            topScrim?.setRenderEffect(RenderEffect.createBlurEffect(TOP_SCRIM_BLUR_RADIUS, TOP_SCRIM_BLUR_RADIUS, Shader.TileMode.CLAMP))
-        }
         val topBar: View? = rootView.findViewById(R.id.fl)
         if (topBar != null) {
             ViewCompat.setOnApplyWindowInsetsListener(topBar) { v, insets ->
@@ -129,8 +112,6 @@ class MainFragment : BaseFragment() {
         })
         wallpaperAdapter?.tryToNotifyDataSetChanged()
         helper.attachToRecyclerView(rv)
-        rv?.addOnScrollListener(topScrimScrollListener)
-        requestTopScrimBlurUpdate()
 
         pref = requireContext().getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE)
         editor = requireContext().getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE).edit()
@@ -182,33 +163,6 @@ class MainFragment : BaseFragment() {
         more?.setOnClickListener { v -> showMoreMenu(v) }
         cancelSelect?.setOnClickListener { exitSelectionMode() }
         deleteSelected?.setOnClickListener { deleteSelectedWallpapers() }
-    }
-
-    private fun updateTopScrimBlur() {
-        if (topScrim == null || rv == null) return
-        if (rv!!.width <= 0 || topScrim!!.height <= 0) return
-        if (topScrimBitmap == null || topScrimBitmap!!.width != rv!!.width || topScrimBitmap!!.height != topScrim!!.height) {
-            if (topScrimBitmap != null && !topScrimBitmap!!.isRecycled) {
-                topScrimBitmap!!.recycle()
-            }
-            topScrimBitmap = Bitmap.createBitmap(rv!!.width, topScrim!!.height, Bitmap.Config.RGB_565)
-        }
-        topScrimBitmap!!.eraseColor(Color.TRANSPARENT)
-        val canvas = Canvas(topScrimBitmap!!)
-        rv!!.draw(canvas)
-        topScrim!!.setImageBitmap(topScrimBitmap)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            topScrim!!.setRenderEffect(RenderEffect.createBlurEffect(TOP_SCRIM_BLUR_RADIUS, TOP_SCRIM_BLUR_RADIUS, Shader.TileMode.CLAMP))
-        }
-    }
-
-    private fun requestTopScrimBlurUpdate() {
-        if (rv == null || topScrimUpdatePending) return
-        topScrimUpdatePending = true
-        rv!!.post {
-            topScrimUpdatePending = false
-            updateTopScrimBlur()
-        }
     }
 
     override fun getLayout(): Int {
@@ -349,7 +303,6 @@ class MainFragment : BaseFragment() {
         if (activity is MainActivity) {
             (activity as MainActivity).setBottomBarVisible(false)
         }
-        topScrim?.visibility = View.GONE
         toast(getString(R.string.select_mode_tip))
     }
 
@@ -365,7 +318,6 @@ class MainFragment : BaseFragment() {
         if (activity is MainActivity) {
             (activity as MainActivity).setBottomBarVisible(true)
         }
-        topScrim?.visibility = View.VISIBLE
     }
 
     private fun deleteSelectedWallpapers() {
@@ -564,11 +516,6 @@ class MainFragment : BaseFragment() {
     }
 
     override fun onDestroyView() {
-        rv?.removeOnScrollListener(topScrimScrollListener)
-        if (topScrimBitmap != null && !topScrimBitmap!!.isRecycled) {
-            topScrimBitmap!!.recycle()
-            topScrimBitmap = null
-        }
         super.onDestroyView()
     }
 
@@ -577,8 +524,6 @@ class MainFragment : BaseFragment() {
         private const val DEFAULT_AUTO_SWITCH_TIME_POINTS = "08:00,12:00,18:00,22:00"
         private const val AUTO_SWITCH_MODE_NONE = 0
         private val AUTO_SWITCH_MODE_ITEMS = arrayOf("手动切换", "按固定时间间隔切换", "按每日时间点切换")
-        private const val TOP_SCRIM_BLUR_RADIUS = 24f
-        private const val TOP_SCRIM_SCROLL_THRESHOLD = 2
         var column = 3
     }
 }
