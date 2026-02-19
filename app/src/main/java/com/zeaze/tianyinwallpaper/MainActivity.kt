@@ -146,8 +146,7 @@ class MainActivity : BaseActivity() {
                                         vibrancy()
                                         blur(10.dp.toPx())
                                         lens(22.dp.toPx(), 22.dp.toPx())
-                                    },
-                                    onDrawSurface = { drawRect(Color(0x47FFFFFF)) }
+                                    }
                                 )
                             } else {
                                 clip(RoundedCornerShape(26.dp))

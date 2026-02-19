@@ -378,7 +378,7 @@ fun MainRouteScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFEDEDED))
+            .background(if (enableLiquidGlass) Color.Transparent else Color(0xFFEDEDED))
     ) {
         LazyColumn(
             modifier = Modifier
@@ -725,8 +725,7 @@ private fun MainTopBar(
                                 vibrancy()
                                 blur(8.dp.toPx())
                                 lens(16.dp.toPx(), 16.dp.toPx())
-                            },
-                            onDrawSurface = { drawRect(Color(0x33FFFFFF)) }
+                            }
                         )
                     } else {
                         this
@@ -820,16 +819,15 @@ private fun GlassCircleButton(
                             vibrancy()
                             blur(8.dp.toPx())
                             lens(16.dp.toPx(), 16.dp.toPx())
-                        },
-                        onDrawSurface = { drawRect(Color(0x40FFFFFF)) }
+                        }
                     )
                 } else {
                     this
                 }
             },
         shape = CircleShape,
-        color = Color(0xAAFFFFFF),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x88FFFFFF))
+        color = if (enableLiquidGlass) Color.Transparent else Color(0xAAFFFFFF),
+        border = if (enableLiquidGlass) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0x88FFFFFF))
     ) {
         Box(
             modifier = Modifier
