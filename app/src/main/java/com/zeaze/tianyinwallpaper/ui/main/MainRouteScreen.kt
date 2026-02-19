@@ -10,6 +10,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.Settings
 import android.util.Log
+import android.util.LruCache
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -82,6 +83,23 @@ import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private data class ThumbnailCacheKey(
+    val type: Int,
+    val uuid: String,
+    val imgUri: String,
+    val videoUri: String,
+    val imgPath: String
+)
+
+private const val THUMBNAIL_CACHE_MEMORY_DIVISOR = 8L
+private val THUMBNAIL_CACHE = object : LruCache<ThumbnailCacheKey, Bitmap>(
+    (Runtime.getRuntime().maxMemory() / THUMBNAIL_CACHE_MEMORY_DIVISOR / 1024L).toInt()
+) {
+    override fun sizeOf(key: ThumbnailCacheKey, value: Bitmap): Int {
+        return value.byteCount / 1024
+    }
+}
 
 @Composable
 fun MainRouteScreen(
@@ -750,8 +768,18 @@ private fun GlassCircleButton(
 @Composable
 private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWallpaperModel) {
     val context = LocalContext.current
-    val bitmapState = produceState<Bitmap?>(initialValue = null, model.type, model.imgUri, model.videoUri, model.imgPath) {
-        value = withContext(Dispatchers.IO) {
+    val cacheKey = ThumbnailCacheKey(
+        type = model.type,
+        uuid = model.uuid.orEmpty(),
+        imgUri = model.imgUri.orEmpty(),
+        videoUri = model.videoUri.orEmpty(),
+        imgPath = model.imgPath.orEmpty()
+    )
+    val bitmapState = produceState<Bitmap?>(
+        initialValue = THUMBNAIL_CACHE.get(cacheKey),
+        cacheKey
+    ) {
+        val loaded = withContext(Dispatchers.IO) {
             runCatching {
                 when {
                     model.type == 0 && !model.imgUri.isNullOrEmpty() -> {
@@ -773,6 +801,8 @@ private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWall
                 }
             }.getOrNull()
         }
+        value = loaded
+        loaded?.let { THUMBNAIL_CACHE.put(cacheKey, it) }
     }
     bitmapState.value?.let { bitmap ->
         Image(
