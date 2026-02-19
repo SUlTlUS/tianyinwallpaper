@@ -40,7 +40,6 @@ import androidx.compose.material.DropdownMenuItem
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
-import androidx.compose.material.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -69,13 +68,6 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
 import io.reactivex.functions.Consumer
 import java.io.IOException
 import java.util.Collections
@@ -278,12 +270,10 @@ fun MainRouteScreen(
     val rowGroups = remember(wallpapers.size) {
         wallpapers.indices.toList().chunked(3)
     }
-    val liquidBackdrop = rememberLayerBackdrop()
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFEDEDED))
-            .layerBackdrop(liquidBackdrop)
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -372,14 +362,12 @@ fun MainRouteScreen(
         if (selectionMode) {
             SelectionTopBar(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
-                backdrop = liquidBackdrop,
                 onCancelSelect = { exitSelectionMode() }
             )
             GlassCircleButton(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 26.dp),
-                backdrop = liquidBackdrop,
                 label = context.getString(R.string.delete_symbol),
                 onClick = {
                     if (selectedPositions.isEmpty()) {
@@ -392,7 +380,6 @@ fun MainRouteScreen(
         } else {
             MainTopBar(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
-                backdrop = liquidBackdrop,
                 groupName = groupName,
                 onGroupNameChange = {
                     groupName = it
@@ -580,7 +567,6 @@ fun MainRouteScreen(
 @Composable
 private fun MainTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
-    backdrop: LayerBackdrop,
     groupName: String,
     onGroupNameChange: (String) -> Unit,
     onAdd: () -> Unit,
@@ -597,39 +583,19 @@ private fun MainTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        GlassCircleButton(backdrop = backdrop, label = "+", onClick = onAdd)
-        Box(
+        GlassCircleButton(label = "+", onClick = onAdd)
+        OutlinedTextField(
+            value = groupName,
+            onValueChange = onGroupNameChange,
             modifier = Modifier
                 .weight(1f)
-                .height(54.dp)
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { RoundedCornerShape(26.dp) },
-                    effects = {
-                        vibrancy()
-                        blur(8.dp.toPx())
-                        lens(16.dp.toPx(), 16.dp.toPx())
-                    },
-                    onDrawSurface = { drawRect(Color(0x33FFFFFF)) }
-                )
-                .padding(horizontal = 4.dp)
-        ) {
-            OutlinedTextField(
-                value = groupName,
-                onValueChange = onGroupNameChange,
-                modifier = Modifier.fillMaxSize(),
-                singleLine = true,
-                shape = RoundedCornerShape(26.dp),
-                label = { Text("输入壁纸组名称") },
-                colors = TextFieldDefaults.outlinedTextFieldColors(
-                    backgroundColor = Color.Transparent,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
-                )
-            )
-        }
+                .height(54.dp),
+            singleLine = true,
+            shape = RoundedCornerShape(26.dp),
+            label = { Text("输入壁纸组名称") }
+        )
         Box {
-            GlassCircleButton(backdrop = backdrop, label = "…", onClick = { onMoreMenuExpandedChange(true) })
+            GlassCircleButton(label = "…", onClick = { onMoreMenuExpandedChange(true) })
             DropdownMenu(
                 expanded = moreMenuExpanded,
                 onDismissRequest = { onMoreMenuExpandedChange(false) }
@@ -642,14 +608,13 @@ private fun MainTopBar(
                 }
             }
         }
-        GlassCircleButton(backdrop = backdrop, label = "✓", onClick = onApply)
+        GlassCircleButton(label = "✓", onClick = onApply)
     }
 }
 
 @Composable
 private fun SelectionTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
-    backdrop: LayerBackdrop,
     onCancelSelect: () -> Unit
 ) {
     Row(
@@ -658,7 +623,7 @@ private fun SelectionTopBar(
             .padding(top = statusBarTopPaddingDp + 10.dp, end = 8.dp),
         horizontalArrangement = Arrangement.End
     ) {
-        GlassCircleButton(backdrop = backdrop, label = "×", onClick = onCancelSelect)
+        GlassCircleButton(label = "×", onClick = onCancelSelect)
     }
 }
 
@@ -679,27 +644,23 @@ private fun TopMask(statusBarTopPaddingDp: androidx.compose.ui.unit.Dp) {
 @Composable
 private fun GlassCircleButton(
     modifier: Modifier = Modifier,
-    backdrop: LayerBackdrop,
     label: String,
     onClick: () -> Unit
 ) {
-    Box(
-        modifier = modifier
-            .size(48.dp)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { CircleShape },
-                effects = {
-                    vibrancy()
-                    blur(8.dp.toPx())
-                    lens(16.dp.toPx(), 16.dp.toPx())
-                },
-                onDrawSurface = { drawRect(Color(0x40FFFFFF)) }
-            )
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
+    Surface(
+        modifier = modifier.size(48.dp),
+        shape = CircleShape,
+        color = Color(0xAAFFFFFF),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x88FFFFFF))
     ) {
-        Text(text = label, color = Color(0xFF1A2433), fontSize = 20.sp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = label, color = Color(0xFF1A2433), fontSize = 20.sp)
+        }
     }
 }
 
