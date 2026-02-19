@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -36,6 +37,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.navigation.compose.NavHost
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import com.alibaba.fastjson.JSON
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
@@ -50,11 +56,16 @@ import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
 
 class MainActivity : BaseActivity() {
-    private val tabTitleResIds: List<Int> = listOf(R.string.main_tab_wallpaper, R.string.main_tab_groups, R.string.main_tab_settings)
-    private val fragmentContainerId: Int = View.generateViewId()
-    private var selectedTab by mutableStateOf(0)
+    private val tabItems: List<Pair<String, Int>> = listOf(
+        ROUTE_MAIN to R.string.main_tab_wallpaper,
+        ROUTE_ABOUT to R.string.main_tab_groups,
+        ROUTE_SETTING to R.string.main_tab_settings
+    )
+    private val mainContainerId: Int = View.generateViewId()
+    private val aboutContainerId: Int = View.generateViewId()
+    private val settingContainerId: Int = View.generateViewId()
     private var showBottomBar by mutableStateOf(true)
-    private var lastSwitchedTab = -1
+    private var pendingRoute by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,35 +86,34 @@ class MainActivity : BaseActivity() {
 
     @Composable
     private fun MainActivityScreen() {
+        val navController = rememberNavController()
+        val navBackStackEntry by navController.currentBackStackEntryAsState()
+        val currentRoute = navBackStackEntry?.destination?.route ?: ROUTE_MAIN
+        LaunchedEffect(pendingRoute) {
+            val route = pendingRoute ?: return@LaunchedEffect
+            if (currentRoute != route) {
+                navigateToRoute(navController, route)
+            }
+            pendingRoute = null
+        }
         Box(modifier = Modifier
             .fillMaxSize()
             .background(APP_BACKGROUND_COLOR)) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { context ->
-                    FrameLayout(context).apply {
-                        id = fragmentContainerId
-                    }
-                },
-                update = { container ->
-                    val targetTab = selectedTab
-                    if (!container.isAttachedToWindow && targetTab != lastSwitchedTab) {
-                        container.post {
-                            if (!container.isAttachedToWindow) {
-                                return@post
-                            }
-                            if (selectedTab == targetTab && canSwitchTab(container, targetTab)) {
-                                switchTab(targetTab)
-                                lastSwitchedTab = targetTab
-                            }
-                        }
-                    }
-                    if (canSwitchTab(container, targetTab)) {
-                        switchTab(targetTab)
-                        lastSwitchedTab = targetTab
-                    }
+            NavHost(
+                navController = navController,
+                startDestination = ROUTE_MAIN,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(ROUTE_MAIN) {
+                    FragmentHost(routeTag = ROUTE_MAIN, containerId = mainContainerId) { MainFragment() }
                 }
-            )
+                composable(ROUTE_ABOUT) {
+                    FragmentHost(routeTag = ROUTE_ABOUT, containerId = aboutContainerId) { AboutFragment() }
+                }
+                composable(ROUTE_SETTING) {
+                    FragmentHost(routeTag = ROUTE_SETTING, containerId = settingContainerId) { SettingFragment() }
+                }
+            }
             if (showBottomBar) {
                 Row(
                     modifier = Modifier
@@ -114,14 +124,14 @@ class MainActivity : BaseActivity() {
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    tabTitleResIds.forEachIndexed { index, titleRes ->
+                    tabItems.forEach { (route, titleRes) ->
                         Text(
                             text = getString(titleRes),
-                            color = if (selectedTab == index) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
-                            fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
+                            color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
+                            fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
                             modifier = Modifier
                                 .clickable {
-                                    selectedTab = index
+                                    navigateToRoute(navController, route)
                                 }
                                 .padding(horizontal = 8.dp, vertical = 8.dp)
                         )
@@ -131,36 +141,43 @@ class MainActivity : BaseActivity() {
         }
     }
 
-    private fun switchTab(index: Int) {
-        if (index < 0 || index >= tabTitleResIds.size) return
-        val tag = "main_tab_fragment_$index"
-        val currentFragment = supportFragmentManager.findFragmentById(fragmentContainerId)
-        if (currentFragment?.tag == tag) {
-            return
-        }
-        val fragment = supportFragmentManager.findFragmentByTag(tag) ?: createFragment(index)
-        supportFragmentManager.beginTransaction()
-            .replace(fragmentContainerId, fragment, tag)
-            .commit()
+    @Composable
+    private fun FragmentHost(routeTag: String, containerId: Int, factory: () -> Fragment) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context ->
+                FrameLayout(context).apply {
+                    id = containerId
+                }
+            },
+            update = {
+                if (supportFragmentManager.isStateSaved) {
+                    return@AndroidView
+                }
+                val current = supportFragmentManager.findFragmentById(containerId)
+                if (current?.tag == routeTag) {
+                    return@AndroidView
+                }
+                val fragment = supportFragmentManager.findFragmentByTag(routeTag) ?: factory()
+                supportFragmentManager.beginTransaction()
+                    .replace(containerId, fragment, routeTag)
+                    .commit()
+            }
+        )
     }
 
-    private fun canSwitchTab(container: FrameLayout, targetTab: Int): Boolean {
-        return container.id == fragmentContainerId &&
-            container.isAttachedToWindow &&
-            !supportFragmentManager.isStateSaved &&
-            targetTab != lastSwitchedTab
-    }
-
-    private fun createFragment(index: Int): Fragment {
-        return when (index) {
-            0 -> MainFragment()
-            1 -> AboutFragment()
-            else -> SettingFragment()
+    private fun navigateToRoute(navController: NavHostController, route: String) {
+        navController.navigate(route) {
+            popUpTo(ROUTE_MAIN) {
+                saveState = true
+            }
+            restoreState = true
+            launchSingleTop = true
         }
     }
 
     fun openSettingPage() {
-        selectedTab = SETTINGS_TAB_INDEX
+        pendingRoute = ROUTE_SETTING
     }
 
     fun setBottomBarVisible(visible: Boolean) {
@@ -292,7 +309,9 @@ class MainActivity : BaseActivity() {
 
     companion object {
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
-        private const val SETTINGS_TAB_INDEX = 2
+        private const val ROUTE_MAIN = "main"
+        private const val ROUTE_ABOUT = "about"
+        private const val ROUTE_SETTING = "setting"
         private val APP_BACKGROUND_COLOR = Color(0xFFEDEDED)
     }
 }
