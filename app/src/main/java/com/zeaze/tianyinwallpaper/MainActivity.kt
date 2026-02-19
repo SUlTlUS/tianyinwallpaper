@@ -132,7 +132,8 @@ class MainActivity : BaseActivity() {
                 composable(ROUTE_MAIN) {
                     MainRouteScreen(
                         onOpenSettingPage = { openSettingPage() },
-                        onBottomBarVisibleChange = { setBottomBarVisible(it) }
+                        onBottomBarVisibleChange = { setBottomBarVisible(it) },
+                        backdropSource = liquidBackdrop
                     )
                 }
                 composable(ROUTE_ABOUT) {

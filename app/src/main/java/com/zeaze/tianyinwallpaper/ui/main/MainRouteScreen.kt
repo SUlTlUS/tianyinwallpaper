@@ -182,7 +182,8 @@ private fun getVideoThumbnailFile(context: Context, model: TianYinWallpaperModel
 @Composable
 fun MainRouteScreen(
     onOpenSettingPage: () -> Unit,
-    onBottomBarVisibleChange: (Boolean) -> Unit
+    onBottomBarVisibleChange: (Boolean) -> Unit,
+    backdropSource: LayerBackdrop? = null
 ) {
     val context = LocalContext.current
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
@@ -375,7 +376,7 @@ fun MainRouteScreen(
     val rowGroups = remember(wallpapers.size) {
         wallpapers.indices.toList().chunked(3)
     }
-    val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val liquidBackdrop = backdropSource ?: if (enableLiquidGlass) rememberLayerBackdrop() else null
     val contentLayerBackground = MaterialTheme.colors.background
     Box(
         modifier = Modifier
@@ -387,7 +388,7 @@ fun MainRouteScreen(
                 .fillMaxSize()
                 .background(if (enableLiquidGlass) contentLayerBackground else Color.Transparent)
                 .composed {
-                    if (enableLiquidGlass && liquidBackdrop != null) {
+                    if (enableLiquidGlass && liquidBackdrop != null && backdropSource == null) {
                         layerBackdrop(liquidBackdrop)
                     } else {
                         this
