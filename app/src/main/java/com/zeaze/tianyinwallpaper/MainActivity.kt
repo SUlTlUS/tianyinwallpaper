@@ -14,29 +14,38 @@ import androidx.appcompat.app.AlertDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
@@ -67,6 +76,7 @@ import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
+import kotlinx.coroutines.launch
 
 class MainActivity : BaseActivity() {
     private val tabItems: List<Pair<String, Int>> = listOf(
@@ -156,54 +166,122 @@ class MainActivity : BaseActivity() {
                 }
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .safeContentPadding()
-                        .heightIn(min = 64.dp)
-                        .padding(horizontal = 24.dp, vertical = 14.dp)
-                        .composed {
-                            if (enableLiquidGlass && liquidBackdrop != null) {
-                                drawBackdrop(
-                                    backdrop = liquidBackdrop,
-                                    shape = { RoundedCornerShape(26.dp) },
-                                    effects = {
-                                        vibrancy()
-                                        blur(10.dp.toPx())
-                                        lens(22.dp.toPx(), 22.dp.toPx())
-                                    },
-                                    onDrawSurface = { drawRect(glassSurfaceColor) }
-                                )
-                            } else {
-                                clip(RoundedCornerShape(26.dp))
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
-                                        )
-                                    )
-                                    .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
-                            }
-                        }
-                ) {
+                if (enableLiquidGlass && liquidBackdrop != null) {
+                    val animationScope = rememberCoroutineScope()
+                    val pressAnimationSpec = remember {
+                        spring<Float>(
+                            dampingRatio = BOTTOM_BAR_PRESS_DAMPING_RATIO,
+                            stiffness = BOTTOM_BAR_PRESS_STIFFNESS
+                        )
+                    }
                     Row(
                         modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .safeContentPadding()
+                            .height(64.dp)
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceAround,
+                            .padding(horizontal = 24.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         tabItems.forEach { (route, titleRes) ->
-                            Text(
-                                text = getString(titleRes),
-                                color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
-                                fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
+                            val selected = currentRoute == route
+                            val progressAnimation = remember { Animatable(0f) }
+                            val selectedTint = MaterialTheme.colors.primary
+                            LaunchedEffect(selected) {
+                                if (!selected) {
+                                    progressAnimation.snapTo(0f)
+                                }
+                            }
+                            Box(
                                 modifier = Modifier
+                                    .drawBackdrop(
+                                        backdrop = liquidBackdrop,
+                                        shape = { RoundedCornerShape(26.dp) },
+                                        effects = {
+                                            vibrancy()
+                                            blur(BOTTOM_BAR_BLUR_RADIUS.dp.toPx())
+                                            lens(BOTTOM_BAR_LENS_WIDTH.dp.toPx(), BOTTOM_BAR_LENS_HEIGHT.dp.toPx())
+                                        },
+                                        layerBlock = {
+                                            val progress = progressAnimation.value
+                                            val maxScale = (size.width + BOTTOM_BAR_PRESS_EXPANSION_DP.dp.toPx()) / size.width
+                                            val scale = 1f + (maxScale - 1f) * progress
+                                            scaleX = scale
+                                            scaleY = scale
+                                        },
+                                        onDrawSurface = {
+                                            if (selected) {
+                                                drawRect(selectedTint, blendMode = BlendMode.Hue)
+                                                drawRect(selectedTint.copy(alpha = BOTTOM_BAR_SELECTED_TINT_ALPHA))
+                                            } else {
+                                                drawRect(glassSurfaceColor)
+                                            }
+                                        }
+                                    )
+                                    .clip(RoundedCornerShape(26.dp))
                                     .clickable {
                                         navigateToRoute(navController, route)
                                     }
-                                    .padding(horizontal = 8.dp, vertical = 8.dp)
+                                    .pointerInput(route) {
+                                        awaitEachGesture {
+                                            awaitFirstDown()
+                                            animationScope.launch {
+                                                progressAnimation.stop()
+                                                progressAnimation.animateTo(1f, pressAnimationSpec)
+                                            }
+                                            waitForUpOrCancellation()
+                                            animationScope.launch {
+                                                progressAnimation.stop()
+                                                progressAnimation.animateTo(0f, pressAnimationSpec)
+                                            }
+                                        }
+                                    }
+                                    .fillMaxHeight()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = getString(titleRes),
+                                    color = if (selected) Color.White else MaterialTheme.colors.onSurface,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 14.dp)
+                            .clip(RoundedCornerShape(26.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
+                                )
                             )
+                            .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceAround,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            tabItems.forEach { (route, titleRes) ->
+                                Text(
+                                    text = getString(titleRes),
+                                    color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
+                                    fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier
+                                        .clickable {
+                                            navigateToRoute(navController, route)
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -363,5 +441,12 @@ class MainActivity : BaseActivity() {
         const val THEME_MODE_FOLLOW_SYSTEM = 0
         const val THEME_MODE_LIGHT = 1
         const val THEME_MODE_DARK = 2
+        private const val BOTTOM_BAR_BLUR_RADIUS = 4f
+        private const val BOTTOM_BAR_LENS_WIDTH = 16f
+        private const val BOTTOM_BAR_LENS_HEIGHT = 32f
+        private const val BOTTOM_BAR_PRESS_EXPANSION_DP = 16f
+        private const val BOTTOM_BAR_SELECTED_TINT_ALPHA = 0.45f
+        private const val BOTTOM_BAR_PRESS_DAMPING_RATIO = 0.5f
+        private const val BOTTOM_BAR_PRESS_STIFFNESS = 300f
     }
 }
