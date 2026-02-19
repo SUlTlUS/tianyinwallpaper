@@ -19,7 +19,6 @@ import android.text.TextUtils
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.widget.CheckBox
 import android.widget.CompoundButton
 import android.widget.EditText
@@ -31,8 +30,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -83,25 +80,6 @@ class MainFragment : BaseFragment() {
         override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
             if (kotlin.math.abs(dy) < TOP_SCRIM_SCROLL_THRESHOLD) return
             requestTopScrimBlurUpdate()
-        }
-    }
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: android.view.ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        rootView = inflater.inflate(R.layout.main_fragment, container, false)
-        return ComposeView(requireContext()).apply {
-            setContent {
-                AndroidView(factory = {
-                    val parent = rootView.parent
-                    if (parent is ViewGroup) {
-                        parent.removeView(rootView)
-                    }
-                    rootView
-                })
-            }
         }
     }
 

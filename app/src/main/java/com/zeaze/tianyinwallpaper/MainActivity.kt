@@ -87,6 +87,17 @@ class MainActivity : BaseActivity() {
                 },
                 update = { container ->
                     val targetTab = selectedTab
+                    if (!container.isAttachedToWindow && targetTab != lastSwitchedTab) {
+                        container.post {
+                            if (!container.isAttachedToWindow) {
+                                return@post
+                            }
+                            if (selectedTab == targetTab && canSwitchTab(container, targetTab)) {
+                                switchTab(targetTab)
+                                lastSwitchedTab = targetTab
+                            }
+                        }
+                    }
                     if (canSwitchTab(container, targetTab)) {
                         switchTab(targetTab)
                         lastSwitchedTab = targetTab
