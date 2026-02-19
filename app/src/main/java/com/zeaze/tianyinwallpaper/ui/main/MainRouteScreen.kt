@@ -39,6 +39,7 @@ import androidx.compose.material.Button
 import androidx.compose.material.Checkbox
 import androidx.compose.material.DropdownMenu
 import androidx.compose.material.DropdownMenuItem
+import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
@@ -375,14 +376,16 @@ fun MainRouteScreen(
         wallpapers.indices.toList().chunked(3)
     }
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val contentLayerBackground = MaterialTheme.colors.background
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (enableLiquidGlass) Color.Transparent else Color(0xFFEDEDED))
+            .background(if (enableLiquidGlass) Color.Transparent else contentLayerBackground)
     ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .background(if (enableLiquidGlass) contentLayerBackground else Color.Transparent)
                 .composed {
                     if (enableLiquidGlass && liquidBackdrop != null) {
                         layerBackdrop(liquidBackdrop)

@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -38,6 +39,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material.darkColors
+import androidx.compose.material.lightColors
 import androidx.navigation.compose.NavHost
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
@@ -73,9 +77,7 @@ class MainActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
-                MainActivityScreen()
-            }
+            MainActivityScreen()
         }
 
         val wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -89,6 +91,14 @@ class MainActivity : BaseActivity() {
 
     @Composable
     private fun MainActivityScreen() {
+        val pref = remember(this) { getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
+        var themeMode by remember { mutableStateOf(pref.getInt(PREF_THEME_MODE, THEME_MODE_FOLLOW_SYSTEM)) }
+        val useDarkTheme = when (themeMode) {
+            THEME_MODE_DARK -> true
+            THEME_MODE_LIGHT -> false
+            else -> isSystemInDarkTheme()
+        }
+        MaterialTheme(colors = if (useDarkTheme) darkColors() else lightColors()) {
         val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -129,7 +139,11 @@ class MainActivity : BaseActivity() {
                     AboutRouteScreen()
                 }
                 composable(ROUTE_SETTING) {
-                    SettingRouteScreen()
+                    SettingRouteScreen(
+                        onThemeModeChange = { mode ->
+                            themeMode = mode
+                        }
+                    )
                 }
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
@@ -176,6 +190,7 @@ class MainActivity : BaseActivity() {
                     }
                 }
             }
+        }
         }
     }
 
@@ -326,5 +341,9 @@ class MainActivity : BaseActivity() {
         private const val ROUTE_ABOUT = "about"
         private const val ROUTE_SETTING = "setting"
         private val APP_BACKGROUND_COLOR = Color(0xFFEDEDED)
+        const val PREF_THEME_MODE = "themeMode"
+        const val THEME_MODE_FOLLOW_SYSTEM = 0
+        const val THEME_MODE_LIGHT = 1
+        const val THEME_MODE_DARK = 2
     }
 }

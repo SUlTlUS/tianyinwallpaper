@@ -31,10 +31,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.zeaze.tianyinwallpaper.App
+import com.zeaze.tianyinwallpaper.MainActivity
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 
 @Composable
-fun SettingRouteScreen() {
+fun SettingRouteScreen(
+    onThemeModeChange: (Int) -> Unit = {}
+) {
     val context = LocalContext.current
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
@@ -44,6 +47,7 @@ fun SettingRouteScreen() {
     var needBackgroundPlay by remember { mutableStateOf(pref.getBoolean("needBackgroundPlay", false)) }
     var wallpaperScroll by remember { mutableStateOf(pref.getBoolean("wallpaperScroll", false)) }
     var minTime by remember { mutableStateOf(pref.getInt("minTime", 1)) }
+    var themeMode by remember { mutableStateOf(pref.getInt(MainActivity.PREF_THEME_MODE, MainActivity.THEME_MODE_FOLLOW_SYSTEM)) }
     var autoSwitchMode by remember {
         mutableStateOf(pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE))
     }
@@ -59,6 +63,7 @@ fun SettingRouteScreen() {
     var showMinTimeDialog by remember { mutableStateOf(false) }
     var minTimeInput by remember { mutableStateOf(minTime.toString()) }
     var showAutoModeDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -86,6 +91,14 @@ fun SettingRouteScreen() {
         SettingTextItem("壁纸最小切换时间:${minTime}秒（点击修改）") {
             minTimeInput = minTime.toString()
             showMinTimeDialog = true
+        }
+        val themeModeText = when (themeMode) {
+            MainActivity.THEME_MODE_LIGHT -> "浅色"
+            MainActivity.THEME_MODE_DARK -> "深色"
+            else -> "跟随系统"
+        }
+        SettingTextItem("主题模式：$themeModeText（点击修改）") {
+            showThemeDialog = true
         }
         val modeText = if (autoSwitchMode >= AUTO_SWITCH_MODE_NONE && autoSwitchMode < AUTO_SWITCH_MODE_ITEMS.size) {
             AUTO_SWITCH_MODE_ITEMS[autoSwitchMode]
@@ -170,6 +183,36 @@ fun SettingRouteScreen() {
             },
             confirmButton = {
                 Button(onClick = { showAutoModeDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showThemeDialog) {
+        val themeOptions = listOf(
+            MainActivity.THEME_MODE_FOLLOW_SYSTEM to "跟随系统",
+            MainActivity.THEME_MODE_LIGHT to "浅色",
+            MainActivity.THEME_MODE_DARK to "深色"
+        )
+        AlertDialog(
+            onDismissRequest = { showThemeDialog = false },
+            title = { Text("选择主题模式") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    themeOptions.forEach { (mode, label) ->
+                        Button(
+                            onClick = {
+                                editor.putInt(MainActivity.PREF_THEME_MODE, mode).apply()
+                                themeMode = mode
+                                onThemeModeChange(mode)
+                                showThemeDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(if (themeMode == mode) "✓ $label" else label) }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showThemeDialog = false }) { Text("取消") }
             }
         )
     }
