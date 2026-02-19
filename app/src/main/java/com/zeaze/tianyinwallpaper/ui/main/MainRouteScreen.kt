@@ -4,13 +4,16 @@ import android.app.Activity
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.Settings
 import android.util.Log
-import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,22 +38,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.alibaba.fastjson.JSON
-import com.bumptech.glide.Glide
-import com.github.gzuliyujiang.wheelpicker.TimePicker
-import com.github.gzuliyujiang.wheelpicker.annotation.TimeMode
-import com.github.gzuliyujiang.wheelpicker.entity.TimeEntity
-import com.github.gzuliyujiang.wheelpicker.impl.UnitTimeFormatter
-import com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
@@ -62,6 +61,8 @@ import io.reactivex.functions.Consumer
 import java.io.IOException
 import java.util.Collections
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun MainRouteScreen(
@@ -232,20 +233,24 @@ fun MainRouteScreen(
         return s
     }
 
-    fun selectTime(time: Int, onPicked: (Int) -> Unit) {
-        val hostActivity = activity ?: return
-        val picker = TimePicker(hostActivity)
-        val wheelLayout: TimeWheelLayout = picker.wheelLayout
-        wheelLayout.setTimeMode(TimeMode.HOUR_24_NO_SECOND)
-        wheelLayout.setTimeFormatter(UnitTimeFormatter())
-        if (time != -1) {
-            wheelLayout.setDefaultValue(TimeEntity.target(time / 60, time % 60, 0))
+    fun parseTimeText(text: String): Int? {
+        val parts = text.split(":")
+        if (parts.size != 2) return null
+        val hour = parts[0].toIntOrNull() ?: return null
+        val minute = parts[1].toIntOrNull() ?: return null
+        if (hour !in 0..23 || minute !in 0..59) return null
+        return hour * 60 + minute
+    }
+
+    fun parseAndValidateTime(text: String, label: String): Int? {
+        return if (text.isBlank()) {
+            -1
         } else {
-            wheelLayout.setDefaultValue(TimeEntity.target(0, 0, 0))
+            parseTimeText(text) ?: run {
+                toast("$label 格式错误，请使用HH:mm格式")
+                null
+            }
         }
-        wheelLayout.setResetWhenLinkage(false)
-        picker.setOnTimePickedListener { hour, minute, _ -> onPicked(hour * 60 + minute) }
-        picker.show()
     }
 
     Column(
@@ -306,18 +311,9 @@ fun MainRouteScreen(
                         }
                         .background(Color.Black)
                 ) {
-                    AndroidView(
+                    WallpaperCardImage(
                         modifier = Modifier.fillMaxSize(),
-                        factory = { ctx -> ImageView(ctx).apply { scaleType = ImageView.ScaleType.CENTER_CROP } },
-                        update = { iv ->
-                            if (model.type == 0 && !model.imgUri.isNullOrEmpty()) {
-                                Glide.with(context).load(Uri.parse(model.imgUri)).into(iv)
-                            } else if (model.type == 1 && !model.videoUri.isNullOrEmpty()) {
-                                Glide.with(context).load(Uri.parse(model.videoUri)).into(iv)
-                            } else {
-                                Glide.with(context).load(model.imgPath).into(iv)
-                            }
-                        }
+                        model = model
                     )
                     Text(
                         text = if (model.type == 0) "静态" else "动态",
@@ -455,23 +451,33 @@ fun MainRouteScreen(
         if (model != null) {
             var startTime by remember(index) { mutableStateOf(model.startTime) }
             var endTime by remember(index) { mutableStateOf(model.endTime) }
+            var startText by remember(index) { mutableStateOf(if (startTime == -1) "" else getTimeString(startTime)) }
+            var endText by remember(index) { mutableStateOf(if (endTime == -1) "" else getTimeString(endTime)) }
             AlertDialog(
                 onDismissRequest = { timeDialogIndex = null },
                 title = { Text("设置时间条件") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            if (startTime == -1) "开始时间：点击选择" else "开始时间：${getTimeString(startTime)}",
-                            modifier = Modifier.clickable { selectTime(startTime) { startTime = it } }
+                        OutlinedTextField(
+                            value = startText,
+                            onValueChange = { startText = it },
+                            singleLine = true,
+                            label = { Text("开始时间(HH:mm)") }
                         )
-                        Text(
-                            if (endTime == -1) "结束时间：点击选择" else "结束时间：${getTimeString(endTime)}",
-                            modifier = Modifier.clickable { selectTime(endTime) { endTime = it } }
+                        OutlinedTextField(
+                            value = endText,
+                            onValueChange = { endText = it },
+                            singleLine = true,
+                            label = { Text("结束时间(HH:mm)") }
                         )
                     }
                 },
                 confirmButton = {
                     Button(onClick = {
+                        startTime = parseAndValidateTime(startText, "开始时间") ?: return@Button
+                        endTime = parseAndValidateTime(endText, "结束时间") ?: run {
+                            return@Button
+                        }
                         model.startTime = startTime
                         model.endTime = endTime
                         if (model.startTime != -1 && model.endTime == -1) model.endTime = 24 * 60
@@ -482,7 +488,12 @@ fun MainRouteScreen(
                 },
                 dismissButton = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { startTime = -1; endTime = -1 }) { Text("重置") }
+                        Button(onClick = {
+                            startTime = -1
+                            endTime = -1
+                            startText = ""
+                            endText = ""
+                        }) { Text("重置") }
                         Button(onClick = { timeDialogIndex = null }) { Text(context.getString(R.string.common_cancel)) }
                     }
                 }
@@ -608,3 +619,40 @@ fun MainRouteScreen(
 
 private const val AUTO_SWITCH_MODE_NONE = 0
 private val AUTO_SWITCH_MODE_ITEMS = arrayOf("手动切换", "按固定时间间隔切换", "按每日时间点切换")
+
+@Composable
+private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWallpaperModel) {
+    val context = LocalContext.current
+    val bitmapState = produceState<Bitmap?>(initialValue = null, model.type, model.imgUri, model.videoUri, model.imgPath) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                when {
+                    model.type == 0 && !model.imgUri.isNullOrEmpty() -> {
+                        context.contentResolver.openInputStream(Uri.parse(model.imgUri))?.use {
+                            BitmapFactory.decodeStream(it)
+                        }
+                    }
+                    model.type == 1 && !model.videoUri.isNullOrEmpty() -> {
+                        val retriever = MediaMetadataRetriever()
+                        try {
+                            retriever.setDataSource(context, Uri.parse(model.videoUri))
+                            retriever.getFrameAtTime(0)
+                        } finally {
+                            retriever.release()
+                        }
+                    }
+                    !model.imgPath.isNullOrEmpty() -> BitmapFactory.decodeFile(model.imgPath)
+                    else -> null
+                }
+            }.getOrNull()
+        }
+    }
+    bitmapState.value?.let { bitmap ->
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier,
+            contentScale = ContentScale.Crop
+        )
+    }
+}
