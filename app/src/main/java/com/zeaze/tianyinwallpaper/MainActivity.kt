@@ -54,6 +54,7 @@ class MainActivity : BaseActivity() {
     private val fragmentContainerId: Int = View.generateViewId()
     private var selectedTab by mutableStateOf(0)
     private var showBottomBar by mutableStateOf(true)
+    private var lastSwitchedTab = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,8 +85,12 @@ class MainActivity : BaseActivity() {
                         id = fragmentContainerId
                     }
                 },
-                update = {
-                    switchTab(selectedTab)
+                update = { container ->
+                    val targetTab = selectedTab
+                    if (canSwitchTab(container, targetTab)) {
+                        switchTab(targetTab)
+                        lastSwitchedTab = targetTab
+                    }
                 }
             )
             if (showBottomBar) {
@@ -128,6 +133,13 @@ class MainActivity : BaseActivity() {
             .commit()
     }
 
+    private fun canSwitchTab(container: FrameLayout, targetTab: Int): Boolean {
+        return container.id == fragmentContainerId &&
+            container.isAttachedToWindow &&
+            !supportFragmentManager.isStateSaved &&
+            targetTab != lastSwitchedTab
+    }
+
     private fun createFragment(index: Int): Fragment {
         return when (index) {
             0 -> MainFragment()
@@ -141,7 +153,9 @@ class MainActivity : BaseActivity() {
     }
 
     fun setBottomBarVisible(visible: Boolean) {
-        showBottomBar = visible
+        runOnUiThread {
+            showBottomBar = visible
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

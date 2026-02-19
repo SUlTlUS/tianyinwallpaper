@@ -19,6 +19,7 @@ import android.text.TextUtils
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.CheckBox
 import android.widget.CompoundButton
 import android.widget.EditText
@@ -93,7 +94,13 @@ class MainFragment : BaseFragment() {
         rootView = inflater.inflate(R.layout.main_fragment, container, false)
         return ComposeView(requireContext()).apply {
             setContent {
-                AndroidView(factory = { rootView })
+                AndroidView(factory = {
+                    val parent = rootView.parent
+                    if (parent is ViewGroup) {
+                        parent.removeView(rootView)
+                    }
+                    rootView
+                })
             }
         }
     }
