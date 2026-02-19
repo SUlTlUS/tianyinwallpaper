@@ -51,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -65,6 +66,13 @@ import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
@@ -81,6 +89,7 @@ fun MainRouteScreen(
     onBottomBarVisibleChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val activity = context as? Activity
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
@@ -270,10 +279,18 @@ fun MainRouteScreen(
     val rowGroups = remember(wallpapers.size) {
         wallpapers.indices.toList().chunked(3)
     }
+    val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFEDEDED))
+            .composed {
+                if (enableLiquidGlass && liquidBackdrop != null) {
+                    layerBackdrop(liquidBackdrop)
+                } else {
+                    this
+                }
+            }
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -362,12 +379,16 @@ fun MainRouteScreen(
         if (selectionMode) {
             SelectionTopBar(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = liquidBackdrop,
                 onCancelSelect = { exitSelectionMode() }
             )
             GlassCircleButton(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 26.dp),
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = liquidBackdrop,
                 label = context.getString(R.string.delete_symbol),
                 onClick = {
                     if (selectedPositions.isEmpty()) {
@@ -380,6 +401,8 @@ fun MainRouteScreen(
         } else {
             MainTopBar(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = liquidBackdrop,
                 groupName = groupName,
                 onGroupNameChange = {
                     groupName = it
@@ -567,6 +590,8 @@ fun MainRouteScreen(
 @Composable
 private fun MainTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
+    enableLiquidGlass: Boolean,
+    backdrop: LayerBackdrop?,
     groupName: String,
     onGroupNameChange: (String) -> Unit,
     onAdd: () -> Unit,
@@ -583,19 +608,45 @@ private fun MainTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        GlassCircleButton(label = "+", onClick = onAdd)
+        GlassCircleButton(
+            enableLiquidGlass = enableLiquidGlass,
+            backdrop = backdrop,
+            label = "+",
+            onClick = onAdd
+        )
         OutlinedTextField(
             value = groupName,
             onValueChange = onGroupNameChange,
             modifier = Modifier
                 .weight(1f)
-                .height(54.dp),
+                .height(54.dp)
+                .composed {
+                    if (enableLiquidGlass && backdrop != null) {
+                        drawBackdrop(
+                            backdrop = backdrop,
+                            shape = { RoundedCornerShape(26.dp) },
+                            effects = {
+                                vibrancy()
+                                blur(8.dp.toPx())
+                                lens(16.dp.toPx(), 16.dp.toPx())
+                            },
+                            onDrawSurface = { drawRect(Color(0x33FFFFFF)) }
+                        )
+                    } else {
+                        this
+                    }
+                },
             singleLine = true,
             shape = RoundedCornerShape(26.dp),
             label = { Text("输入壁纸组名称") }
         )
         Box {
-            GlassCircleButton(label = "…", onClick = { onMoreMenuExpandedChange(true) })
+            GlassCircleButton(
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = backdrop,
+                label = "…",
+                onClick = { onMoreMenuExpandedChange(true) }
+            )
             DropdownMenu(
                 expanded = moreMenuExpanded,
                 onDismissRequest = { onMoreMenuExpandedChange(false) }
@@ -608,13 +659,20 @@ private fun MainTopBar(
                 }
             }
         }
-        GlassCircleButton(label = "✓", onClick = onApply)
+        GlassCircleButton(
+            enableLiquidGlass = enableLiquidGlass,
+            backdrop = backdrop,
+            label = "✓",
+            onClick = onApply
+        )
     }
 }
 
 @Composable
 private fun SelectionTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
+    enableLiquidGlass: Boolean,
+    backdrop: LayerBackdrop?,
     onCancelSelect: () -> Unit
 ) {
     Row(
@@ -623,7 +681,12 @@ private fun SelectionTopBar(
             .padding(top = statusBarTopPaddingDp + 10.dp, end = 8.dp),
         horizontalArrangement = Arrangement.End
     ) {
-        GlassCircleButton(label = "×", onClick = onCancelSelect)
+        GlassCircleButton(
+            enableLiquidGlass = enableLiquidGlass,
+            backdrop = backdrop,
+            label = "×",
+            onClick = onCancelSelect
+        )
     }
 }
 
@@ -644,11 +707,30 @@ private fun TopMask(statusBarTopPaddingDp: androidx.compose.ui.unit.Dp) {
 @Composable
 private fun GlassCircleButton(
     modifier: Modifier = Modifier,
+    enableLiquidGlass: Boolean,
+    backdrop: LayerBackdrop?,
     label: String,
     onClick: () -> Unit
 ) {
     Surface(
-        modifier = modifier.size(48.dp),
+        modifier = modifier
+            .size(48.dp)
+            .composed {
+                if (enableLiquidGlass && backdrop != null) {
+                    drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { CircleShape },
+                        effects = {
+                            vibrancy()
+                            blur(8.dp.toPx())
+                            lens(16.dp.toPx(), 16.dp.toPx())
+                        },
+                        onDrawSurface = { drawRect(Color(0x40FFFFFF)) }
+                    )
+                } else {
+                    this
+                }
+            },
         shape = CircleShape,
         color = Color(0xAAFFFFFF),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x88FFFFFF))

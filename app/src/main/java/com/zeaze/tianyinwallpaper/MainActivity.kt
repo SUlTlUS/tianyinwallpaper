@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +44,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.alibaba.fastjson.JSON
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
@@ -82,6 +89,7 @@ class MainActivity : BaseActivity() {
 
     @Composable
     private fun MainActivityScreen() {
+        val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route ?: ROUTE_MAIN
@@ -92,9 +100,19 @@ class MainActivity : BaseActivity() {
             }
             pendingRoute = null
         }
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .background(APP_BACKGROUND_COLOR)) {
+        val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(APP_BACKGROUND_COLOR)
+                .composed {
+                    if (enableLiquidGlass && liquidBackdrop != null) {
+                        layerBackdrop(liquidBackdrop)
+                    } else {
+                        this
+                    }
+                }
+        ) {
             NavHost(
                 navController = navController,
                 startDestination = ROUTE_MAIN,
@@ -118,13 +136,28 @@ class MainActivity : BaseActivity() {
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(horizontal = 24.dp, vertical = 14.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
-                            )
-                        )
-                        .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
+                        .composed {
+                            if (enableLiquidGlass && liquidBackdrop != null) {
+                                drawBackdrop(
+                                    backdrop = liquidBackdrop,
+                                    shape = { RoundedCornerShape(26.dp) },
+                                    effects = {
+                                        vibrancy()
+                                        blur(10.dp.toPx())
+                                        lens(22.dp.toPx(), 22.dp.toPx())
+                                    },
+                                    onDrawSurface = { drawRect(Color(0x47FFFFFF)) }
+                                )
+                            } else {
+                                clip(RoundedCornerShape(26.dp))
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
+                                        )
+                                    )
+                                    .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
+                            }
+                        }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically
