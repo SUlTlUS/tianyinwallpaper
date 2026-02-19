@@ -101,6 +101,39 @@ private val THUMBNAIL_CACHE = object : LruCache<ThumbnailCacheKey, Bitmap>(
     }
 }
 
+private fun buildThumbnailCacheKey(model: TianYinWallpaperModel): ThumbnailCacheKey {
+    return ThumbnailCacheKey(
+        type = model.type,
+        uuid = model.uuid.orEmpty(),
+        imgUri = model.imgUri.orEmpty(),
+        videoUri = model.videoUri.orEmpty(),
+        imgPath = model.imgPath.orEmpty()
+    )
+}
+
+private fun loadThumbnailBitmap(context: android.content.Context, model: TianYinWallpaperModel): Bitmap? {
+    return runCatching {
+        when {
+            model.type == 0 && !model.imgUri.isNullOrEmpty() -> {
+                context.contentResolver.openInputStream(Uri.parse(model.imgUri))?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+            }
+            model.type == 1 && !model.videoUri.isNullOrEmpty() -> {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(context, Uri.parse(model.videoUri))
+                    retriever.getFrameAtTime(0)
+                } finally {
+                    retriever.release()
+                }
+            }
+            !model.imgPath.isNullOrEmpty() -> BitmapFactory.decodeFile(model.imgPath)
+            else -> null
+        }
+    }.getOrNull()
+}
+
 @Composable
 fun MainRouteScreen(
     onOpenSettingPage: () -> Unit,
@@ -232,6 +265,18 @@ fun MainRouteScreen(
 
     LaunchedEffect(selectionMode) {
         onBottomBarVisibleChange(!selectionMode)
+    }
+
+    LaunchedEffect(wallpapers.size) {
+        val snapshot = wallpapers.toList()
+        withContext(Dispatchers.IO) {
+            snapshot.forEach { model ->
+                val key = buildThumbnailCacheKey(model)
+                if (THUMBNAIL_CACHE.get(key) == null) {
+                    loadThumbnailBitmap(context, model)?.let { THUMBNAIL_CACHE.put(key, it) }
+                }
+            }
+        }
     }
 
     DisposableEffect(Unit) {
@@ -768,38 +813,13 @@ private fun GlassCircleButton(
 @Composable
 private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWallpaperModel) {
     val context = LocalContext.current
-    val cacheKey = ThumbnailCacheKey(
-        type = model.type,
-        uuid = model.uuid.orEmpty(),
-        imgUri = model.imgUri.orEmpty(),
-        videoUri = model.videoUri.orEmpty(),
-        imgPath = model.imgPath.orEmpty()
-    )
+    val cacheKey = buildThumbnailCacheKey(model)
     val bitmapState = produceState<Bitmap?>(
         initialValue = THUMBNAIL_CACHE.get(cacheKey),
         cacheKey
     ) {
         val loaded = withContext(Dispatchers.IO) {
-            runCatching {
-                when {
-                    model.type == 0 && !model.imgUri.isNullOrEmpty() -> {
-                        context.contentResolver.openInputStream(Uri.parse(model.imgUri))?.use {
-                            BitmapFactory.decodeStream(it)
-                        }
-                    }
-                    model.type == 1 && !model.videoUri.isNullOrEmpty() -> {
-                        val retriever = MediaMetadataRetriever()
-                        try {
-                            retriever.setDataSource(context, Uri.parse(model.videoUri))
-                            retriever.getFrameAtTime(0)
-                        } finally {
-                            retriever.release()
-                        }
-                    }
-                    !model.imgPath.isNullOrEmpty() -> BitmapFactory.decodeFile(model.imgPath)
-                    else -> null
-                }
-            }.getOrNull()
+            loadThumbnailBitmap(context, model)
         }
         value = loaded
         loaded?.let { THUMBNAIL_CACHE.put(cacheKey, it) }
