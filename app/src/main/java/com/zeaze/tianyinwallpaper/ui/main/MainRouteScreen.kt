@@ -284,16 +284,17 @@ fun MainRouteScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFEDEDED))
-            .composed {
-                if (enableLiquidGlass && liquidBackdrop != null) {
-                    layerBackdrop(liquidBackdrop)
-                } else {
-                    this
-                }
-            }
     ) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .composed {
+                    if (enableLiquidGlass && liquidBackdrop != null) {
+                        layerBackdrop(liquidBackdrop)
+                    } else {
+                        this
+                    }
+                },
             contentPadding = PaddingValues(
                 start = 8.dp,
                 end = 8.dp,

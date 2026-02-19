@@ -105,18 +105,19 @@ class MainActivity : BaseActivity() {
             modifier = Modifier
                 .fillMaxSize()
                 .background(APP_BACKGROUND_COLOR)
-                .composed {
-                    if (enableLiquidGlass && liquidBackdrop != null) {
-                        layerBackdrop(liquidBackdrop)
-                    } else {
-                        this
-                    }
-                }
         ) {
             NavHost(
                 navController = navController,
                 startDestination = ROUTE_MAIN,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .composed {
+                        if (enableLiquidGlass && liquidBackdrop != null) {
+                            layerBackdrop(liquidBackdrop)
+                        } else {
+                            this
+                        }
+                    }
             ) {
                 composable(ROUTE_MAIN) {
                     MainRouteScreen(
