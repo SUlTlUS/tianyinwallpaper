@@ -3,43 +3,55 @@ package com.zeaze.tianyinwallpaper.ui.main
 import android.app.Activity.RESULT_OK
 import android.app.WallpaperManager
 import android.content.ComponentName
-import android.content.DialogInterface
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.text.TextUtils
 import android.util.Log
-import android.view.LayoutInflater
-import android.view.View
-import android.widget.CheckBox
-import android.widget.CompoundButton
-import android.widget.EditText
 import android.widget.ImageView
-import android.widget.PopupMenu
-import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
+import androidx.compose.material.Checkbox
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.ItemTouchHelper
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.alibaba.fastjson.JSON
+import com.bumptech.glide.Glide
+import com.github.gzuliyujiang.wheelpicker.TimePicker
+import com.github.gzuliyujiang.wheelpicker.annotation.TimeMode
+import com.github.gzuliyujiang.wheelpicker.entity.TimeEntity
+import com.github.gzuliyujiang.wheelpicker.impl.UnitTimeFormatter
+import com.github.gzuliyujiang.wheelpicker.widget.TimeWheelLayout
 import com.lxj.xpopup.XPopup
 import com.lxj.xpopup.impl.LoadingPopupView
 import com.zeaze.tianyinwallpaper.App
@@ -57,19 +69,27 @@ import java.util.Collections
 import java.util.UUID
 
 class MainFragment : BaseFragment() {
-    private var rv: RecyclerView? = null
-    private var manager: GridLayoutManager? = null
-    private var wallpaperAdapter: WallpaperAdapter? = null
-    private var tv: EditText? = null
-    private var select: TextView? = null
-    private var apply: TextView? = null
-    private var more: TextView? = null
-    private var cancelSelect: TextView? = null
-    private var deleteSelected: TextView? = null
-    private var selectionMode = false
-    private val list: MutableList<TianYinWallpaperModel> = ArrayList()
-    private var model: TianYinWallpaperModel? = null
+
+    private val wallpapers = mutableStateListOf<TianYinWallpaperModel>()
+    private val selectedPositions = mutableStateListOf<Int>()
+
+    private var selectionMode by mutableStateOf(false)
+    private var groupName by mutableStateOf("")
+
+    private var showWallpaperTypeDialog by mutableStateOf(false)
+    private var showPermissionDialog by mutableStateOf(false)
+    private var showMoreDialog by mutableStateOf(false)
+    private var showDeleteSelectedDialog by mutableStateOf(false)
+    private var showWallpaperSettingDialog by mutableStateOf(false)
+    private var showMinTimeDialog by mutableStateOf(false)
+    private var showAutoModeDialog by mutableStateOf(false)
+
+    private var actionDialogIndex by mutableStateOf<Int?>(null)
+    private var timeDialogIndex by mutableStateOf<Int?>(null)
+    private var loopDialogIndex by mutableStateOf<Int?>(null)
+
     private var popupView: LoadingPopupView? = null
+    private var model: TianYinWallpaperModel? = null
 
     private var now = 0
     private var uris: List<Uri>? = null
@@ -78,110 +98,16 @@ class MainFragment : BaseFragment() {
     private var pref: SharedPreferences? = null
     private var editor: SharedPreferences.Editor? = null
 
-    override fun init() {
-        addDisposable(
-            RxBus.getDefault().toObservableWithCode(RxConstants.RX_ADD_WALLPAPER, TianYinWallpaperModel::class.java)
-                .subscribe(Consumer { o: TianYinWallpaperModel ->
-                    list.add(0, o)
-                    activity?.runOnUiThread {
-                        wallpaperAdapter?.tryToNotifyDataSetChanged()
-                        toast("已加入，请在“壁纸“里查看")
-                    }
-                })
-        )
-
-        rv = rootView.findViewById(R.id.rv)
-        select = rootView.findViewById(R.id.select)
-        apply = rootView.findViewById(R.id.apply)
-        more = rootView.findViewById(R.id.more)
-        cancelSelect = rootView.findViewById(R.id.cancel_select)
-        deleteSelected = rootView.findViewById(R.id.delete_selected)
-        val topScrim: ImageView? = rootView.findViewById(R.id.top_scrim)
-        topScrim?.visibility = View.GONE
-        tv = rootView.findViewById(R.id.tv)
-        val topBar: View? = rootView.findViewById(R.id.fl)
-        if (topBar != null) {
-            ViewCompat.setOnApplyWindowInsetsListener(topBar) { v, insets ->
-                v.translationY = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top.toFloat()
-                insets
-            }
-        }
-
-        manager = GridLayoutManager(context, column)
-        rv?.layoutManager = manager
-        wallpaperAdapter = WallpaperAdapter(requireContext(), list, tv)
-        rv?.adapter = wallpaperAdapter
-        wallpaperAdapter?.setOnWallpaperClickListener(object : WallpaperAdapter.OnWallpaperClickListener {
-            override fun onWallpaperClick(position: Int): Boolean {
-                if (!selectionMode) {
-                    return false
-                }
-                wallpaperAdapter?.toggleSelected(position)
-                return true
-            }
-        })
-        wallpaperAdapter?.tryToNotifyDataSetChanged()
-        helper.attachToRecyclerView(rv)
-
-        pref = requireContext().getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE)
-        editor = requireContext().getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE).edit()
-
-        select?.setOnClickListener {
-            Log.d("TAG", "onClick: ")
-            if (model != null) {
-                return@setOnClickListener
-            }
-            showWallpaperTypeDialog()
-        }
-        apply?.setOnClickListener {
-            if (list.isEmpty()) {
-                toast("至少需要1张壁纸才能开始设置")
-                return@setOnClickListener
-            }
-            Thread {
-                FileUtil.save(requireContext(), JSON.toJSONString(list), FileUtil.wallpaperPath, object : FileUtil.OnSave {
-                    override fun onSave() {
-                        val hostActivity = activity ?: run {
-                            Log.w("MainFragment", "onSave skipped: activity is null")
-                            return
-                        }
-                        hostActivity.runOnUiThread {
-                            val wallpaperManager = WallpaperManager.getInstance(hostActivity)
-                            try {
-                                wallpaperManager.clear()
-                            } catch (e: IOException) {
-                                e.printStackTrace()
-                            }
-                            val intent = Intent()
-                            intent.action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
-                            intent.putExtra(
-                                WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                                ComponentName(hostActivity, TianYinWallpaperService::class.java)
-                            )
-                            wallpaperLaunch.launch(intent)
-                        }
-                    }
-                })
-            }.start()
-        }
-        more?.setOnClickListener { v -> showMoreMenu(v) }
-        cancelSelect?.setOnClickListener { exitSelectionMode() }
-        deleteSelected?.setOnClickListener { deleteSelectedWallpapers() }
-    }
-
-    override fun getLayout(): Int {
-        return R.layout.main_fragment
-    }
-
     private lateinit var imageLaunch: ActivityResultLauncher<Array<String>>
     private lateinit var videoLaunch: ActivityResultLauncher<Array<String>>
     private lateinit var wallpaperLaunch: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        imageLaunch = registerForActivityResult(
-            ActivityResultContracts.OpenMultipleDocuments()
-        ) { results ->
+        pref = requireContext().getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE)
+        editor = pref?.edit()
+
+        imageLaunch = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { results ->
             if (results.isNullOrEmpty()) {
                 model = null
                 return@registerForActivityResult
@@ -197,9 +123,8 @@ class MainFragment : BaseFragment() {
                 .show() as LoadingPopupView
             exchange(now)
         }
-        videoLaunch = registerForActivityResult(
-            ActivityResultContracts.OpenMultipleDocuments()
-        ) { results ->
+
+        videoLaunch = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { results ->
             if (results.isNullOrEmpty()) {
                 model = null
                 return@registerForActivityResult
@@ -215,22 +140,582 @@ class MainFragment : BaseFragment() {
                 .show() as LoadingPopupView
             exchange(now)
         }
+
         wallpaperLaunch = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 toast("设置成功")
             } else {
-                showWallpaperPermissionDialog()
+                showPermissionDialog = true
             }
         }
+    }
+
+    override fun onCreateView(
+        inflater: android.view.LayoutInflater,
+        container: android.view.ViewGroup?,
+        savedInstanceState: Bundle?
+    ): android.view.View {
+        rootView = ComposeView(requireContext()).apply {
+            setContent {
+                MaterialTheme {
+                    MainScreen()
+                }
+            }
+        }
+        return rootView
+    }
+
+    override fun init() {
+        if (wallpapers.isEmpty()) {
+            val cache = pref?.getString("wallpaperCache", "")
+            if (!cache.isNullOrEmpty()) {
+                wallpapers.addAll(JSON.parseArray(cache, TianYinWallpaperModel::class.java))
+                groupName = pref?.getString("wallpaperTvCache", "") ?: ""
+            }
+        }
+
+        addDisposable(
+            RxBus.getDefault().toObservableWithCode(RxConstants.RX_ADD_WALLPAPER, TianYinWallpaperModel::class.java)
+                .subscribe(Consumer { o: TianYinWallpaperModel ->
+                    wallpapers.add(0, o)
+                    saveCache()
+                    toast("已加入，请在“壁纸“里查看")
+                })
+        )
+    }
+
+    override fun getLayout(): Int = R.layout.main_fragment
+
+    @Composable
+    private fun MainScreen() {
+        LaunchedEffect(selectionMode) {
+            (activity as? MainActivity)?.setBottomBarVisible(!selectionMode)
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFFEDEDED))
+                .padding(8.dp)
+        ) {
+            if (!selectionMode) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Button(onClick = { if (model == null) showWallpaperTypeDialog = true }) { Text("+") }
+                        Button(onClick = { applyWallpapers() }) { Text("✓") }
+                        Button(onClick = { showMoreDialog = true }) { Text("…") }
+                    }
+                    OutlinedTextField(
+                        value = groupName,
+                        onValueChange = {
+                            groupName = it
+                            saveCache()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("输入壁纸组的名称") }
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(onClick = { exitSelectionMode() }) {
+                        Text("取消选择")
+                    }
+                    Button(onClick = { showDeleteSelectedDialog = true }) {
+                        Text("删除选中")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                itemsIndexed(wallpapers) { index, model ->
+                    WallpaperCard(
+                        model = model,
+                        selected = selectedPositions.contains(index),
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            if (selectionMode) {
+                                toggleSelected(index)
+                            } else {
+                                actionDialogIndex = index
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        if (showWallpaperTypeDialog) WallpaperTypeDialog()
+        if (showPermissionDialog) PermissionDialog()
+        if (showMoreDialog) MoreDialog()
+        if (showDeleteSelectedDialog) DeleteSelectedDialog()
+        if (showWallpaperSettingDialog) WallpaperSettingDialog()
+        if (showMinTimeDialog) MinTimeDialog()
+        if (showAutoModeDialog) AutoModeDialog()
+
+        actionDialogIndex?.let { ActionDialog(it) }
+        timeDialogIndex?.let { TimeConditionDialog(it) }
+        loopDialogIndex?.let { LoopDialog(it) }
+    }
+
+    @Composable
+    private fun WallpaperCard(
+        model: TianYinWallpaperModel,
+        selected: Boolean,
+        modifier: Modifier,
+        onClick: () -> Unit
+    ) {
+        Box(
+            modifier = modifier
+                .height(120.dp)
+                .clickable { onClick() }
+                .background(Color.Black)
+        ) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx -> ImageView(ctx).apply { scaleType = ImageView.ScaleType.CENTER_CROP } },
+                update = { iv ->
+                    if (model.type == 0 && !model.imgUri.isNullOrEmpty()) {
+                        Glide.with(requireContext()).load(Uri.parse(model.imgUri)).into(iv)
+                    } else if (model.type == 1 && !model.videoUri.isNullOrEmpty()) {
+                        Glide.with(requireContext()).load(Uri.parse(model.videoUri)).into(iv)
+                    } else {
+                        Glide.with(requireContext()).load(model.imgPath).into(iv)
+                    }
+                }
+            )
+
+            Text(
+                text = if (model.type == 0) "静态" else "动态",
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .background(Color(0x66000000))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+
+            if (model.startTime != -1 && model.endTime != -1) {
+                Text(
+                    text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .background(Color(0x66000000))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+
+            if (selected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0x88000000))
+                )
+                Text("✓", color = Color.White, fontSize = 18.sp, modifier = Modifier.align(Alignment.Center))
+            }
+        }
+    }
+
+    @Composable
+    private fun WallpaperTypeDialog() {
+        AlertDialog(onDismissRequest = { showWallpaperTypeDialog = false },
+            title = { Text(getString(R.string.main_select_wallpaper_type_tip)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { showWallpaperTypeDialog = false; selectWallpaper() }, modifier = Modifier.fillMaxWidth()) {
+                        Text(getString(R.string.main_wallpaper_type_static))
+                    }
+                    Button(onClick = { showWallpaperTypeDialog = false; selectLiveWallpaper() }, modifier = Modifier.fillMaxWidth()) {
+                        Text(getString(R.string.main_wallpaper_type_dynamic))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { model = null; showWallpaperTypeDialog = false }) {
+                    Text(getString(R.string.common_cancel))
+                }
+            })
+    }
+
+    @Composable
+    private fun PermissionDialog() {
+        AlertDialog(onDismissRequest = { showPermissionDialog = false },
+            title = { Text(getString(R.string.main_set_wallpaper_failed_permission_tip)) },
+            confirmButton = {
+                Button(onClick = {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    val uri = Uri.fromParts("package", requireActivity().packageName, null)
+                    intent.data = uri
+                    startActivity(intent)
+                    showPermissionDialog = false
+                }) {
+                    Text(getString(R.string.common_confirm))
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showPermissionDialog = false }) {
+                    Text(getString(R.string.common_cancel))
+                }
+            })
+    }
+
+    @Composable
+    private fun MoreDialog() {
+        AlertDialog(
+            onDismissRequest = { showMoreDialog = false },
+            title = { Text("更多") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { showMoreDialog = false; enterSelectionMode() }, modifier = Modifier.fillMaxWidth()) {
+                        Text(getString(R.string.menu_select_mode))
+                    }
+                    Button(onClick = { showMoreDialog = false; showWallpaperSettingDialog = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("壁纸设置")
+                    }
+                    Button(onClick = {
+                        showMoreDialog = false
+                        (activity as? MainActivity)?.openSettingPage()
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text(getString(R.string.menu_setting))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showMoreDialog = false }) { Text(getString(R.string.common_cancel)) }
+            }
+        )
+    }
+
+    @Composable
+    private fun DeleteSelectedDialog() {
+        AlertDialog(
+            onDismissRequest = { showDeleteSelectedDialog = false },
+            title = { Text(getString(R.string.delete_selected_confirm)) },
+            confirmButton = {
+                Button(onClick = {
+                    val indexes = selectedPositions.toMutableList()
+                    Collections.sort(indexes, Collections.reverseOrder())
+                    for (index in indexes) {
+                        if (index in wallpapers.indices) {
+                            wallpapers.removeAt(index)
+                        }
+                    }
+                    selectedPositions.clear()
+                    saveCache()
+                    exitSelectionMode()
+                    showDeleteSelectedDialog = false
+                }) {
+                    Text(getString(R.string.common_delete))
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showDeleteSelectedDialog = false }) {
+                    Text(getString(R.string.common_cancel))
+                }
+            }
+        )
+    }
+
+    @Composable
+    private fun ActionDialog(index: Int) {
+        AlertDialog(
+            onDismissRequest = { actionDialogIndex = null },
+            title = { Text("请选择操作") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { actionDialogIndex = null; timeDialogIndex = index }, modifier = Modifier.fillMaxWidth()) {
+                        Text("设置时间条件")
+                    }
+                    Button(onClick = { actionDialogIndex = null; loopDialogIndex = index }, modifier = Modifier.fillMaxWidth()) {
+                        Text("设置循环播放")
+                    }
+                    Button(onClick = {
+                        actionDialogIndex = null
+                        delete(index)
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("删除")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { actionDialogIndex = null }) { Text(getString(R.string.common_cancel)) }
+            }
+        )
+    }
+
+    @Composable
+    private fun TimeConditionDialog(index: Int) {
+        val model = wallpapers.getOrNull(index) ?: return
+        var startTime by remember(index) { mutableStateOf(model.startTime) }
+        var endTime by remember(index) { mutableStateOf(model.endTime) }
+
+        AlertDialog(
+            onDismissRequest = { timeDialogIndex = null },
+            title = { Text("设置时间条件") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (startTime == -1) "开始时间：点击选择" else "开始时间：${getTimeString(startTime)}",
+                        modifier = Modifier.clickable { selectTime(startTime) { startTime = it } }
+                    )
+                    Text(
+                        if (endTime == -1) "结束时间：点击选择" else "结束时间：${getTimeString(endTime)}",
+                        modifier = Modifier.clickable { selectTime(endTime) { endTime = it } }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    model.startTime = startTime
+                    model.endTime = endTime
+                    if (model.startTime != -1 && model.endTime == -1) {
+                        model.endTime = 24 * 60
+                    }
+                    if (model.endTime != -1 && model.startTime == -1) {
+                        model.startTime = 0
+                    }
+                    saveCache()
+                    timeDialogIndex = null
+                }) {
+                    Text(getString(R.string.common_confirm))
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        startTime = -1
+                        endTime = -1
+                    }) { Text("重置") }
+                    Button(onClick = { timeDialogIndex = null }) { Text(getString(R.string.common_cancel)) }
+                }
+            }
+        )
+    }
+
+    @Composable
+    private fun LoopDialog(index: Int) {
+        val model = wallpapers.getOrNull(index) ?: return
+        var loop by remember(index) { mutableStateOf(model.loop) }
+
+        AlertDialog(
+            onDismissRequest = { loopDialogIndex = null },
+            title = { Text("设置循环播放") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = loop, onCheckedChange = { loop = it })
+                    Text("循环播放")
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    model.loop = loop
+                    saveCache()
+                    loopDialogIndex = null
+                }) {
+                    Text(getString(R.string.common_confirm))
+                }
+            },
+            dismissButton = {
+                Button(onClick = { loopDialogIndex = null }) {
+                    Text(getString(R.string.common_cancel))
+                }
+            }
+        )
+    }
+
+    @Composable
+    private fun WallpaperSettingDialog() {
+        var rand by remember { mutableStateOf(pref?.getBoolean("rand", false) == true) }
+        var pageChange by remember { mutableStateOf(pref?.getBoolean("pageChange", false) == true) }
+        var needBackgroundPlay by remember { mutableStateOf(pref?.getBoolean("needBackgroundPlay", false) == true) }
+        var wallpaperScroll by remember { mutableStateOf(pref?.getBoolean("wallpaperScroll", false) == true) }
+        val minTime = pref?.getInt("minTime", 1) ?: 1
+        val mode = pref?.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE) ?: AUTO_SWITCH_MODE_NONE
+
+        AlertDialog(
+            onDismissRequest = { showWallpaperSettingDialog = false },
+            title = { Text("壁纸设置（Compose）") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SettingCheckRow("随机切换", onToggle = {
+                        rand = !rand
+                        editor?.putBoolean("rand", rand)?.apply()
+                    }, checked = rand)
+                    SettingCheckRow("按页切换并预加载", onToggle = {
+                        pageChange = !pageChange
+                        editor?.putBoolean("pageChange", pageChange)?.apply()
+                    }, checked = pageChange)
+                    SettingCheckRow("后台继续播放", onToggle = {
+                        needBackgroundPlay = !needBackgroundPlay
+                        editor?.putBoolean("needBackgroundPlay", needBackgroundPlay)?.apply()
+                    }, checked = needBackgroundPlay)
+                    SettingCheckRow("壁纸跟随滑动", onToggle = {
+                        wallpaperScroll = !wallpaperScroll
+                        editor?.putBoolean("wallpaperScroll", wallpaperScroll)?.apply()
+                    }, checked = wallpaperScroll)
+                    Text("壁纸最小切换时间: ${minTime}秒", modifier = Modifier.clickable { showMinTimeDialog = true })
+                    Text("自动切换模式: ${AUTO_SWITCH_MODE_ITEMS.getOrElse(mode) { AUTO_SWITCH_MODE_ITEMS[0] }}", modifier = Modifier.clickable {
+                        showAutoModeDialog = true
+                    })
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showWallpaperSettingDialog = false }) {
+                    Text(getString(R.string.common_confirm))
+                }
+            }
+        )
+    }
+
+    @Composable
+    private fun SettingCheckRow(label: String, onToggle: () -> Unit, checked: Boolean) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onToggle() },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label)
+            Checkbox(checked = checked, onCheckedChange = { onToggle() })
+        }
+    }
+
+    @Composable
+    private fun MinTimeDialog() {
+        var text by remember { mutableStateOf((pref?.getInt("minTime", 1) ?: 1).toString()) }
+        AlertDialog(
+            onDismissRequest = { showMinTimeDialog = false },
+            title = { Text("请输入最小切换时间（秒）") },
+            text = {
+                OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true)
+            },
+            confirmButton = {
+                Button(onClick = {
+                    try {
+                        val value = text.toInt()
+                        editor?.putInt("minTime", value)?.apply()
+                        showMinTimeDialog = false
+                    } catch (e: Exception) {
+                        toast("请输入整数")
+                    }
+                }) { Text(getString(R.string.common_confirm)) }
+            },
+            dismissButton = {
+                Button(onClick = { showMinTimeDialog = false }) { Text(getString(R.string.common_cancel)) }
+            }
+        )
+    }
+
+    @Composable
+    private fun AutoModeDialog() {
+        val checked = pref?.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE) ?: AUTO_SWITCH_MODE_NONE
+        AlertDialog(
+            onDismissRequest = { showAutoModeDialog = false },
+            title = { Text("选择自动切换模式") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AUTO_SWITCH_MODE_ITEMS.forEachIndexed { index, mode ->
+                        Button(onClick = {
+                            editor?.putInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, index)
+                            editor?.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
+                            editor?.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
+                            editor?.apply()
+                            showAutoModeDialog = false
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (index == checked) "✓ $mode" else mode)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showAutoModeDialog = false }) { Text(getString(R.string.common_cancel)) }
+            }
+        )
+    }
+
+    private fun toggleSelected(position: Int) {
+        if (selectedPositions.contains(position)) {
+            selectedPositions.remove(position)
+        } else {
+            selectedPositions.add(position)
+        }
+    }
+
+    private fun enterSelectionMode() {
+        selectionMode = true
+        selectedPositions.clear()
+    }
+
+    private fun exitSelectionMode() {
+        selectionMode = false
+        selectedPositions.clear()
+    }
+
+    private fun delete(index: Int) {
+        if (index in wallpapers.indices) {
+            wallpapers.removeAt(index)
+            saveCache()
+        }
+    }
+
+    private fun saveCache() {
+        editor?.putString("wallpaperCache", JSON.toJSONString(wallpapers))
+        editor?.putString("wallpaperTvCache", groupName)
+        editor?.apply()
+    }
+
+    private fun applyWallpapers() {
+        if (wallpapers.isEmpty()) {
+            toast("至少需要1张壁纸才能开始设置")
+            return
+        }
+        Thread {
+            FileUtil.save(requireContext(), JSON.toJSONString(wallpapers), FileUtil.wallpaperPath, object : FileUtil.OnSave {
+                override fun onSave() {
+                    val hostActivity = activity ?: run {
+                        Log.w("MainFragment", "onSave skipped: activity is null")
+                        return
+                    }
+                    hostActivity.runOnUiThread {
+                        val wallpaperManager = WallpaperManager.getInstance(hostActivity)
+                        try {
+                            wallpaperManager.clear()
+                        } catch (e: IOException) {
+                            e.printStackTrace()
+                        }
+                        val intent = Intent().apply {
+                            action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
+                            putExtra(
+                                WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+                                ComponentName(hostActivity, TianYinWallpaperService::class.java)
+                            )
+                        }
+                        wallpaperLaunch.launch(intent)
+                    }
+                }
+            })
+        }.start()
     }
 
     private fun takePersistableUriPermissions(uris: List<Uri>) {
         for (uri in uris) {
             try {
-                requireActivity().contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
+                requireActivity().contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             } catch (e: SecurityException) {
                 Log.e("MainFragment", "Could not take persistable permission for URI: $uri", e)
             }
@@ -258,155 +743,10 @@ class MainFragment : BaseFragment() {
         }.start()
     }
 
-    fun selectWallpaper() {
-        imageLaunch.launch(arrayOf("image/*"))
-    }
-
-    fun selectLiveWallpaper() {
-        videoLaunch.launch(arrayOf("video/*"))
-    }
-
-    private fun showMoreMenu(anchor: View) {
-        val popupMenu = PopupMenu(context, anchor)
-        popupMenu.menu.add(getString(R.string.menu_select_mode))
-        popupMenu.menu.add(getString(R.string.menu_setting))
-        popupMenu.setOnMenuItemClickListener { item ->
-            if (getString(R.string.menu_select_mode).contentEquals(item.title ?: "")) {
-                enterSelectionMode()
-                return@setOnMenuItemClickListener true
-            }
-            if (getString(R.string.menu_setting).contentEquals(item.title ?: "")) {
-                if (activity is MainActivity) {
-                    (activity as MainActivity).openSettingPage()
-                }
-                return@setOnMenuItemClickListener true
-            }
-            false
-        }
-        popupMenu.show()
-    }
-
-    private fun enterSelectionMode() {
-        selectionMode = true
-        wallpaperAdapter?.setSelectionMode(true)
-        select?.visibility = View.GONE
-        apply?.visibility = View.GONE
-        tv?.visibility = View.GONE
-        more?.visibility = View.GONE
-        cancelSelect?.visibility = View.VISIBLE
-        deleteSelected?.visibility = View.VISIBLE
-        if (activity is MainActivity) {
-            (activity as MainActivity).setBottomBarVisible(false)
-        }
-        toast(getString(R.string.select_mode_tip))
-    }
-
-    private fun exitSelectionMode() {
-        selectionMode = false
-        wallpaperAdapter?.setSelectionMode(false)
-        select?.visibility = View.VISIBLE
-        apply?.visibility = View.VISIBLE
-        tv?.visibility = View.VISIBLE
-        more?.visibility = View.VISIBLE
-        cancelSelect?.visibility = View.GONE
-        deleteSelected?.visibility = View.GONE
-        if (activity is MainActivity) {
-            (activity as MainActivity).setBottomBarVisible(true)
-        }
-    }
-
-    private fun deleteSelectedWallpapers() {
-        val selected = wallpaperAdapter?.getSelectedPositions() ?: emptySet()
-        if (selected.isEmpty()) {
-            toast(getString(R.string.no_selected_tip))
-            return
-        }
-        val composeView = ComposeView(requireContext()).apply {
-            setContent {
-                MaterialTheme {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(getString(R.string.delete_selected_confirm))
-                        Button(onClick = {
-                            val indexes: MutableList<Int> = ArrayList(selected)
-                            Collections.sort(indexes, Collections.reverseOrder())
-                            for (index in indexes) {
-                                if (index >= 0 && index < list.size) {
-                                    list.removeAt(index)
-                                }
-                            }
-                            wallpaperAdapter?.tryToNotifyDataSetChanged()
-                            exitSelectionMode()
-                            alertDialog?.dismiss()
-                        }) {
-                            Text(getString(R.string.common_delete))
-                        }
-                        Button(onClick = { alertDialog?.dismiss() }) {
-                            Text(getString(R.string.common_cancel))
-                        }
-                    }
-                }
-            }
-        }
-        alertDialog = AlertDialog.Builder(requireContext()).setView(composeView).create()
-        alertDialog?.show()
-    }
-
-    private val helper: ItemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.Callback() {
-        override fun getMovementFlags(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int {
-            var dragFlag = 0
-            if (recyclerView.layoutManager is GridLayoutManager) {
-                dragFlag = ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
-            } else if (recyclerView.layoutManager is LinearLayoutManager) {
-                dragFlag = ItemTouchHelper.UP or ItemTouchHelper.DOWN
-            }
-            return makeMovementFlags(dragFlag, 0)
-        }
-
-        override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean {
-            val fromPosition = viewHolder.adapterPosition
-            val toPosition = target.adapterPosition
-            if (fromPosition < toPosition) {
-                for (i in fromPosition until toPosition) {
-                    Collections.swap(list, i, i + 1)
-                }
-            } else {
-                for (i in fromPosition downTo toPosition + 1) {
-                    Collections.swap(list, i, i - 1)
-                }
-            }
-            wallpaperAdapter?.notifyItemMoved(fromPosition, toPosition)
-            return true
-        }
-
-        override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-        }
-
-        override fun isLongPressDragEnabled(): Boolean {
-            return !selectionMode
-        }
-
-        override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
-            if (actionState != ItemTouchHelper.ACTION_STATE_IDLE) {
-                toast("可以开始拖动了")
-            }
-            super.onSelectedChanged(viewHolder, actionState)
-        }
-
-        override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
-            super.clearView(recyclerView, viewHolder)
-            wallpaperAdapter?.tryToNotifyDataSetChanged()
-        }
-    })
-
     private fun addModel() {
         activity?.runOnUiThread {
-            list.add(0, model!!)
-            wallpaperAdapter?.tryToNotifyDataSetChanged()
+            wallpapers.add(0, model!!)
+            saveCache()
             model = null
             now += 1
             if (now >= (uris?.size ?: 0)) {
@@ -419,190 +759,41 @@ class MainFragment : BaseFragment() {
         }
     }
 
-    private var alertDialog: AlertDialog? = null
-
-    private fun showWallpaperTypeDialog() {
-        val composeView = ComposeView(requireContext()).apply {
-            setContent {
-                MaterialTheme {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(getString(R.string.main_select_wallpaper_type_tip))
-                        Button(onClick = {
-                            alertDialog?.dismiss()
-                            selectWallpaper()
-                        }) {
-                            Text(getString(R.string.main_wallpaper_type_static))
-                        }
-                        Button(onClick = {
-                            alertDialog?.dismiss()
-                            selectLiveWallpaper()
-                        }) {
-                            Text(getString(R.string.main_wallpaper_type_dynamic))
-                        }
-                        Button(onClick = {
-                            model = null
-                            alertDialog?.dismiss()
-                        }) {
-                            Text(getString(R.string.common_cancel))
-                        }
-                    }
-                }
-            }
-        }
-        alertDialog = AlertDialog.Builder(requireContext()).setView(composeView).setCancelable(false).create()
-        alertDialog?.show()
+    private fun selectWallpaper() {
+        imageLaunch.launch(arrayOf("image/*"))
     }
 
-    private fun showWallpaperPermissionDialog() {
-        val composeView = ComposeView(requireContext()).apply {
-            setContent {
-                MaterialTheme {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(getString(R.string.main_set_wallpaper_failed_permission_tip))
-                        Button(onClick = {
-                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                            val uri = Uri.fromParts("package", requireActivity().packageName, null)
-                            intent.data = uri
-                            startActivity(intent)
-                            alertDialog?.dismiss()
-                        }) {
-                            Text(getString(R.string.common_confirm))
-                        }
-                        Button(onClick = { alertDialog?.dismiss() }) {
-                            Text(getString(R.string.common_cancel))
-                        }
-                    }
-                }
-            }
-        }
-        alertDialog = AlertDialog.Builder(requireContext()).setView(composeView).create()
-        alertDialog?.show()
+    private fun selectLiveWallpaper() {
+        videoLaunch.launch(arrayOf("video/*"))
     }
 
-    private fun wallpaperSetting() {
-        val builder = AlertDialog.Builder(requireContext())
-        val settingView = LayoutInflater.from(context).inflate(R.layout.main_wallpaper_setting, null)
-        val checkBox: CheckBox = settingView.findViewById(R.id.checkBox)
-        checkBox.isChecked = pref?.getBoolean("rand", false) == true
-        checkBox.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            editor?.putBoolean("rand", isChecked)
-            editor?.apply()
-        }
-
-        val checkBox2: CheckBox = settingView.findViewById(R.id.checkBox2)
-        checkBox2.isChecked = pref?.getBoolean("pageChange", false) == true
-        checkBox2.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            editor?.putBoolean("pageChange", isChecked)
-            editor?.apply()
-        }
-
-        val checkBox3: CheckBox = settingView.findViewById(R.id.checkBox3)
-        checkBox3.isChecked = pref?.getBoolean("needBackgroundPlay", false) == true
-        checkBox3.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            editor?.putBoolean("needBackgroundPlay", isChecked)
-            editor?.apply()
-        }
-
-        val checkBox4: CheckBox = settingView.findViewById(R.id.checkBox4)
-        checkBox4.isChecked = pref?.getBoolean("wallpaperScroll", false) == true
-        checkBox4.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            editor?.putBoolean("wallpaperScroll", isChecked)
-            editor?.apply()
-        }
-
-        val minTv: TextView = settingView.findViewById(R.id.tv)
-        minTv.text = "壁纸最小切换时间:" + pref?.getInt("minTime", 1) + "秒（点击修改）"
-        minTv.setOnClickListener {
-            setMinTime(DialogInterface.OnDismissListener {
-                minTv.text = "壁纸最小切换时间:" + pref?.getInt("minTime", 1) + "秒"
-            })
-        }
-
-        val autoSwitchModeView: TextView = settingView.findViewById(R.id.autoSwitchModeView)
-        val autoSwitchIntervalView: TextView = settingView.findViewById(R.id.autoSwitchIntervalView)
-        val autoSwitchPointsView: TextView = settingView.findViewById(R.id.autoSwitchPointsView)
-        refreshAutoSwitchSettingView(autoSwitchModeView, autoSwitchIntervalView, autoSwitchPointsView)
-        autoSwitchModeView.setOnClickListener {
-            showAutoSwitchModeDialog(Runnable {
-                refreshAutoSwitchSettingView(autoSwitchModeView, autoSwitchIntervalView, autoSwitchPointsView)
-            })
-        }
-        builder.setView(settingView)
-        alertDialog = builder.create()
-        alertDialog?.show()
-    }
-
-    private fun setMinTime(onDismissListener: DialogInterface.OnDismissListener) {
-        val editView = LayoutInflater.from(context).inflate(R.layout.main_edit, null)
-        val builder = AlertDialog.Builder(requireContext())
-        val et: EditText = editView.findViewById(R.id.tv)
-        et.setText((pref?.getInt("minTime", 1) ?: 1).toString())
-        et.hint = "请输入整数"
-        builder.setView(editView)
-            .setNeutralButton("取消", null)
-            .setPositiveButton("确定") { _, _ ->
-                try {
-                    val i = et.text.toString().toInt()
-                    editor?.putInt("minTime", i)
-                    editor?.apply()
-                } catch (e: Exception) {
-                    toast("请输入整数")
-                }
-            }
-            .setCancelable(false)
-            .setOnDismissListener(onDismissListener)
-            .show()
-    }
-
-    private fun refreshAutoSwitchSettingView(modeView: TextView, intervalView: TextView, pointsView: TextView) {
-        val mode = pref?.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE) ?: AUTO_SWITCH_MODE_NONE
-        val modeText = if (mode >= AUTO_SWITCH_MODE_NONE && mode < AUTO_SWITCH_MODE_ITEMS.size) {
-            AUTO_SWITCH_MODE_ITEMS[mode]
+    private fun selectTime(time: Int, onPicked: (Int) -> Unit) {
+        val picker = TimePicker(requireActivity())
+        val wheelLayout: TimeWheelLayout = picker.wheelLayout
+        wheelLayout.setTimeMode(TimeMode.HOUR_24_NO_SECOND)
+        wheelLayout.setTimeFormatter(UnitTimeFormatter())
+        if (time != -1) {
+            wheelLayout.setDefaultValue(TimeEntity.target(time / 60, time % 60, 0))
         } else {
-            AUTO_SWITCH_MODE_ITEMS[AUTO_SWITCH_MODE_NONE]
+            wheelLayout.setDefaultValue(TimeEntity.target(0, 0, 0))
         }
-        modeView.text = "自动切换模式：$modeText（点击修改）"
-        intervalView.text = "自动切换间隔：" + (pref?.getLong(
-            TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_MINUTES,
-            DEFAULT_AUTO_SWITCH_INTERVAL_MINUTES
-        ) ?: DEFAULT_AUTO_SWITCH_INTERVAL_MINUTES) + "分钟（点击修改）"
-        var points = pref?.getString(TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS, DEFAULT_AUTO_SWITCH_TIME_POINTS)
-        points = if (TextUtils.isEmpty(points)) DEFAULT_AUTO_SWITCH_TIME_POINTS else points
-        pointsView.text = "自动切换时间点：$points（点击修改）"
+        wheelLayout.setResetWhenLinkage(false)
+        picker.setOnTimePickedListener { hour, minute, _ ->
+            onPicked(hour * 60 + minute)
+        }
+        picker.show()
     }
 
-    private fun showAutoSwitchModeDialog(onDismiss: Runnable) {
-        val checked = pref?.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE) ?: AUTO_SWITCH_MODE_NONE
-        AlertDialog.Builder(requireContext())
-            .setTitle("选择自动切换模式")
-            .setSingleChoiceItems(AUTO_SWITCH_MODE_ITEMS, checked) { dialog, which ->
-                editor?.putInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, which)
-                editor?.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
-                editor?.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
-                editor?.apply()
-                dialog.dismiss()
-            }
-            .setOnDismissListener { onDismiss.run() }
-            .show()
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
+    private fun getTimeString(t: Int): String {
+        var time = t
+        var s = ""
+        s = if (time / 60 == 0) s + "00" else if (time / 60 < 10) s + "0" + time / 60 else s + time / 60
+        time %= 60
+        s = if (time < 10) s + ":0" + time else s + ":" + time
+        return s
     }
 
     companion object {
-        private const val DEFAULT_AUTO_SWITCH_INTERVAL_MINUTES = 60L
-        private const val DEFAULT_AUTO_SWITCH_TIME_POINTS = "08:00,12:00,18:00,22:00"
         private const val AUTO_SWITCH_MODE_NONE = 0
         private val AUTO_SWITCH_MODE_ITEMS = arrayOf("手动切换", "按固定时间间隔切换", "按每日时间点切换")
         var column = 3
