@@ -17,4 +17,5 @@
     <string name="delete_selected_confirm">确认删除选中的壁纸？</string>
     <string name="common_cancel">取消</string>
     <string name="common_delete">删除</string>
+    <string name="save_list_title">列表</string>
 </resources>
