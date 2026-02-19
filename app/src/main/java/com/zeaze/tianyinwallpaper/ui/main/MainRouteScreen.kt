@@ -2,6 +2,7 @@ package com.zeaze.tianyinwallpaper.ui.main
 
 import android.app.Activity
 import android.app.WallpaperManager
+import android.content.Context
 import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Bitmap
@@ -78,6 +79,8 @@ import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import io.reactivex.functions.Consumer
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Collections
 import java.util.UUID
@@ -113,7 +116,7 @@ private fun buildThumbnailCacheKey(model: TianYinWallpaperModel): ThumbnailCache
     )
 }
 
-private fun loadThumbnailBitmap(context: android.content.Context, model: TianYinWallpaperModel): Bitmap? {
+private fun loadThumbnailBitmap(context: Context, model: TianYinWallpaperModel): Bitmap? {
     val options = BitmapFactory.Options().apply {
         inPreferredConfig = Bitmap.Config.RGB_565
     }
@@ -125,10 +128,14 @@ private fun loadThumbnailBitmap(context: android.content.Context, model: TianYin
                 }
             }
             model.type == 1 && !model.videoUri.isNullOrEmpty() -> {
+                val thumbnailFile = getVideoThumbnailFile(context, model)
+                if (thumbnailFile != null && thumbnailFile.exists()) {
+                    return@runCatching BitmapFactory.decodeFile(thumbnailFile.absolutePath, options)
+                }
                 val retriever = MediaMetadataRetriever()
                 try {
                     retriever.setDataSource(context, Uri.parse(model.videoUri))
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+                    val frame = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
                         retriever.getScaledFrameAtTime(
                             0,
                             MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
@@ -138,6 +145,19 @@ private fun loadThumbnailBitmap(context: android.content.Context, model: TianYin
                     } else {
                         retriever.getFrameAtTime(0)
                     }
+                    if (frame != null && thumbnailFile != null) {
+                        runCatching {
+                            FileOutputStream(thumbnailFile).use {
+                                val saved = frame.compress(Bitmap.CompressFormat.JPEG, 85, it)
+                                if (!saved) {
+                                    Log.w("MainRouteScreen", "Failed to persist video thumbnail: ${thumbnailFile.absolutePath}")
+                                }
+                            }
+                        }.onFailure {
+                            Log.e("MainRouteScreen", "Failed to save video thumbnail: ${thumbnailFile.absolutePath}", it)
+                        }
+                    }
+                    frame
                 } finally {
                     retriever.release()
                 }
@@ -146,6 +166,16 @@ private fun loadThumbnailBitmap(context: android.content.Context, model: TianYin
             else -> null
         }
     }.getOrNull()
+}
+
+private fun getVideoThumbnailFile(context: Context, model: TianYinWallpaperModel): File? {
+    val uuid = model.uuid ?: return null
+    val root = context.getExternalFilesDir(null) ?: return null
+    val thumbnailDir = File(root, "thumbnail_cache")
+    if (!thumbnailDir.mkdirs() && !thumbnailDir.exists()) {
+        return null
+    }
+    return File(thumbnailDir, "$uuid.jpg")
 }
 
 @Composable
