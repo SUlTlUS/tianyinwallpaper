@@ -7,50 +7,60 @@ import android.content.pm.PackageManager
 import android.graphics.Point
 import android.net.Uri
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.ViewGroup
+import android.view.View
+import android.widget.FrameLayout
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.alibaba.fastjson.JSON
-import com.google.android.material.tabs.TabLayout
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.zeaze.tianyinwallpaper.base.BaseActivity
-import com.zeaze.tianyinwallpaper.base.BaseFragmentAdapter
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.about.AboutFragment
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.main.MainFragment
 import com.zeaze.tianyinwallpaper.ui.setting.SettingFragment
 import com.zeaze.tianyinwallpaper.utils.FileUtil
-import com.zeaze.tianyinwallpaper.widget.NoScrollViewPager
 import java.io.File
 
 class MainActivity : BaseActivity() {
-    private var tabLayout: TabLayout? = null
-    private var viewPager: NoScrollViewPager? = null
-    private var titles: MutableList<String>? = null
-    private var fragments: MutableList<Fragment>? = null
-    private var tabsInitialized = false
+    private val tabTitleResIds: List<Int> = listOf(R.string.main_tab_wallpaper, R.string.main_tab_groups, R.string.main_tab_settings)
+    private val fragmentContainerId: Int = View.generateViewId()
+    private var selectedTab by mutableStateOf(0)
+    private var showBottomBar by mutableStateOf(true)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val parent = window.decorView.findViewById<ViewGroup>(android.R.id.content)
         setContent {
-            AndroidView(factory = { context ->
-                LayoutInflater.from(context).inflate(R.layout.activity_main, parent, false).also { rootView ->
-                    tabLayout = rootView.findViewById(R.id.tab_layout)
-                    viewPager = rootView.findViewById(R.id.view_pager)
-                    setupTabs()
-                }
-            })
+            MaterialTheme {
+                MainActivityScreen()
+            }
         }
 
         val wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -62,27 +72,76 @@ class MainActivity : BaseActivity() {
         clearNoUseFile()
     }
 
-    private fun setupTabs() {
-        if (tabsInitialized) {
+    @Composable
+    private fun MainActivityScreen() {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .background(APP_BACKGROUND_COLOR)) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    FrameLayout(context).apply {
+                        id = fragmentContainerId
+                    }
+                },
+                update = {
+                    switchTab(selectedTab)
+                }
+            )
+            if (showBottomBar) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colors.surface)
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .align(Alignment.BottomCenter),
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    tabTitleResIds.forEachIndexed { index, titleRes ->
+                        Text(
+                            text = getString(titleRes),
+                            color = if (selectedTab == index) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
+                            fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier
+                                .clickable {
+                                    selectedTab = index
+                                }
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun switchTab(index: Int) {
+        if (index < 0 || index >= tabTitleResIds.size) return
+        val tag = "main_tab_fragment_$index"
+        val currentFragment = supportFragmentManager.findFragmentById(fragmentContainerId)
+        if (currentFragment?.tag == tag) {
             return
         }
-        tabsInitialized = true
-        titles = ArrayList()
-        fragments = ArrayList()
-        titles?.add("壁纸")
-        titles?.add("壁纸组")
-        titles?.add("设置")
-        fragments?.add(MainFragment())
-        fragments?.add(AboutFragment())
-        fragments?.add(SettingFragment())
-        val adapter = BaseFragmentAdapter(supportFragmentManager, titles ?: emptyList(), fragments ?: emptyList())
-        viewPager?.adapter = adapter
-        viewPager?.offscreenPageLimit = 100
-        tabLayout?.setupWithViewPager(viewPager)
+        val fragment = supportFragmentManager.findFragmentByTag(tag) ?: createFragment(index)
+        supportFragmentManager.beginTransaction()
+            .replace(fragmentContainerId, fragment, tag)
+            .commit()
+    }
+
+    private fun createFragment(index: Int): Fragment {
+        return when (index) {
+            0 -> MainFragment()
+            1 -> AboutFragment()
+            else -> SettingFragment()
+        }
     }
 
     fun openSettingPage() {
-        viewPager?.setCurrentItem(SETTINGS_TAB_INDEX, true)
+        selectedTab = SETTINGS_TAB_INDEX
+    }
+
+    fun setBottomBarVisible(visible: Boolean) {
+        showBottomBar = visible
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -209,5 +268,6 @@ class MainActivity : BaseActivity() {
     companion object {
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
         private const val SETTINGS_TAB_INDEX = 2
+        private val APP_BACKGROUND_COLOR = Color(0xFFEDEDED)
     }
 }

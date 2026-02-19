@@ -30,6 +30,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -80,6 +82,19 @@ class MainFragment : BaseFragment() {
         override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
             if (kotlin.math.abs(dy) < TOP_SCRIM_SCROLL_THRESHOLD) return
             requestTopScrimBlurUpdate()
+        }
+    }
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: android.view.ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        rootView = inflater.inflate(R.layout.main_fragment, container, false)
+        return ComposeView(requireContext()).apply {
+            setContent {
+                AndroidView(factory = { rootView })
+            }
         }
     }
 
@@ -346,8 +361,9 @@ class MainFragment : BaseFragment() {
         more?.visibility = View.GONE
         cancelSelect?.visibility = View.VISIBLE
         deleteSelected?.visibility = View.VISIBLE
-        val bottomBar = activity?.findViewById<View>(R.id.linearLayout)
-        bottomBar?.visibility = View.GONE
+        if (activity is MainActivity) {
+            (activity as MainActivity).setBottomBarVisible(false)
+        }
         topScrim?.visibility = View.GONE
         toast(getString(R.string.select_mode_tip))
     }
@@ -361,8 +377,9 @@ class MainFragment : BaseFragment() {
         more?.visibility = View.VISIBLE
         cancelSelect?.visibility = View.GONE
         deleteSelected?.visibility = View.GONE
-        val bottomBar = activity?.findViewById<View>(R.id.linearLayout)
-        bottomBar?.visibility = View.VISIBLE
+        if (activity is MainActivity) {
+            (activity as MainActivity).setBottomBarVisible(true)
+        }
         topScrim?.visibility = View.VISIBLE
     }
 
