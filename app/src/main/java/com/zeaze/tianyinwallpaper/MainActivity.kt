@@ -7,8 +7,6 @@ import android.content.pm.PackageManager
 import android.graphics.Point
 import android.net.Uri
 import android.os.Bundle
-import android.view.View
-import android.widget.FrameLayout
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -33,10 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.fragment.app.Fragment
 import androidx.navigation.compose.NavHost
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
@@ -48,10 +44,10 @@ import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.zeaze.tianyinwallpaper.base.BaseActivity
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
-import com.zeaze.tianyinwallpaper.ui.about.AboutFragment
+import com.zeaze.tianyinwallpaper.ui.about.AboutRouteScreen
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
-import com.zeaze.tianyinwallpaper.ui.main.MainFragment
-import com.zeaze.tianyinwallpaper.ui.setting.SettingFragment
+import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
+import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
 
@@ -61,9 +57,6 @@ class MainActivity : BaseActivity() {
         ROUTE_ABOUT to R.string.main_tab_groups,
         ROUTE_SETTING to R.string.main_tab_settings
     )
-    private val mainContainerId: Int = View.generateViewId()
-    private val aboutContainerId: Int = View.generateViewId()
-    private val settingContainerId: Int = View.generateViewId()
     private var showBottomBar by mutableStateOf(true)
     private var pendingRoute by mutableStateOf<String?>(null)
 
@@ -105,13 +98,16 @@ class MainActivity : BaseActivity() {
                 modifier = Modifier.fillMaxSize()
             ) {
                 composable(ROUTE_MAIN) {
-                    FragmentHost(routeTag = ROUTE_MAIN, containerId = mainContainerId) { MainFragment() }
+                    MainRouteScreen(
+                        onOpenSettingPage = { openSettingPage() },
+                        onBottomBarVisibleChange = { setBottomBarVisible(it) }
+                    )
                 }
                 composable(ROUTE_ABOUT) {
-                    FragmentHost(routeTag = ROUTE_ABOUT, containerId = aboutContainerId) { AboutFragment() }
+                    AboutRouteScreen()
                 }
                 composable(ROUTE_SETTING) {
-                    FragmentHost(routeTag = ROUTE_SETTING, containerId = settingContainerId) { SettingFragment() }
+                    SettingRouteScreen()
                 }
             }
             if (showBottomBar) {
@@ -139,31 +135,6 @@ class MainActivity : BaseActivity() {
                 }
             }
         }
-    }
-
-    @Composable
-    private fun FragmentHost(routeTag: String, containerId: Int, factory: () -> Fragment) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { context ->
-                FrameLayout(context).apply {
-                    id = containerId
-                }
-            },
-            update = {
-                if (supportFragmentManager.isStateSaved) {
-                    return@AndroidView
-                }
-                val current = supportFragmentManager.findFragmentById(containerId)
-                if (current?.tag == routeTag) {
-                    return@AndroidView
-                }
-                val fragment = supportFragmentManager.findFragmentByTag(routeTag) ?: factory()
-                supportFragmentManager.beginTransaction()
-                    .replace(containerId, fragment, routeTag)
-                    .commit()
-            }
-        )
     }
 
     private fun navigateToRoute(navController: NavHostController, route: String) {
