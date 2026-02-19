@@ -1,33 +1,48 @@
 package com.zeaze.tianyinwallpaper.ui.about
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.TextView
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.alibaba.fastjson.JSON
-import com.bumptech.glide.Glide
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.utils.FileUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class AboutFragment : Fragment() {
     private val saveDataList = mutableStateListOf<SaveData>()
@@ -81,73 +96,80 @@ class AboutFragment : Fragment() {
         val wallpapers = remember(data.s) {
             JSON.parseArray(data.s, TianYinWallpaperModel::class.java) ?: emptyList()
         }
-        AndroidView(
-            modifier = Modifier.fillMaxWidth(),
-            factory = { context ->
-                val root = LinearLayout(context).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(10, 10, 10, 10)
-                    background = ContextCompat.getDrawable(context, R.drawable.edit_background)
-                }
-                val nameView = TextView(context).apply {
-                    id = View.generateViewId()
-                    setTextColor(ContextCompat.getColor(context, R.color.textColor))
-                    textSize = 14f
-                    maxLines = 1
-                }
-                root.addView(
-                    nameView,
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
-                )
-                val previewsRow = LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                }
-                root.setTag(R.id.name, nameView)
-                root.setTag(R.id.about_previews_row_tag, previewsRow)
-                val rowParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ITEM_PREVIEW_HEIGHT_DP.dpToPx(context)
-                ).apply {
-                    topMargin = ITEM_PREVIEW_TOP_MARGIN_DP.dpToPx(context)
-                }
-                root.addView(previewsRow, rowParams)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colors.surface)
+                .padding(10.dp)
+        ) {
+            Text(text = data.name ?: "未命名壁纸组")
+            Spacer(modifier = Modifier.height(ITEM_PREVIEW_TOP_MARGIN_DP.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(ITEM_PREVIEW_HEIGHT_DP.dp),
+                horizontalArrangement = Arrangement.spacedBy(ITEM_PREVIEW_SPACING_DP.dp)
+            ) {
                 repeat(PREVIEW_COUNT) { index ->
-                    val imageView = ImageView(context).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        background = ContextCompat.getDrawable(context, R.drawable.edit_background)
-                    }
-                    val params = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
-                    if (index > 0) {
-                        params.marginStart = ITEM_PREVIEW_SPACING_DP.dpToPx(context)
-                    }
-                    previewsRow.addView(imageView, params)
-                }
-                root
-            },
-            update = { view ->
-                val nameView = view.getTag(R.id.name) as TextView
-                val name = data.name
-                nameView.text = if (name.isNullOrEmpty()) "未命名壁纸组" else name
-                val previewsRow = view.getTag(R.id.about_previews_row_tag) as LinearLayout
-                for (i in 0 until previewsRow.childCount) {
-                    val preview = previewsRow.getChildAt(i) as ImageView
-                    val model = wallpapers.getOrNull(i)
-                    if (model != null) {
-                        var path = if (model.type == 1) model.videoUri else model.imgUri
-                        if (path.isNullOrEmpty()) {
-                            path = model.imgPath
-                        }
-                        preview.visibility = View.VISIBLE
-                        Glide.with(preview.context).load(path).into(preview)
-                    } else {
-                        preview.visibility = View.INVISIBLE
-                    }
+                    val model = wallpapers.getOrNull(index)
+                    PreviewImage(
+                        context = requireContext(),
+                        model = model,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
                 }
             }
-        )
+        }
+    }
+
+    @Composable
+    private fun PreviewImage(context: Context, model: TianYinWallpaperModel?, modifier: Modifier) {
+        var bitmap by remember(model) { mutableStateOf<Bitmap?>(null) }
+        LaunchedEffect(model) {
+            bitmap = loadPreviewBitmap(context, model)
+        }
+        bitmap?.let {
+            Image(bitmap = it.asImageBitmap(), contentDescription = "Wallpaper preview", modifier = modifier)
+        } ?: Spacer(modifier = modifier.background(MaterialTheme.colors.background))
+    }
+
+    private suspend fun loadPreviewBitmap(context: Context, model: TianYinWallpaperModel?): Bitmap? {
+        if (model == null) return null
+        return withContext(Dispatchers.IO) {
+            try {
+                val path = when {
+                    model.type == 1 && !model.videoUri.isNullOrEmpty() -> model.videoUri
+                    !model.imgUri.isNullOrEmpty() -> model.imgUri
+                    else -> model.imgPath
+                }
+                if (path.isNullOrEmpty()) {
+                    null
+                } else if (model.type == 1) {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(context, android.net.Uri.parse(path))
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                            retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, VIDEO_PREVIEW_WIDTH, VIDEO_PREVIEW_HEIGHT)
+                        } else {
+                            retriever.frameAtTime
+                        }
+                    } finally {
+                        retriever.release()
+                    }
+                } else if (path.startsWith("content://")) {
+                    context.contentResolver.openInputStream(android.net.Uri.parse(path))?.use {
+                        BitmapFactory.decodeStream(it)
+                    }
+                } else {
+                    BitmapFactory.decodeFile(path)
+                }
+            } catch (e: Exception) {
+                Log.w("AboutFragment", "Failed to load preview bitmap", e)
+                null
+            }
+        }
     }
 
     companion object {
@@ -155,9 +177,7 @@ class AboutFragment : Fragment() {
         private const val ITEM_PREVIEW_TOP_MARGIN_DP = 8
         private const val ITEM_PREVIEW_SPACING_DP = 6
         private const val PREVIEW_COUNT = 4
-    }
-
-    private fun Int.dpToPx(context: Context): Int {
-        return (this * context.resources.displayMetrics.density).toInt()
+        private const val VIDEO_PREVIEW_WIDTH = 240
+        private const val VIDEO_PREVIEW_HEIGHT = 160
     }
 }
