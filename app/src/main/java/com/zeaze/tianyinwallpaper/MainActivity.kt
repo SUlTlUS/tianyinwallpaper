@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeContentPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
@@ -99,10 +101,12 @@ class MainActivity : BaseActivity() {
             else -> isSystemInDarkTheme()
         }
         MaterialTheme(colors = if (useDarkTheme) darkColors() else lightColors()) {
+        val themeBackgroundColor = MaterialTheme.colors.background
         val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route ?: ROUTE_MAIN
+        val glassSurfaceColor = MaterialTheme.colors.surface.copy(alpha = 0.5f)
         LaunchedEffect(pendingRoute) {
             val route = pendingRoute ?: return@LaunchedEffect
             if (currentRoute != route) {
@@ -110,11 +114,16 @@ class MainActivity : BaseActivity() {
             }
             pendingRoute = null
         }
-        val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+        val liquidBackdrop = if (enableLiquidGlass) {
+            rememberLayerBackdrop {
+                drawRect(themeBackgroundColor)
+                drawContent()
+            }
+        } else null
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(APP_BACKGROUND_COLOR)
+                .background(themeBackgroundColor)
         ) {
             NavHost(
                 navController = navController,
@@ -147,9 +156,12 @@ class MainActivity : BaseActivity() {
                 }
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
-                Row(
+                Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .safeContentPadding()
+                        .heightIn(min = 64.dp)
                         .padding(horizontal = 24.dp, vertical = 14.dp)
                         .composed {
                             if (enableLiquidGlass && liquidBackdrop != null) {
@@ -160,7 +172,8 @@ class MainActivity : BaseActivity() {
                                         vibrancy()
                                         blur(10.dp.toPx())
                                         lens(22.dp.toPx(), 22.dp.toPx())
-                                    }
+                                    },
+                                    onDrawSurface = { drawRect(glassSurfaceColor) }
                                 )
                             } else {
                                 clip(RoundedCornerShape(26.dp))
@@ -172,21 +185,26 @@ class MainActivity : BaseActivity() {
                                     .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
                             }
                         }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceAround,
-                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    tabItems.forEach { (route, titleRes) ->
-                        Text(
-                            text = getString(titleRes),
-                            color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
-                            fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier
-                                .clickable {
-                                    navigateToRoute(navController, route)
-                                }
-                                .padding(horizontal = 8.dp, vertical = 8.dp)
-                        )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        tabItems.forEach { (route, titleRes) ->
+                            Text(
+                                text = getString(titleRes),
+                                color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
+                                fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier
+                                    .clickable {
+                                        navigateToRoute(navController, route)
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
             }
