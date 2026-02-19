@@ -23,6 +23,16 @@ import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.Button
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.GridLayoutManager
@@ -121,13 +131,7 @@ class MainFragment : BaseFragment() {
             if (model != null) {
                 return@setOnClickListener
             }
-            AlertDialog.Builder(requireContext())
-                .setTitle("请选择壁纸类型，可长按选中的壁纸来多选")
-                .setNeutralButton("取消") { _, _ -> model = null }
-                .setNegativeButton("静态") { _, _ -> selectWallpaper() }
-                .setPositiveButton("动态") { _, _ -> selectLiveWallpaper() }
-                .setCancelable(false)
-                .show()
+            showWallpaperTypeDialog()
         }
         apply?.setOnClickListener {
             if (list.isEmpty()) {
@@ -215,16 +219,7 @@ class MainFragment : BaseFragment() {
             if (result.resultCode == RESULT_OK) {
                 toast("设置成功")
             } else {
-                AlertDialog.Builder(requireContext()).setMessage("设置失败，可能是没有设置动态壁纸权限，是否去设置")
-                    .setPositiveButton("确定") { _, _ ->
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        val uri = Uri.fromParts("package", requireActivity().packageName, null)
-                        intent.data = uri
-                        startActivity(intent)
-                    }
-                    .setNeutralButton("取消", null)
-                    .create()
-                    .show()
+                showWallpaperPermissionDialog()
             }
         }
     }
@@ -326,21 +321,39 @@ class MainFragment : BaseFragment() {
             toast(getString(R.string.no_selected_tip))
             return
         }
-        AlertDialog.Builder(requireContext())
-            .setMessage(getString(R.string.delete_selected_confirm))
-            .setNegativeButton(getString(R.string.common_cancel), null)
-            .setPositiveButton(getString(R.string.common_delete)) { _, _ ->
-                val indexes: MutableList<Int> = ArrayList(selected)
-                Collections.sort(indexes, Collections.reverseOrder())
-                for (index in indexes) {
-                    if (index >= 0 && index < list.size) {
-                        list.removeAt(index)
+        val composeView = ComposeView(requireContext()).apply {
+            setContent {
+                MaterialTheme {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(getString(R.string.delete_selected_confirm))
+                        Button(onClick = {
+                            val indexes: MutableList<Int> = ArrayList(selected)
+                            Collections.sort(indexes, Collections.reverseOrder())
+                            for (index in indexes) {
+                                if (index >= 0 && index < list.size) {
+                                    list.removeAt(index)
+                                }
+                            }
+                            wallpaperAdapter?.tryToNotifyDataSetChanged()
+                            exitSelectionMode()
+                            alertDialog?.dismiss()
+                        }) {
+                            Text(getString(R.string.common_delete))
+                        }
+                        Button(onClick = { alertDialog?.dismiss() }) {
+                            Text(getString(R.string.common_cancel))
+                        }
                     }
                 }
-                wallpaperAdapter?.tryToNotifyDataSetChanged()
-                exitSelectionMode()
             }
-            .show()
+        }
+        alertDialog = AlertDialog.Builder(requireContext()).setView(composeView).create()
+        alertDialog?.show()
     }
 
     private val helper: ItemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.Callback() {
@@ -407,6 +420,74 @@ class MainFragment : BaseFragment() {
     }
 
     private var alertDialog: AlertDialog? = null
+
+    private fun showWallpaperTypeDialog() {
+        val composeView = ComposeView(requireContext()).apply {
+            setContent {
+                MaterialTheme {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(getString(R.string.main_select_wallpaper_type_tip))
+                        Button(onClick = {
+                            alertDialog?.dismiss()
+                            selectWallpaper()
+                        }) {
+                            Text(getString(R.string.main_wallpaper_type_static))
+                        }
+                        Button(onClick = {
+                            alertDialog?.dismiss()
+                            selectLiveWallpaper()
+                        }) {
+                            Text(getString(R.string.main_wallpaper_type_dynamic))
+                        }
+                        Button(onClick = {
+                            model = null
+                            alertDialog?.dismiss()
+                        }) {
+                            Text(getString(R.string.common_cancel))
+                        }
+                    }
+                }
+            }
+        }
+        alertDialog = AlertDialog.Builder(requireContext()).setView(composeView).setCancelable(false).create()
+        alertDialog?.show()
+    }
+
+    private fun showWallpaperPermissionDialog() {
+        val composeView = ComposeView(requireContext()).apply {
+            setContent {
+                MaterialTheme {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(getString(R.string.main_set_wallpaper_failed_permission_tip))
+                        Button(onClick = {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            val uri = Uri.fromParts("package", requireActivity().packageName, null)
+                            intent.data = uri
+                            startActivity(intent)
+                            alertDialog?.dismiss()
+                        }) {
+                            Text(getString(R.string.common_confirm))
+                        }
+                        Button(onClick = { alertDialog?.dismiss() }) {
+                            Text(getString(R.string.common_cancel))
+                        }
+                    }
+                }
+            }
+        }
+        alertDialog = AlertDialog.Builder(requireContext()).setView(composeView).create()
+        alertDialog?.show()
+    }
 
     private fun wallpaperSetting() {
         val builder = AlertDialog.Builder(requireContext())
