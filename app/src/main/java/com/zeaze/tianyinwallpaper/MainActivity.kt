@@ -9,50 +9,64 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.navigation.compose.NavHost
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import com.alibaba.fastjson.JSON
-import com.google.android.material.tabs.TabLayout
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.zeaze.tianyinwallpaper.base.BaseActivity
-import com.zeaze.tianyinwallpaper.base.BaseFragment
-import com.zeaze.tianyinwallpaper.base.BaseFragmentAdapter
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
-import com.zeaze.tianyinwallpaper.ui.about.AboutFragment
+import com.zeaze.tianyinwallpaper.ui.about.AboutRouteScreen
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
-import com.zeaze.tianyinwallpaper.ui.main.MainFragment
-import com.zeaze.tianyinwallpaper.ui.setting.SettingFragment
+import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
+import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
-import com.zeaze.tianyinwallpaper.widget.NoScrollViewPager
 import java.io.File
 
 class MainActivity : BaseActivity() {
-    private var tabLayout: TabLayout? = null
-    private var viewPager: NoScrollViewPager? = null
-    private var titles: MutableList<String>? = null
-    private var fragments: MutableList<BaseFragment>? = null
+    private val tabItems: List<Pair<String, Int>> = listOf(
+        ROUTE_MAIN to R.string.main_tab_wallpaper,
+        ROUTE_ABOUT to R.string.main_tab_groups,
+        ROUTE_SETTING to R.string.main_tab_settings
+    )
+    private var showBottomBar by mutableStateOf(true)
+    private var pendingRoute by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        tabLayout = findViewById(R.id.tab_layout)
-        viewPager = findViewById(R.id.view_pager)
-
-        titles = ArrayList()
-        fragments = ArrayList()
-        titles?.add("壁纸")
-        titles?.add("壁纸组")
-        titles?.add("设置")
-        fragments?.add(MainFragment())
-        fragments?.add(AboutFragment())
-        fragments?.add(SettingFragment())
-        val adapter = BaseFragmentAdapter(supportFragmentManager, titles ?: emptyList(), fragments ?: emptyList())
-        viewPager?.adapter = adapter
-        viewPager?.offscreenPageLimit = 100
-        tabLayout?.setupWithViewPager(viewPager)
+        setContent {
+            MaterialTheme {
+                MainActivityScreen()
+            }
+        }
 
         val wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val point = Point()
@@ -63,8 +77,84 @@ class MainActivity : BaseActivity() {
         clearNoUseFile()
     }
 
+    @Composable
+    private fun MainActivityScreen() {
+        val navController = rememberNavController()
+        val navBackStackEntry by navController.currentBackStackEntryAsState()
+        val currentRoute = navBackStackEntry?.destination?.route ?: ROUTE_MAIN
+        LaunchedEffect(pendingRoute) {
+            val route = pendingRoute ?: return@LaunchedEffect
+            if (currentRoute != route) {
+                navigateToRoute(navController, route)
+            }
+            pendingRoute = null
+        }
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .background(APP_BACKGROUND_COLOR)) {
+            NavHost(
+                navController = navController,
+                startDestination = ROUTE_MAIN,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(ROUTE_MAIN) {
+                    MainRouteScreen(
+                        onOpenSettingPage = { openSettingPage() },
+                        onBottomBarVisibleChange = { setBottomBarVisible(it) }
+                    )
+                }
+                composable(ROUTE_ABOUT) {
+                    AboutRouteScreen()
+                }
+                composable(ROUTE_SETTING) {
+                    SettingRouteScreen()
+                }
+            }
+            if (showBottomBar) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colors.surface)
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .align(Alignment.BottomCenter),
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    tabItems.forEach { (route, titleRes) ->
+                        Text(
+                            text = getString(titleRes),
+                            color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
+                            fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier
+                                .clickable {
+                                    navigateToRoute(navController, route)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun navigateToRoute(navController: NavHostController, route: String) {
+        navController.navigate(route) {
+            popUpTo(ROUTE_MAIN) {
+                saveState = true
+            }
+            restoreState = true
+            launchSingleTop = true
+        }
+    }
+
     fun openSettingPage() {
-        viewPager?.setCurrentItem(SETTINGS_TAB_INDEX, true)
+        pendingRoute = ROUTE_SETTING
+    }
+
+    fun setBottomBarVisible(visible: Boolean) {
+        runOnUiThread {
+            showBottomBar = visible
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -190,6 +280,9 @@ class MainActivity : BaseActivity() {
 
     companion object {
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
-        private const val SETTINGS_TAB_INDEX = 2
+        private const val ROUTE_MAIN = "main"
+        private const val ROUTE_ABOUT = "about"
+        private const val ROUTE_SETTING = "setting"
+        private val APP_BACKGROUND_COLOR = Color(0xFFEDEDED)
     }
 }

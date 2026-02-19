@@ -17,4 +17,13 @@
     <string name="delete_selected_confirm">确认删除选中的壁纸？</string>
     <string name="common_cancel">取消</string>
     <string name="common_delete">删除</string>
+    <string name="common_confirm">确定</string>
+    <string name="save_list_title">列表</string>
+    <string name="main_tab_wallpaper">壁纸</string>
+    <string name="main_tab_groups">壁纸组</string>
+    <string name="main_tab_settings">设置</string>
+    <string name="main_select_wallpaper_type_tip">请选择壁纸类型，可长按选中的壁纸来多选</string>
+    <string name="main_wallpaper_type_static">静态</string>
+    <string name="main_wallpaper_type_dynamic">动态</string>
+    <string name="main_set_wallpaper_failed_permission_tip">设置失败，可能是没有设置动态壁纸权限，是否去设置</string>
 </resources>
