@@ -19,18 +19,26 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.Checkbox
+import androidx.compose.material.DropdownMenu
+import androidx.compose.material.DropdownMenuItem
 import androidx.compose.material.OutlinedTextField
+import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -43,10 +51,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alibaba.fastjson.JSON
@@ -82,15 +93,18 @@ fun MainRouteScreen(
 
     var showWallpaperTypeDialog by remember { mutableStateOf(false) }
     var showPermissionDialog by remember { mutableStateOf(false) }
-    var showMoreDialog by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
-    var showWallpaperSettingDialog by remember { mutableStateOf(false) }
-    var showMinTimeDialog by remember { mutableStateOf(false) }
-    var showAutoModeDialog by remember { mutableStateOf(false) }
 
     var actionDialogIndex by remember { mutableStateOf<Int?>(null) }
     var timeDialogIndex by remember { mutableStateOf<Int?>(null) }
     var loopDialogIndex by remember { mutableStateOf<Int?>(null) }
+    val density = LocalDensity.current
+    val statusBarTopPadding = remember(context) {
+        val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (id > 0) context.resources.getDimensionPixelSize(id) else 0
+    }
+    val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
     fun toast(msg: String) {
         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -253,94 +267,137 @@ fun MainRouteScreen(
         }
     }
 
-    Column(
+    val rowGroups = remember(wallpapers.size) {
+        wallpapers.indices.toList().chunked(3)
+    }
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFEDEDED))
-            .padding(8.dp)
     ) {
-        if (!selectionMode) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Button(onClick = { showWallpaperTypeDialog = true }) { Text("+") }
-                    Button(onClick = { applyWallpapers() }) { Text("✓") }
-                    Button(onClick = { showMoreDialog = true }) { Text("…") }
-                }
-                OutlinedTextField(
-                    value = groupName,
-                    onValueChange = {
-                        groupName = it
-                        saveCache()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("输入壁纸组的名称") }
-                )
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(onClick = { exitSelectionMode() }) { Text("取消选择") }
-                Button(onClick = { showDeleteSelectedDialog = true }) { Text("删除选中") }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 8.dp,
+                end = 8.dp,
+                top = statusBarTopPaddingDp + 88.dp,
+                bottom = if (selectionMode) 90.dp else 8.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            itemsIndexed(wallpapers) { index, model ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp)
-                        .clickable {
-                            if (selectionMode) {
-                                if (selectedPositions.contains(index)) selectedPositions.remove(index) else selectedPositions.add(index)
-                            } else {
-                                actionDialogIndex = index
+            items(rowGroups) { row ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    repeat(3) { columnIndex ->
+                        val itemIndex = row.getOrNull(columnIndex)
+                        if (itemIndex == null) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        } else {
+                            val model = wallpapers[itemIndex]
+                            val selected = selectedPositions.contains(itemIndex)
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(0.68f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        if (selectionMode) {
+                                            if (selected) selectedPositions.remove(itemIndex) else selectedPositions.add(itemIndex)
+                                        } else {
+                                            actionDialogIndex = itemIndex
+                                        }
+                                    }
+                                    .background(Color.Black)
+                            ) {
+                                WallpaperCardImage(
+                                    modifier = Modifier.fillMaxSize(),
+                                    model = model
+                                )
+                                Text(
+                                    text = if (model.type == 0) "静态" else "动态",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .background(Color(0x66000000))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                                if (model.startTime != -1 && model.endTime != -1) {
+                                    Text(
+                                        text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .background(Color(0x66000000))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                if (selected) {
+                                    Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
+                                    Surface(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(6.dp),
+                                        shape = CircleShape,
+                                        color = Color(0xD91A1A1A)
+                                    ) {
+                                        Text(
+                                            text = "✓",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
-                        .background(Color.Black)
-                ) {
-                    WallpaperCardImage(
-                        modifier = Modifier.fillMaxSize(),
-                        model = model
-                    )
-                    Text(
-                        text = if (model.type == 0) "静态" else "动态",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .background(Color(0x66000000))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                    if (model.startTime != -1 && model.endTime != -1) {
-                        Text(
-                            text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .background(Color(0x66000000))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                    if (selectedPositions.contains(index)) {
-                        Box(modifier = Modifier.fillMaxSize().background(Color(0x88000000)))
-                        Text("✓", color = Color.White, fontSize = 18.sp, modifier = Modifier.align(Alignment.Center))
                     }
                 }
             }
+        }
+        TopMask(statusBarTopPaddingDp)
+        if (selectionMode) {
+            SelectionTopBar(
+                statusBarTopPaddingDp = statusBarTopPaddingDp,
+                onCancelSelect = { exitSelectionMode() }
+            )
+            GlassCircleButton(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 26.dp),
+                label = context.getString(R.string.delete_symbol),
+                onClick = {
+                    if (selectedPositions.isEmpty()) {
+                        toast(context.getString(R.string.no_selected_tip))
+                    } else {
+                        showDeleteSelectedDialog = true
+                    }
+                }
+            )
+        } else {
+            MainTopBar(
+                statusBarTopPaddingDp = statusBarTopPaddingDp,
+                groupName = groupName,
+                onGroupNameChange = {
+                    groupName = it
+                    saveCache()
+                },
+                onAdd = { showWallpaperTypeDialog = true },
+                onApply = { applyWallpapers() },
+                moreMenuExpanded = showMoreMenu,
+                onMoreMenuExpandedChange = { showMoreMenu = it },
+                onSelect = {
+                    showMoreMenu = false
+                    enterSelectionMode()
+                },
+                onOpenSetting = {
+                    showMoreMenu = false
+                    onOpenSettingPage()
+                }
+            )
         }
     }
 
@@ -379,29 +436,6 @@ fun MainRouteScreen(
             },
             dismissButton = {
                 Button(onClick = { showPermissionDialog = false }) { Text(context.getString(R.string.common_cancel)) }
-            }
-        )
-    }
-
-    if (showMoreDialog) {
-        AlertDialog(
-            onDismissRequest = { showMoreDialog = false },
-            title = { Text("更多") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { showMoreDialog = false; enterSelectionMode() }, modifier = Modifier.fillMaxWidth()) {
-                        Text(context.getString(R.string.menu_select_mode))
-                    }
-                    Button(onClick = { showMoreDialog = false; showWallpaperSettingDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("壁纸设置")
-                    }
-                    Button(onClick = { showMoreDialog = false; onOpenSettingPage() }, modifier = Modifier.fillMaxWidth()) {
-                        Text(context.getString(R.string.menu_setting))
-                    }
-                }
-            },
-            confirmButton = {
-                Button(onClick = { showMoreDialog = false }) { Text(context.getString(R.string.common_cancel)) }
             }
         )
     }
@@ -528,97 +562,107 @@ fun MainRouteScreen(
         }
     }
 
-    if (showWallpaperSettingDialog) {
-        var rand by remember { mutableStateOf(pref.getBoolean("rand", false)) }
-        var pageChange by remember { mutableStateOf(pref.getBoolean("pageChange", false)) }
-        var needBackgroundPlay by remember { mutableStateOf(pref.getBoolean("needBackgroundPlay", false)) }
-        var wallpaperScroll by remember { mutableStateOf(pref.getBoolean("wallpaperScroll", false)) }
-        val minTime = pref.getInt("minTime", 1)
-        val mode = pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE)
+}
 
-        AlertDialog(
-            onDismissRequest = { showWallpaperSettingDialog = false },
-            title = { Text("壁纸设置（Compose）") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(modifier = Modifier.fillMaxWidth().clickable { rand = !rand; editor.putBoolean("rand", rand).apply() }, horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("随机切换")
-                        Checkbox(checked = rand, onCheckedChange = { checked -> rand = checked; editor.putBoolean("rand", rand).apply() })
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().clickable { pageChange = !pageChange; editor.putBoolean("pageChange", pageChange).apply() }, horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("按页切换并预加载")
-                        Checkbox(checked = pageChange, onCheckedChange = { checked -> pageChange = checked; editor.putBoolean("pageChange", pageChange).apply() })
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().clickable { needBackgroundPlay = !needBackgroundPlay; editor.putBoolean("needBackgroundPlay", needBackgroundPlay).apply() }, horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("后台继续播放")
-                        Checkbox(checked = needBackgroundPlay, onCheckedChange = { checked -> needBackgroundPlay = checked; editor.putBoolean("needBackgroundPlay", needBackgroundPlay).apply() })
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().clickable { wallpaperScroll = !wallpaperScroll; editor.putBoolean("wallpaperScroll", wallpaperScroll).apply() }, horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("壁纸跟随滑动")
-                        Checkbox(checked = wallpaperScroll, onCheckedChange = { checked -> wallpaperScroll = checked; editor.putBoolean("wallpaperScroll", wallpaperScroll).apply() })
-                    }
-                    Text("壁纸最小切换时间: ${minTime}秒", modifier = Modifier.clickable { showMinTimeDialog = true })
-                    Text("自动切换模式: ${AUTO_SWITCH_MODE_ITEMS.getOrElse(mode) { AUTO_SWITCH_MODE_ITEMS[0] }}", modifier = Modifier.clickable { showAutoModeDialog = true })
+@Composable
+private fun MainTopBar(
+    statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
+    groupName: String,
+    onGroupNameChange: (String) -> Unit,
+    onAdd: () -> Unit,
+    onApply: () -> Unit,
+    moreMenuExpanded: Boolean,
+    onMoreMenuExpandedChange: (Boolean) -> Unit,
+    onSelect: () -> Unit,
+    onOpenSetting: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        GlassCircleButton(label = "+", onClick = onAdd)
+        OutlinedTextField(
+            value = groupName,
+            onValueChange = onGroupNameChange,
+            modifier = Modifier
+                .weight(1f)
+                .height(54.dp),
+            singleLine = true,
+            shape = RoundedCornerShape(26.dp),
+            label = { Text("输入壁纸组名称") }
+        )
+        Box {
+            GlassCircleButton(label = "…", onClick = { onMoreMenuExpandedChange(true) })
+            DropdownMenu(
+                expanded = moreMenuExpanded,
+                onDismissRequest = { onMoreMenuExpandedChange(false) }
+            ) {
+                DropdownMenuItem(onClick = onSelect) {
+                    Text("选择")
                 }
-            },
-            confirmButton = {
-                Button(onClick = { showWallpaperSettingDialog = false }) { Text(context.getString(R.string.common_confirm)) }
-            }
-        )
-    }
-
-    if (showMinTimeDialog) {
-        var text by remember { mutableStateOf((pref.getInt("minTime", 1)).toString()) }
-        AlertDialog(
-            onDismissRequest = { showMinTimeDialog = false },
-            title = { Text("请输入最小切换时间（秒）") },
-            text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true) },
-            confirmButton = {
-                Button(onClick = {
-                    try {
-                        val value = text.toInt()
-                        editor.putInt("minTime", value).apply()
-                        showMinTimeDialog = false
-                    } catch (_: Exception) {
-                        toast("请输入整数")
-                    }
-                }) { Text(context.getString(R.string.common_confirm)) }
-            },
-            dismissButton = {
-                Button(onClick = { showMinTimeDialog = false }) { Text(context.getString(R.string.common_cancel)) }
-            }
-        )
-    }
-
-    if (showAutoModeDialog) {
-        val checked = pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE)
-        AlertDialog(
-            onDismissRequest = { showAutoModeDialog = false },
-            title = { Text("选择自动切换模式") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    AUTO_SWITCH_MODE_ITEMS.forEachIndexed { index, mode ->
-                        Button(onClick = {
-                            editor.putInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, index)
-                            editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
-                            editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
-                            editor.apply()
-                            showAutoModeDialog = false
-                        }, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (index == checked) "✓ $mode" else mode)
-                        }
-                    }
+                DropdownMenuItem(onClick = onOpenSetting) {
+                    Text("设置")
                 }
-            },
-            confirmButton = {
-                Button(onClick = { showAutoModeDialog = false }) { Text(context.getString(R.string.common_cancel)) }
             }
-        )
+        }
+        GlassCircleButton(label = "✓", onClick = onApply)
     }
 }
 
-private const val AUTO_SWITCH_MODE_NONE = 0
-private val AUTO_SWITCH_MODE_ITEMS = arrayOf("手动切换", "按固定时间间隔切换", "按每日时间点切换")
+@Composable
+private fun SelectionTopBar(
+    statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
+    onCancelSelect: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = statusBarTopPaddingDp + 10.dp, end = 8.dp),
+        horizontalArrangement = Arrangement.End
+    ) {
+        GlassCircleButton(label = "×", onClick = onCancelSelect)
+    }
+}
+
+@Composable
+private fun TopMask(statusBarTopPaddingDp: androidx.compose.ui.unit.Dp) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(statusBarTopPaddingDp + 96.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(Color(0xD9F6F8FB), Color(0x66F6F8FB), Color.Transparent)
+                )
+            )
+    )
+}
+
+@Composable
+private fun GlassCircleButton(
+    modifier: Modifier = Modifier,
+    label: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier.size(48.dp),
+        shape = CircleShape,
+        color = Color(0xAAFFFFFF),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x88FFFFFF))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = label, color = Color(0xFF1A2433), fontSize = 20.sp)
+        }
+    }
+}
 
 @Composable
 private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWallpaperModel) {
