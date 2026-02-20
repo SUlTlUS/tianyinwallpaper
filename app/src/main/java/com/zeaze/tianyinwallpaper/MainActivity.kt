@@ -19,13 +19,16 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
@@ -47,7 +50,9 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -60,6 +65,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.alibaba.fastjson.JSON
 import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -167,88 +173,19 @@ class MainActivity : BaseActivity() {
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
                 if (enableLiquidGlass && liquidBackdrop != null) {
-                    val animationScope = rememberCoroutineScope()
-                    val pressAnimationSpec = remember {
-                        spring<Float>(
-                            dampingRatio = BOTTOM_BAR_PRESS_DAMPING_RATIO,
-                            stiffness = BOTTOM_BAR_PRESS_STIFFNESS
-                        )
-                    }
-                    Row(
+                    CatalogStyleBottomBar(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .safeContentPadding()
                             .height(64.dp)
                             .fillMaxWidth()
                             .padding(horizontal = 24.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        tabItems.forEach { (route, titleRes) ->
-                            val selected = currentRoute == route
-                            val progressAnimation = remember { Animatable(0f) }
-                            val selectedTint = MaterialTheme.colors.primary
-                            LaunchedEffect(selected) {
-                                if (!selected) {
-                                    progressAnimation.snapTo(0f)
-                                }
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .drawBackdrop(
-                                        backdrop = liquidBackdrop,
-                                        shape = { RoundedCornerShape(26.dp) },
-                                        effects = {
-                                            vibrancy()
-                                            blur(BOTTOM_BAR_BLUR_RADIUS.dp.toPx())
-                                            lens(BOTTOM_BAR_LENS_WIDTH.dp.toPx(), BOTTOM_BAR_LENS_HEIGHT.dp.toPx())
-                                        },
-                                        layerBlock = {
-                                            val progress = progressAnimation.value
-                                            val maxScale = (size.width + BOTTOM_BAR_PRESS_EXPANSION_DP.dp.toPx()) / size.width
-                                            val scale = 1f + (maxScale - 1f) * progress
-                                            scaleX = scale
-                                            scaleY = scale
-                                        },
-                                        onDrawSurface = {
-                                            if (selected) {
-                                                drawRect(selectedTint, blendMode = BlendMode.Hue)
-                                                drawRect(selectedTint.copy(alpha = BOTTOM_BAR_SELECTED_TINT_ALPHA))
-                                            } else {
-                                                drawRect(glassSurfaceColor)
-                                            }
-                                        }
-                                    )
-                                    .clip(RoundedCornerShape(26.dp))
-                                    .clickable {
-                                        navigateToRoute(navController, route)
-                                    }
-                                    .pointerInput(route) {
-                                        awaitEachGesture {
-                                            awaitFirstDown()
-                                            animationScope.launch {
-                                                progressAnimation.stop()
-                                                progressAnimation.animateTo(1f, pressAnimationSpec)
-                                            }
-                                            waitForUpOrCancellation()
-                                            animationScope.launch {
-                                                progressAnimation.stop()
-                                                progressAnimation.animateTo(0f, pressAnimationSpec)
-                                            }
-                                        }
-                                    }
-                                    .fillMaxHeight()
-                                    .weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = getString(titleRes),
-                                    color = if (selected) Color.White else MaterialTheme.colors.onSurface,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                )
-                            }
-                        }
-                    }
+                        tabItems = tabItems,
+                        currentRoute = currentRoute,
+                        liquidBackdrop = liquidBackdrop,
+                        glassSurfaceColor = glassSurfaceColor,
+                        onNavigate = { route -> navigateToRoute(navController, route) }
+                    )
                 } else {
                     Box(
                         modifier = Modifier
@@ -287,6 +224,120 @@ class MainActivity : BaseActivity() {
                 }
             }
         }
+        }
+    }
+
+    @Composable
+    private fun CatalogStyleBottomBar(
+        modifier: Modifier,
+        tabItems: List<Pair<String, Int>>,
+        currentRoute: String,
+        liquidBackdrop: com.kyant.backdrop.Backdrop,
+        glassSurfaceColor: Color,
+        onNavigate: (String) -> Unit
+    ) {
+        if (tabItems.isEmpty()) return
+        val animationScope = rememberCoroutineScope()
+        val pressAnimationSpec = remember {
+            spring<Float>(
+                dampingRatio = BOTTOM_BAR_PRESS_DAMPING_RATIO,
+                stiffness = BOTTOM_BAR_PRESS_STIFFNESS
+            )
+        }
+        val tabCount = tabItems.size
+        val selectedIndex = tabItems.indexOfFirst { it.first == currentRoute }.coerceAtLeast(0)
+        val indicatorProgress = remember { Animatable(selectedIndex.toFloat()) }
+        val density = LocalDensity.current
+        LaunchedEffect(selectedIndex) {
+            indicatorProgress.animateTo(selectedIndex.toFloat(), pressAnimationSpec)
+        }
+        val pressAnimations = remember(tabCount) { List(tabCount) { Animatable(0f) } }
+        val combinedBackdrop = rememberCombinedBackdrop(liquidBackdrop, rememberLayerBackdrop())
+        BoxWithConstraints(modifier = modifier) {
+            val itemWidth = remember(maxWidth, tabCount) { maxWidth / tabCount }
+            val itemWidthPx = with(density) { itemWidth.toPx() }
+            val selectedTint = MaterialTheme.colors.primary
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset {
+                        IntOffset((itemWidthPx * indicatorProgress.value).toInt(), 0)
+                    }
+                    .width(itemWidth)
+                    .fillMaxHeight()
+                    .drawBackdrop(
+                        backdrop = combinedBackdrop,
+                        shape = { RoundedCornerShape(26.dp) },
+                        effects = {
+                            vibrancy()
+                            blur(BOTTOM_BAR_BLUR_RADIUS.dp.toPx())
+                            lens(BOTTOM_BAR_LENS_WIDTH.dp.toPx(), BOTTOM_BAR_LENS_HEIGHT.dp.toPx())
+                        },
+                        onDrawSurface = {
+                            drawRect(selectedTint, blendMode = BlendMode.Hue)
+                            drawRect(selectedTint.copy(alpha = BOTTOM_BAR_SELECTED_TINT_ALPHA))
+                        }
+                    )
+            )
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(BOTTOM_BAR_ITEM_SPACING.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                tabItems.forEachIndexed { index, (route, titleRes) ->
+                    val selected = currentRoute == route
+                    val pressAnimation = pressAnimations[index]
+                    Box(
+                        modifier = Modifier
+                            .drawBackdrop(
+                                backdrop = combinedBackdrop,
+                                shape = { RoundedCornerShape(26.dp) },
+                                effects = {
+                                    vibrancy()
+                                    blur(BOTTOM_BAR_BLUR_RADIUS.dp.toPx())
+                                    lens(BOTTOM_BAR_LENS_WIDTH.dp.toPx(), BOTTOM_BAR_LENS_HEIGHT.dp.toPx())
+                                },
+                                layerBlock = {
+                                    val progress = pressAnimation.value
+                                    val maxScale = (size.width + BOTTOM_BAR_PRESS_EXPANSION_DP.dp.toPx()) / size.width
+                                    val scale = 1f + (maxScale - 1f) * progress
+                                    scaleX = scale
+                                    scaleY = scale
+                                },
+                                onDrawSurface = {
+                                    if (!selected) {
+                                        drawRect(glassSurfaceColor)
+                                    }
+                                }
+                            )
+                            .clip(RoundedCornerShape(26.dp))
+                            .clickable { onNavigate(route) }
+                            .pointerInput(route) {
+                                awaitEachGesture {
+                                    awaitFirstDown()
+                                    animationScope.launch {
+                                        pressAnimation.stop()
+                                        pressAnimation.animateTo(1f, pressAnimationSpec)
+                                    }
+                                    waitForUpOrCancellation()
+                                    animationScope.launch {
+                                        pressAnimation.stop()
+                                        pressAnimation.animateTo(0f, pressAnimationSpec)
+                                    }
+                                }
+                            }
+                            .fillMaxHeight()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = getString(titleRes),
+                            color = if (selected) Color.White else MaterialTheme.colors.onSurface,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -448,5 +499,6 @@ class MainActivity : BaseActivity() {
         private const val BOTTOM_BAR_SELECTED_TINT_ALPHA = 0.45f
         private const val BOTTOM_BAR_PRESS_DAMPING_RATIO = 0.5f
         private const val BOTTOM_BAR_PRESS_STIFFNESS = 300f
+        private const val BOTTOM_BAR_ITEM_SPACING = 8
     }
 }
