@@ -2,7 +2,6 @@ package com.zeaze.tianyinwallpaper.ui.setting
 
 import android.content.Context
 import android.content.pm.PackageManager
-import android.os.Build
 import android.text.TextUtils
 import android.util.Log
 import android.widget.Toast
@@ -295,23 +294,20 @@ private fun LinkText(label: String, url: String) {
 }
 
 private fun getVersionName(context: Context): String {
-    var verName = "获取失败"
-    try {
-        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
-        } else {
-            @Suppress("DEPRECATION")
-            context.packageManager.getPackageInfo(context.packageName, 0)
-        }
-        verName = packageInfo.versionName ?: "获取失败"
+    return try {
+        @Suppress("DEPRECATION")
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        packageInfo.versionName ?: "获取失败"
     } catch (e: PackageManager.NameNotFoundException) {
-        verName = "获取失败(包信息缺失)"
-        Log.e("SettingFragment", "getVersionName NameNotFound", e)
+        Log.e("SettingFragment", "getVersionName package not found", e)
+        "获取失败"
     } catch (e: SecurityException) {
-        verName = "获取失败(权限受限)"
         Log.e("SettingFragment", "getVersionName security error", e)
+        "获取失败"
+    } catch (e: IllegalArgumentException) {
+        Log.e("SettingFragment", "getVersionName illegal argument", e)
+        "获取失败"
     }
-    return verName
 }
 
 private fun getAboutText(): String {
