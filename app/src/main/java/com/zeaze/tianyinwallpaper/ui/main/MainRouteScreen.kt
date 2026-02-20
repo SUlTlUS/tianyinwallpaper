@@ -43,6 +43,7 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
+import androidx.compose.material.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -806,7 +807,7 @@ private fun MainTopBar(
             onValueChange = onGroupNameChange,
             modifier = Modifier
                 .weight(1f)
-                .height(54.dp)
+                .height(52.dp)
                 .composed {
                     if (enableLiquidGlass && backdrop != null) {
                         drawBackdrop(
@@ -824,7 +825,14 @@ private fun MainTopBar(
                 },
             singleLine = true,
             shape = RoundedCornerShape(26.dp),
-            label = { Text("输入壁纸组名称") }
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                backgroundColor = Color.Transparent,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                disabledBorderColor = Color.Transparent,
+                errorBorderColor = Color.Transparent
+            ),
+            placeholder = { Text("输入壁纸组名称") }
         )
         Box {
             GlassCircleButton(
