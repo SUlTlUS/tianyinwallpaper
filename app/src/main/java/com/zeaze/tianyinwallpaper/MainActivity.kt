@@ -173,18 +173,25 @@ class MainActivity : BaseActivity() {
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
                 if (enableLiquidGlass && liquidBackdrop != null) {
-                    LiquidBottomTabs(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .safeContentPadding()
-                            .height(64.dp)
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 14.dp),
-                        tabItems = tabItems,
-                        selectedTabIndex = { tabItems.indexOfFirst { it.first == currentRoute }.coerceAtLeast(0) },
-                        backdrop = liquidBackdrop,
-                        onTabSelected = { index -> navigateToRoute(navController, tabItems[index].first) }
-                    )
+                    val selectedTabIndex = tabItems.indexOfFirst { it.first == currentRoute }
+                    if (selectedTabIndex >= 0) {
+                        LiquidBottomTabs(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .safeContentPadding()
+                                .height(64.dp)
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 14.dp),
+                            tabItems = tabItems,
+                            selectedTabIndex = selectedTabIndex,
+                            backdrop = liquidBackdrop,
+                            onTabSelected = { index ->
+                                tabItems.getOrNull(index)?.first?.let { route ->
+                                    navigateToRoute(navController, route)
+                                }
+                            }
+                        )
+                    }
                 } else {
                     Box(
                         modifier = Modifier
@@ -230,7 +237,7 @@ class MainActivity : BaseActivity() {
     private fun LiquidBottomTabs(
         modifier: Modifier,
         tabItems: List<Pair<String, Int>>,
-        selectedTabIndex: () -> Int,
+        selectedTabIndex: Int,
         backdrop: com.kyant.backdrop.Backdrop,
         onTabSelected: (index: Int) -> Unit
     ) {
@@ -243,7 +250,7 @@ class MainActivity : BaseActivity() {
             )
         }
         val tabCount = tabItems.size
-        val selectedIndex = selectedTabIndex()
+        val selectedIndex = selectedTabIndex
         val indicatorProgress = remember { Animatable(selectedIndex.toFloat()) }
         val density = LocalDensity.current
         LaunchedEffect(selectedIndex) {
@@ -286,7 +293,7 @@ class MainActivity : BaseActivity() {
                 horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                tabItems.forEachIndexed { index, (route, titleRes) ->
+                tabItems.forEachIndexed { index, (_, titleRes) ->
                     val selected = selectedIndex == index
                     val pressAnimation = pressAnimations[index]
                     Box(
@@ -297,7 +304,7 @@ class MainActivity : BaseActivity() {
                                 scaleY = scale
                             }
                             .clickable { onTabSelected(index) }
-                            .pointerInput(route) {
+                            .pointerInput(index) {
                                 awaitEachGesture {
                                     awaitFirstDown()
                                     animationScope.launch {
