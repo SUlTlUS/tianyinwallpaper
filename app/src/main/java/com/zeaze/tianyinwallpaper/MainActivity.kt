@@ -5,7 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Point
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
+import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -170,59 +173,37 @@ class MainActivity : BaseActivity() {
                 }
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
-                if (enableLiquidGlass && liquidBackdrop != null) {
-                    val selectedTabIndex = tabItems.indexOfFirst { it.first == currentRoute }
-                    if (selectedTabIndex >= 0) {
-                        LiquidBottomTabs(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .safeContentPadding()
-                                .height(64.dp)
-                                .fillMaxWidth()
-                                .padding(horizontal = 24.dp, vertical = 14.dp),
-                            tabItems = tabItems,
-                            selectedTabIndex = selectedTabIndex,
-                            backdrop = liquidBackdrop,
-                            onTabSelected = { index ->
-                                tabItems.getOrNull(index)?.first?.let { route ->
-                                    navigateToRoute(navController, route)
-                                }
-                            }
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 14.dp)
-                            .clip(RoundedCornerShape(26.dp))
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
-                                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 14.dp)
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
                             )
-                            .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
+                        )
+                        .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceAround,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            tabItems.forEach { (route, titleRes) ->
-                                Text(
-                                    text = getString(titleRes),
-                                    color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
-                                    fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier
-                                        .clickable {
-                                            navigateToRoute(navController, route)
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 8.dp)
-                                )
-                            }
+                        tabItems.forEach { (route, titleRes) ->
+                            Text(
+                                text = getString(titleRes),
+                                color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
+                                fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier
+                                    .clickable {
+                                        navigateToRoute(navController, route)
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 8.dp)
+                            )
                         }
                     }
                 }
@@ -438,46 +419,50 @@ class MainActivity : BaseActivity() {
 
     private fun clearNoUseFile() {
         Thread {
-            val uuids: MutableList<String?> = ArrayList()
-            val file = File(getExternalFilesDir(null).toString() + FileUtil.wallpaperFilePath)
-            if (!file.exists()) {
-                file.mkdirs()
-            }
-            var s = FileUtil.loadData(this@MainActivity, FileUtil.dataPath)
-            val saveDataList = JSON.parseArray(s, SaveData::class.java)
-            var list: List<TianYinWallpaperModel>
-            for (saveData in saveDataList) {
-                list = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java)
+            try {
+                val uuids: MutableList<String?> = ArrayList()
+                val file = File(getExternalFilesDir(null).toString() + FileUtil.wallpaperFilePath)
+                if (!file.exists()) {
+                    file.mkdirs()
+                }
+                var s = FileUtil.loadData(this@MainActivity, FileUtil.dataPath)
+                val saveDataList = JSON.parseArray(s, SaveData::class.java) ?: emptyList()
+                var list: List<TianYinWallpaperModel>
+                for (saveData in saveDataList) {
+                    list = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java) ?: emptyList()
+                    for (model in list) {
+                        uuids.add(model.uuid)
+                    }
+                }
+                val cache = getSharedPreferences("tianyin", MODE_PRIVATE).getString("wallpaperCache", "")
+                if (!cache.isNullOrEmpty()) {
+                    list = JSON.parseArray(cache, TianYinWallpaperModel::class.java) ?: emptyList()
+                    for (model in list) {
+                        uuids.add(model.uuid)
+                    }
+                }
+                s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
+                list = JSON.parseArray(s, TianYinWallpaperModel::class.java) ?: emptyList()
                 for (model in list) {
                     uuids.add(model.uuid)
                 }
-            }
-            val cache = getSharedPreferences("tianyin", MODE_PRIVATE).getString("wallpaperCache", "")
-            if (!cache.isNullOrEmpty()) {
-                list = JSON.parseArray(cache, TianYinWallpaperModel::class.java)
-                for (model in list) {
-                    uuids.add(model.uuid)
-                }
-            }
-            s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
-            list = JSON.parseArray(s, TianYinWallpaperModel::class.java)
-            for (model in list) {
-                uuids.add(model.uuid)
-            }
-            val papers = file.list()
-            if (papers != null) {
-                for (paper in papers) {
-                    var keep = false
-                    for (uuid in uuids) {
-                        if (uuid != null && paper.startsWith(uuid)) {
-                            keep = true
-                            break
+                val papers = file.list()
+                if (papers != null) {
+                    for (paper in papers) {
+                        var keep = false
+                        for (uuid in uuids) {
+                            if (uuid != null && paper.startsWith(uuid)) {
+                                keep = true
+                                break
+                            }
+                        }
+                        if (!keep) {
+                            File(file, paper).delete()
                         }
                     }
-                    if (!keep) {
-                        File(file, paper).delete()
-                    }
                 }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to clear unused wallpaper files", e)
             }
         }.start()
     }
@@ -504,17 +489,24 @@ class MainActivity : BaseActivity() {
         }
         if (permissionList.isNotEmpty()) {
             val permissions = permissionList.toTypedArray()
-            ActivityCompat.requestPermissions(this, permissions, 1)
+            ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE)
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != PERMISSION_REQUEST_CODE) return
         for (i in grantResults.indices) {
             if (grantResults[i] == PackageManager.PERMISSION_DENIED) {
                 AlertDialog.Builder(this)
-                    .setMessage("没有获取到" + permissions[i] + "权限，无法使用，请去系统设置里开启权限")
-                    .setPositiveButton("确定") { _, _ -> finish() }
+                    .setMessage("没有获取到${permissions[i]}权限，无法使用，请去系统设置里开启权限")
+                    .setPositiveButton("去设置") { _, _ ->
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", packageName, null)
+                        }
+                        startActivity(intent)
+                    }
+                    .setNegativeButton("取消", null)
                     .setCancelable(false)
                     .create()
                     .show()
@@ -524,6 +516,7 @@ class MainActivity : BaseActivity() {
     }
 
     companion object {
+        private const val PERMISSION_REQUEST_CODE = 1
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
         private const val ROUTE_MAIN = "main"
         private const val ROUTE_ABOUT = "about"

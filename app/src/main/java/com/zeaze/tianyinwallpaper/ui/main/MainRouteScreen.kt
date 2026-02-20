@@ -302,8 +302,23 @@ fun MainRouteScreen(
         if (wallpapers.isEmpty()) {
             val cache = pref.getString("wallpaperCache", "")
             if (!cache.isNullOrEmpty()) {
-                wallpapers.addAll(JSON.parseArray(cache, TianYinWallpaperModel::class.java))
-                groupName = pref.getString("wallpaperTvCache", "") ?: ""
+                val cachedWallpapers = runCatching {
+                    JSON.parseArray(cache, TianYinWallpaperModel::class.java)
+                }.onFailure {
+                    Log.w("MainRouteScreen", "Failed to parse wallpaperCache json, size=${cache.length}", it)
+                }.getOrNull()
+                if (cachedWallpapers == null) {
+                    editor.remove("wallpaperCache").remove("wallpaperTvCache").apply()
+                } else {
+                    val validWallpapers = cachedWallpapers.filterNotNull()
+                    if (validWallpapers.size != cachedWallpapers.size) {
+                        Log.w("MainRouteScreen", "wallpaperCache is corrupted (contains null entries), clearing cache")
+                        editor.remove("wallpaperCache").remove("wallpaperTvCache").apply()
+                    } else {
+                        wallpapers.addAll(validWallpapers)
+                        groupName = pref.getString("wallpaperTvCache", "") ?: ""
+                    }
+                }
             }
         }
     }
