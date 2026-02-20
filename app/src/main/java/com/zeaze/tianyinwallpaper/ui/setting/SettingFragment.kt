@@ -28,10 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.MainActivity
+import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 
 @Composable
@@ -74,7 +76,7 @@ fun SettingRouteScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
-            text = "设置",
+            text = stringResource(R.string.main_tab_settings),
             style = MaterialTheme.typography.h4,
             color = MaterialTheme.colors.onBackground
         )
