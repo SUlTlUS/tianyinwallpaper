@@ -12,33 +12,66 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeContentPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material.darkColors
+import androidx.compose.material.lightColors
 import androidx.navigation.compose.NavHost
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.alibaba.fastjson.JSON
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 import com.pgyer.pgyersdk.PgyerSDKManager
 import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
 import com.pgyer.pgyersdk.model.CheckSoftModel
@@ -50,12 +83,12 @@ import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
+import kotlinx.coroutines.launch
 
 class MainActivity : BaseActivity() {
     private val tabItems: List<Pair<String, Int>> = listOf(
         ROUTE_MAIN to R.string.main_tab_wallpaper,
-        ROUTE_ABOUT to R.string.main_tab_groups,
-        ROUTE_SETTING to R.string.main_tab_settings
+        ROUTE_ABOUT to R.string.main_tab_groups
     )
     private var showBottomBar by mutableStateOf(true)
     private var pendingRoute by mutableStateOf<String?>(null)
@@ -63,9 +96,7 @@ class MainActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
-                MainActivityScreen()
-            }
+            MainActivityScreen()
         }
 
         val wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -79,6 +110,16 @@ class MainActivity : BaseActivity() {
 
     @Composable
     private fun MainActivityScreen() {
+        val pref = remember(this) { getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
+        var themeMode by remember { mutableStateOf(pref.getInt(PREF_THEME_MODE, THEME_MODE_FOLLOW_SYSTEM)) }
+        val useDarkTheme = when (themeMode) {
+            THEME_MODE_DARK -> true
+            THEME_MODE_LIGHT -> false
+            else -> isSystemInDarkTheme()
+        }
+        MaterialTheme(colors = if (useDarkTheme) darkColors() else lightColors()) {
+        val themeBackgroundColor = MaterialTheme.colors.background
+        val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route ?: ROUTE_MAIN
@@ -89,13 +130,29 @@ class MainActivity : BaseActivity() {
             }
             pendingRoute = null
         }
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .background(APP_BACKGROUND_COLOR)) {
+        val liquidBackdrop = if (enableLiquidGlass) {
+            rememberLayerBackdrop {
+                drawRect(themeBackgroundColor)
+                drawContent()
+            }
+        } else null
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(themeBackgroundColor)
+        ) {
             NavHost(
                 navController = navController,
                 startDestination = ROUTE_MAIN,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .composed {
+                        if (enableLiquidGlass && liquidBackdrop != null) {
+                            layerBackdrop(liquidBackdrop)
+                        } else {
+                            this
+                        }
+                    }
             ) {
                 composable(ROUTE_MAIN) {
                     MainRouteScreen(
@@ -107,29 +164,161 @@ class MainActivity : BaseActivity() {
                     AboutRouteScreen()
                 }
                 composable(ROUTE_SETTING) {
-                    SettingRouteScreen()
+                    SettingRouteScreen(
+                        onThemeModeChange = { mode ->
+                            themeMode = mode
+                        }
+                    )
                 }
             }
-            if (showBottomBar) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colors.surface)
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                        .align(Alignment.BottomCenter),
-                    horizontalArrangement = Arrangement.SpaceAround,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    tabItems.forEach { (route, titleRes) ->
+            if (showBottomBar && currentRoute != ROUTE_SETTING) {
+                if (enableLiquidGlass && liquidBackdrop != null) {
+                    CatalogStyleBottomBar(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .safeContentPadding()
+                            .height(64.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 14.dp),
+                        tabItems = tabItems,
+                        currentRoute = currentRoute,
+                        liquidBackdrop = liquidBackdrop,
+                        onNavigate = { route -> navigateToRoute(navController, route) }
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 14.dp)
+                            .clip(RoundedCornerShape(26.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
+                                )
+                            )
+                            .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceAround,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            tabItems.forEach { (route, titleRes) ->
+                                Text(
+                                    text = getString(titleRes),
+                                    color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
+                                    fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier
+                                        .clickable {
+                                            navigateToRoute(navController, route)
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        }
+    }
+
+    @Composable
+    private fun CatalogStyleBottomBar(
+        modifier: Modifier,
+        tabItems: List<Pair<String, Int>>,
+        currentRoute: String,
+        liquidBackdrop: com.kyant.backdrop.Backdrop,
+        onNavigate: (String) -> Unit
+    ) {
+        if (tabItems.isEmpty()) return
+        val animationScope = rememberCoroutineScope()
+        val pressAnimationSpec = remember {
+            spring<Float>(
+                dampingRatio = BOTTOM_BAR_PRESS_DAMPING_RATIO,
+                stiffness = BOTTOM_BAR_PRESS_STIFFNESS
+            )
+        }
+        val tabCount = tabItems.size
+        val selectedIndex = tabItems.indexOfFirst { it.first == currentRoute }.coerceAtLeast(0)
+        val indicatorProgress = remember { Animatable(selectedIndex.toFloat()) }
+        val density = LocalDensity.current
+        LaunchedEffect(selectedIndex) {
+            indicatorProgress.animateTo(selectedIndex.toFloat(), pressAnimationSpec)
+        }
+        val pressAnimations = remember(tabCount) { List(tabCount) { Animatable(0f) } }
+        val combinedBackdrop = rememberCombinedBackdrop(liquidBackdrop, rememberLayerBackdrop())
+        BoxWithConstraints(modifier = modifier) {
+            val itemWidth = remember(maxWidth, tabCount) { maxWidth / tabCount }
+            val itemWidthPx = with(density) { itemWidth.toPx() }
+            val selectedTint = MaterialTheme.colors.primary
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset {
+                        IntOffset((itemWidthPx * indicatorProgress.value).toInt(), INDICATOR_VERTICAL_OFFSET_DP.dp.roundToPx())
+                    }
+                    .width(itemWidth)
+                    .fillMaxHeight()
+                    .padding(
+                        horizontal = INDICATOR_HORIZONTAL_PADDING_DP.dp,
+                        vertical = INDICATOR_VERTICAL_PADDING_DP.dp
+                    )
+                    .drawBackdrop(
+                        backdrop = combinedBackdrop,
+                        shape = { RoundedCornerShape(26.dp) },
+                        effects = {
+                            vibrancy()
+                            blur(BOTTOM_BAR_BLUR_RADIUS.dp.toPx())
+                            lens(BOTTOM_BAR_LENS_WIDTH.dp.toPx(), BOTTOM_BAR_LENS_HEIGHT.dp.toPx())
+                        },
+                        onDrawSurface = {
+                            drawRect(selectedTint, blendMode = BlendMode.Hue)
+                            drawRect(selectedTint.copy(alpha = BOTTOM_BAR_SELECTED_TINT_ALPHA))
+                        }
+                    )
+            )
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                tabItems.forEachIndexed { index, (route, titleRes) ->
+                    val selected = currentRoute == route
+                    val pressAnimation = pressAnimations[index]
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                val scale = 1f + BOTTOM_BAR_PRESS_SCALE_DELTA * pressAnimation.value
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                            .clickable { onNavigate(route) }
+                            .pointerInput(route) {
+                                awaitEachGesture {
+                                    awaitFirstDown()
+                                    animationScope.launch {
+                                        pressAnimation.stop()
+                                        pressAnimation.animateTo(1f, pressAnimationSpec)
+                                    }
+                                    waitForUpOrCancellation()
+                                    animationScope.launch {
+                                        pressAnimation.stop()
+                                        pressAnimation.animateTo(0f, pressAnimationSpec)
+                                    }
+                                }
+                            }
+                            .fillMaxHeight()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
                             text = getString(titleRes),
-                            color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
-                            fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier
-                                .clickable {
-                                    navigateToRoute(navController, route)
-                                }
-                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                            color = if (selected) Color.White else MaterialTheme.colors.onSurface,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
                         )
                     }
                 }
@@ -284,5 +473,19 @@ class MainActivity : BaseActivity() {
         private const val ROUTE_ABOUT = "about"
         private const val ROUTE_SETTING = "setting"
         private val APP_BACKGROUND_COLOR = Color(0xFFEDEDED)
+        const val PREF_THEME_MODE = "themeMode"
+        const val THEME_MODE_FOLLOW_SYSTEM = 0
+        const val THEME_MODE_LIGHT = 1
+        const val THEME_MODE_DARK = 2
+        private const val BOTTOM_BAR_BLUR_RADIUS = 4f
+        private const val BOTTOM_BAR_LENS_WIDTH = 16f
+        private const val BOTTOM_BAR_LENS_HEIGHT = 32f
+        private const val BOTTOM_BAR_SELECTED_TINT_ALPHA = 0.45f
+        private const val BOTTOM_BAR_PRESS_DAMPING_RATIO = 0.5f
+        private const val BOTTOM_BAR_PRESS_STIFFNESS = 300f
+        private const val BOTTOM_BAR_PRESS_SCALE_DELTA = 0.08f
+        private const val INDICATOR_VERTICAL_OFFSET_DP = -4
+        private const val INDICATOR_HORIZONTAL_PADDING_DP = 6
+        private const val INDICATOR_VERTICAL_PADDING_DP = 6
     }
 }
