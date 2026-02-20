@@ -50,6 +50,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -282,6 +283,34 @@ class MainActivity : BaseActivity() {
                             drawRect(
                                 if (isDarkTheme) Color(0xFF101010).copy(alpha = 0.45f)
                                 else Color.White.copy(alpha = 0.55f)
+                            )
+                        }
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RectangleShape },
+                        effects = {
+                            blur(4.dp.toPx())
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                lens(16.dp.toPx(), 10.dp.toPx())
+                            }
+                        },
+                        onDrawSurface = {
+                            val tintColor =
+                                if (isDarkTheme) Color.Black.copy(alpha = 0.22f)
+                                else Color.White.copy(alpha = 0.45f)
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(tintColor, Color.Transparent),
+                                    startY = 0f,
+                                    endY = size.height
+                                )
                             )
                         }
                     )
