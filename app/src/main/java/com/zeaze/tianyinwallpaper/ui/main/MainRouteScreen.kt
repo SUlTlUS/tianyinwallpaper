@@ -800,7 +800,7 @@ private fun MainTopBar(
                     drawBackdrop(
                         backdrop = backdrop,
                         exportedBackdrop = topBarBackdrop,
-                        shape = { RoundedCornerShape(28.dp) },
+                        shape = { RoundedCornerShape(0.dp) },
                         effects = { }
                     )
                 } else {
