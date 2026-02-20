@@ -5,6 +5,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,13 +21,11 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp as lerpFloat
 import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.shadow.Shadow
-import com.kyant.shapes.Capsule
 
 @Composable
 fun LiquidToggle(
@@ -50,7 +49,7 @@ fun LiquidToggle(
         Box(
             Modifier
                 .layerBackdrop(trackBackdrop)
-                .clip(Capsule())
+                .clip(RoundedCornerShape(percent = 50))
                 .drawBehind {
                     drawRect(lerp(trackColor, accentColor, fraction))
                 }
@@ -66,8 +65,8 @@ fun LiquidToggle(
                         else lerpFloat(-padding, -(padding + dragWidth), fraction)
                 }
                 .drawBackdrop(
-                    backdrop = rememberBackdrop(trackBackdrop) { drawBackdrop() },
-                    shape = { Capsule() },
+                    backdrop = trackBackdrop,
+                    shape = { RoundedCornerShape(percent = 50) },
                     effects = {
                         blur(8.dp.toPx())
                         lens(2.dp.toPx(), 4.dp.toPx(), chromaticAberration = true)
