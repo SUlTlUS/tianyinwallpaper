@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Point
 import android.os.Bundle
+import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -481,7 +482,7 @@ class MainActivity : BaseActivity() {
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("MainActivity", "Failed to clear unused wallpaper files", e)
             }
         }.start()
     }
