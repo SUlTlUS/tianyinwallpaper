@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Point
-import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
@@ -72,9 +71,6 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
-import com.pgyer.pgyersdk.PgyerSDKManager
-import com.pgyer.pgyersdk.callback.CheckoutVersionCallBack
-import com.pgyer.pgyersdk.model.CheckSoftModel
 import com.zeaze.tianyinwallpaper.base.BaseActivity
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.about.AboutRouteScreen
@@ -359,25 +355,6 @@ class MainActivity : BaseActivity() {
 
     override fun onResume() {
         super.onResume()
-        PgyerSDKManager.checkSoftwareUpdate(this, object : CheckoutVersionCallBack {
-            override fun onSuccess(checkSoftModel: CheckSoftModel) {
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("检测到有新版本")
-                    .setMessage(checkSoftModel.buildUpdateDescription)
-                    .setPositiveButton("更新") { _, _ ->
-                        val uri = Uri.parse(checkSoftModel.downloadURL)
-                        val intent = Intent(Intent.ACTION_VIEW, uri)
-                        startActivity(intent)
-                    }
-                    .setNegativeButton("下次", null)
-                    .setCancelable(false)
-                    .create()
-                    .show()
-            }
-
-            override fun onFail(s: String) {
-            }
-        })
     }
 
     private fun clearNoUseFile() {
