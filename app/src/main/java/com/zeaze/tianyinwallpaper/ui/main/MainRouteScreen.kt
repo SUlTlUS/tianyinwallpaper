@@ -310,8 +310,14 @@ fun MainRouteScreen(
                 if (cachedWallpapers == null) {
                     editor.remove("wallpaperCache").remove("wallpaperTvCache").apply()
                 } else {
-                    wallpapers.addAll(cachedWallpapers)
-                    groupName = pref.getString("wallpaperTvCache", "") ?: ""
+                    val validWallpapers = cachedWallpapers.filterNotNull()
+                    if (validWallpapers.size != cachedWallpapers.size) {
+                        Log.w("MainRouteScreen", "wallpaperCache is corrupted (contains null entries), clearing cache")
+                        editor.remove("wallpaperCache").remove("wallpaperTvCache").apply()
+                    } else {
+                        wallpapers.addAll(validWallpapers)
+                        groupName = pref.getString("wallpaperTvCache", "") ?: ""
+                    }
                 }
             }
         }
