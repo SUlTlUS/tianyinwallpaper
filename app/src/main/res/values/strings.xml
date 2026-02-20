@@ -25,5 +25,8 @@
     <string name="main_select_wallpaper_type_tip">请选择壁纸类型，可长按选中的壁纸来多选</string>
     <string name="main_wallpaper_type_static">静态</string>
     <string name="main_wallpaper_type_dynamic">动态</string>
+    <string name="main_wallpaper_type_directory">目录</string>
+    <string name="main_wallpaper_type_directory_empty">所选目录中没有可导入的图片或视频</string>
+    <string name="main_wallpaper_directory_permission_failed">无法获取目录读取权限，请重新选择并授权</string>
     <string name="main_set_wallpaper_failed_permission_tip">设置失败，可能是没有设置动态壁纸权限，是否去设置</string>
 </resources>
