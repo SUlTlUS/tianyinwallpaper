@@ -59,7 +59,6 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -74,7 +73,9 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
@@ -791,19 +792,18 @@ private fun MainTopBar(
     onOpenSetting: () -> Unit
 ) {
     val topBarBackdrop = if (enableLiquidGlass && backdrop != null) rememberLayerBackdrop() else null
-    val controlsBackdrop = topBarBackdrop ?: backdrop
+    val controlsBackdrop = if (enableLiquidGlass && backdrop != null && topBarBackdrop != null) {
+        rememberCombinedBackdrop(backdrop, topBarBackdrop)
+    } else {
+        backdrop
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp)
             .composed {
                 if (enableLiquidGlass && backdrop != null && topBarBackdrop != null) {
-                    drawBackdrop(
-                        backdrop = backdrop,
-                        exportedBackdrop = topBarBackdrop,
-                        shape = { RectangleShape },
-                        effects = { }
-                    )
+                    layerBackdrop(topBarBackdrop)
                 } else {
                     this
                 }
@@ -917,7 +917,7 @@ private fun TopMask(statusBarTopPaddingDp: androidx.compose.ui.unit.Dp) {
 private fun GlassCircleButton(
     modifier: Modifier = Modifier,
     enableLiquidGlass: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: Backdrop?,
     label: String,
     onClick: () -> Unit
 ) {
