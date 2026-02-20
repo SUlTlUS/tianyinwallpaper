@@ -834,6 +834,12 @@ private fun MainTopBar(
             ),
             placeholder = { Text("输入壁纸组名称") }
         )
+        GlassCircleButton(
+            enableLiquidGlass = enableLiquidGlass,
+            backdrop = backdrop,
+            label = "✓",
+            onClick = onApply
+        )
         Box {
             GlassCircleButton(
                 enableLiquidGlass = enableLiquidGlass,
@@ -853,12 +859,6 @@ private fun MainTopBar(
                 }
             }
         }
-        GlassCircleButton(
-            enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
-            label = "✓",
-            onClick = onApply
-        )
     }
 }
 
