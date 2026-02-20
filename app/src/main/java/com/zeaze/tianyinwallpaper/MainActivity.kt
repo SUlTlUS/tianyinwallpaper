@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -48,6 +49,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -169,18 +171,25 @@ class MainActivity : BaseActivity() {
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
                 if (enableLiquidGlass && liquidBackdrop != null) {
-                    CatalogStyleBottomBar(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .safeContentPadding()
-                            .height(64.dp)
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 14.dp),
-                        tabItems = tabItems,
-                        currentRoute = currentRoute,
-                        liquidBackdrop = liquidBackdrop,
-                        onNavigate = { route -> navigateToRoute(navController, route) }
-                    )
+                    val selectedTabIndex = tabItems.indexOfFirst { it.first == currentRoute }
+                    if (selectedTabIndex >= 0) {
+                        LiquidBottomTabs(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .safeContentPadding()
+                                .height(64.dp)
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 14.dp),
+                            tabItems = tabItems,
+                            selectedTabIndex = selectedTabIndex,
+                            backdrop = liquidBackdrop,
+                            onTabSelected = { index ->
+                                tabItems.getOrNull(index)?.first?.let { route ->
+                                    navigateToRoute(navController, route)
+                                }
+                            }
+                        )
+                    }
                 } else {
                     Box(
                         modifier = Modifier
@@ -223,12 +232,12 @@ class MainActivity : BaseActivity() {
     }
 
     @Composable
-    private fun CatalogStyleBottomBar(
+    private fun LiquidBottomTabs(
         modifier: Modifier,
         tabItems: List<Pair<String, Int>>,
-        currentRoute: String,
-        liquidBackdrop: com.kyant.backdrop.Backdrop,
-        onNavigate: (String) -> Unit
+        selectedTabIndex: Int,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onTabSelected: (index: Int) -> Unit
     ) {
         if (tabItems.isEmpty()) return
         val animationScope = rememberCoroutineScope()
@@ -239,41 +248,95 @@ class MainActivity : BaseActivity() {
             )
         }
         val tabCount = tabItems.size
-        val selectedIndex = tabItems.indexOfFirst { it.first == currentRoute }.coerceAtLeast(0)
+        val selectedIndex = selectedTabIndex
+        val isDarkTheme = isSystemInDarkTheme()
         val indicatorProgress = remember { Animatable(selectedIndex.toFloat()) }
         val density = LocalDensity.current
         LaunchedEffect(selectedIndex) {
             indicatorProgress.animateTo(selectedIndex.toFloat(), pressAnimationSpec)
         }
         val pressAnimations = remember(tabCount) { List(tabCount) { Animatable(0f) } }
-        val combinedBackdrop = rememberCombinedBackdrop(liquidBackdrop, rememberLayerBackdrop())
+        val combinedBackdrop = rememberCombinedBackdrop(backdrop, rememberLayerBackdrop())
         BoxWithConstraints(modifier = modifier) {
             val itemWidth = remember(maxWidth, tabCount) { maxWidth / tabCount }
             val itemWidthPx = with(density) { itemWidth.toPx() }
+            val indicatorWidth = itemWidth * 0.68f
+            val indicatorWidthPx = with(density) { indicatorWidth.toPx() }
             val selectedTint = MaterialTheme.colors.primary
+            val selectedColor = BOTTOM_BAR_SELECTED_COLOR
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RoundedCornerShape(28.dp) },
+                        effects = {
+                            vibrancy()
+                            blur(8.dp.toPx())
+                            lens(22.dp.toPx(), 18.dp.toPx())
+                        },
+                        onDrawSurface = {
+                            drawRect(
+                                if (isDarkTheme) Color(0xFF101010).copy(alpha = 0.45f)
+                                else Color.White.copy(alpha = 0.55f)
+                            )
+                        }
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RectangleShape },
+                        effects = {
+                            blur(4.dp.toPx())
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                lens(16.dp.toPx(), 10.dp.toPx())
+                            }
+                        },
+                        onDrawSurface = {
+                            val tintColor =
+                                if (isDarkTheme) Color.Black.copy(alpha = 0.22f)
+                                else Color.White.copy(alpha = 0.45f)
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(tintColor, Color.Transparent),
+                                    startY = 0f,
+                                    endY = size.height
+                                )
+                            )
+                        }
+                    )
+            )
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .offset {
-                        IntOffset((itemWidthPx * indicatorProgress.value).toInt(), INDICATOR_VERTICAL_OFFSET_DP.dp.roundToPx())
+                        IntOffset(
+                            (itemWidthPx * indicatorProgress.value + (itemWidthPx - indicatorWidthPx) / 2f).toInt(),
+                            6.dp.roundToPx()
+                        )
                     }
-                    .width(itemWidth)
-                    .fillMaxHeight()
+                    .width(indicatorWidth)
+                    .height(52.dp)
                     .padding(
-                        horizontal = INDICATOR_HORIZONTAL_PADDING_DP.dp,
-                        vertical = INDICATOR_VERTICAL_PADDING_DP.dp
+                        horizontal = 4.dp,
+                        vertical = 2.dp
                     )
                     .drawBackdrop(
                         backdrop = combinedBackdrop,
-                        shape = { RoundedCornerShape(26.dp) },
+                        shape = { RoundedCornerShape(22.dp) },
                         effects = {
                             vibrancy()
-                            blur(BOTTOM_BAR_BLUR_RADIUS.dp.toPx())
-                            lens(BOTTOM_BAR_LENS_WIDTH.dp.toPx(), BOTTOM_BAR_LENS_HEIGHT.dp.toPx())
+                            blur(8.dp.toPx())
+                            lens(20.dp.toPx(), 20.dp.toPx())
                         },
                         onDrawSurface = {
-                            drawRect(selectedTint, blendMode = BlendMode.Hue)
-                            drawRect(selectedTint.copy(alpha = BOTTOM_BAR_SELECTED_TINT_ALPHA))
+                            drawRect(selectedTint.copy(alpha = 0.20f), blendMode = BlendMode.Hue)
+                            drawRect(Color.White.copy(alpha = 0.18f))
                         }
                     )
             )
@@ -283,7 +346,7 @@ class MainActivity : BaseActivity() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 tabItems.forEachIndexed { index, (route, titleRes) ->
-                    val selected = currentRoute == route
+                    val selected = selectedIndex == index
                     val pressAnimation = pressAnimations[index]
                     Box(
                         modifier = Modifier
@@ -292,8 +355,8 @@ class MainActivity : BaseActivity() {
                                 scaleX = scale
                                 scaleY = scale
                             }
-                            .clickable { onNavigate(route) }
-                            .pointerInput(route) {
+                            .clickable { onTabSelected(index) }
+                            .pointerInput(index) {
                                 awaitEachGesture {
                                     awaitFirstDown()
                                     animationScope.launch {
@@ -311,11 +374,21 @@ class MainActivity : BaseActivity() {
                             .weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = getString(titleRes),
-                            color = if (selected) Color.White else MaterialTheme.colors.onSurface,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                        )
+                        val tabIcon = tabSymbol(route)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = tabIcon,
+                                color = if (selected) selectedColor else MaterialTheme.colors.onSurface
+                            )
+                            Text(
+                                text = getString(titleRes),
+                                color = if (selected) selectedColor else MaterialTheme.colors.onSurface,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                            )
+                        }
                     }
                 }
             }
@@ -330,6 +403,12 @@ class MainActivity : BaseActivity() {
             restoreState = true
             launchSingleTop = true
         }
+    }
+
+    private fun tabSymbol(route: String): String = when (route) {
+        ROUTE_MAIN -> "✈"
+        ROUTE_ABOUT -> "◎"
+        else -> "•"
     }
 
     fun openSettingPage() {
@@ -458,6 +537,7 @@ class MainActivity : BaseActivity() {
         private const val BOTTOM_BAR_LENS_WIDTH = 16f
         private const val BOTTOM_BAR_LENS_HEIGHT = 32f
         private const val BOTTOM_BAR_SELECTED_TINT_ALPHA = 0.45f
+        private val BOTTOM_BAR_SELECTED_COLOR = Color(0xFF2A83FF)
         private const val BOTTOM_BAR_PRESS_DAMPING_RATIO = 0.5f
         private const val BOTTOM_BAR_PRESS_STIFFNESS = 300f
         private const val BOTTOM_BAR_PRESS_SCALE_DELTA = 0.08f
