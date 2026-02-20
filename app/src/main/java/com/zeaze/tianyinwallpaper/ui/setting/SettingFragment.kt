@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.text.TextUtils
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -304,9 +305,11 @@ private fun getVersionName(context: Context): String {
         }
         verName = packageInfo.versionName ?: "获取失败"
     } catch (e: PackageManager.NameNotFoundException) {
-        e.printStackTrace()
-    } catch (e: RuntimeException) {
-        e.printStackTrace()
+        verName = "获取失败(包信息缺失)"
+        Log.e("SettingFragment", "getVersionName NameNotFound", e)
+    } catch (e: SecurityException) {
+        verName = "获取失败(权限受限)"
+        Log.e("SettingFragment", "getVersionName security error", e)
     }
     return verName
 }
