@@ -173,7 +173,7 @@ class MainActivity : BaseActivity() {
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
                 if (enableLiquidGlass && liquidBackdrop != null) {
-                    CatalogStyleBottomBar(
+                    LiquidBottomTabs(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .safeContentPadding()
@@ -181,9 +181,9 @@ class MainActivity : BaseActivity() {
                             .fillMaxWidth()
                             .padding(horizontal = 24.dp, vertical = 14.dp),
                         tabItems = tabItems,
-                        currentRoute = currentRoute,
-                        liquidBackdrop = liquidBackdrop,
-                        onNavigate = { route -> navigateToRoute(navController, route) }
+                        selectedTabIndex = { tabItems.indexOfFirst { it.first == currentRoute }.coerceAtLeast(0) },
+                        backdrop = liquidBackdrop,
+                        onTabSelected = { index -> navigateToRoute(navController, tabItems[index].first) }
                     )
                 } else {
                     Box(
@@ -227,12 +227,12 @@ class MainActivity : BaseActivity() {
     }
 
     @Composable
-    private fun CatalogStyleBottomBar(
+    private fun LiquidBottomTabs(
         modifier: Modifier,
         tabItems: List<Pair<String, Int>>,
-        currentRoute: String,
-        liquidBackdrop: com.kyant.backdrop.Backdrop,
-        onNavigate: (String) -> Unit
+        selectedTabIndex: () -> Int,
+        backdrop: com.kyant.backdrop.Backdrop,
+        onTabSelected: (index: Int) -> Unit
     ) {
         if (tabItems.isEmpty()) return
         val animationScope = rememberCoroutineScope()
@@ -243,14 +243,14 @@ class MainActivity : BaseActivity() {
             )
         }
         val tabCount = tabItems.size
-        val selectedIndex = tabItems.indexOfFirst { it.first == currentRoute }.coerceAtLeast(0)
+        val selectedIndex = selectedTabIndex()
         val indicatorProgress = remember { Animatable(selectedIndex.toFloat()) }
         val density = LocalDensity.current
         LaunchedEffect(selectedIndex) {
             indicatorProgress.animateTo(selectedIndex.toFloat(), pressAnimationSpec)
         }
         val pressAnimations = remember(tabCount) { List(tabCount) { Animatable(0f) } }
-        val combinedBackdrop = rememberCombinedBackdrop(liquidBackdrop, rememberLayerBackdrop())
+        val combinedBackdrop = rememberCombinedBackdrop(backdrop, rememberLayerBackdrop())
         BoxWithConstraints(modifier = modifier) {
             val itemWidth = remember(maxWidth, tabCount) { maxWidth / tabCount }
             val itemWidthPx = with(density) { itemWidth.toPx() }
@@ -287,7 +287,7 @@ class MainActivity : BaseActivity() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 tabItems.forEachIndexed { index, (route, titleRes) ->
-                    val selected = currentRoute == route
+                    val selected = selectedIndex == index
                     val pressAnimation = pressAnimations[index]
                     Box(
                         modifier = Modifier
@@ -296,7 +296,7 @@ class MainActivity : BaseActivity() {
                                 scaleX = scale
                                 scaleY = scale
                             }
-                            .clickable { onNavigate(route) }
+                            .clickable { onTabSelected(index) }
                             .pointerInput(route) {
                                 awaitEachGesture {
                                     awaitFirstDown()
