@@ -100,6 +100,8 @@ private data class ThumbnailCacheKey(
 private const val THUMBNAIL_CACHE_MEMORY_DIVISOR = 8L
 private const val THUMBNAIL_VIDEO_WIDTH = 360
 private const val THUMBNAIL_VIDEO_HEIGHT = 640
+private const val WALLPAPER_TYPE_STATIC = 0
+private const val WALLPAPER_TYPE_DYNAMIC = 1
 
 internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): Int? {
     val normalizedMime = mimeType.orEmpty().lowercase()
@@ -112,7 +114,7 @@ internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): In
         normalizedName.endsWith(".gif") ||
         normalizedName.endsWith(".bmp")
     ) {
-        return 0
+        return WALLPAPER_TYPE_STATIC
     }
     if (normalizedMime.startsWith("video/") ||
         normalizedName.endsWith(".mp4") ||
@@ -122,7 +124,7 @@ internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): In
         normalizedName.endsWith(".mov") ||
         normalizedName.endsWith(".3gp")
     ) {
-        return 1
+        return WALLPAPER_TYPE_DYNAMIC
     }
     return null
 }
@@ -301,16 +303,16 @@ fun MainRouteScreen(
         }.start()
     }
 
-    fun appendMixedModels(results: List<Pair<Uri, Boolean>>) {
-        takePersistableUriPermissions(results.map { it.first })
+    fun appendMixedModels(results: List<Pair<Uri, Boolean>>, takeUriPermissions: Boolean = true) {
+        if (takeUriPermissions) takePersistableUriPermissions(results.map { it.first })
         val list = results.map { (uri, dynamic) ->
             TianYinWallpaperModel().apply {
                 uuid = UUID.randomUUID().toString()
                 if (dynamic) {
-                    type = 1
+                    type = WALLPAPER_TYPE_DYNAMIC
                     videoUri = uri.toString()
                 } else {
-                    type = 0
+                    type = WALLPAPER_TYPE_STATIC
                     imgUri = uri.toString()
                 }
             }
@@ -327,21 +329,20 @@ fun MainRouteScreen(
         val treeDocument = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
         val mediaUris = mutableListOf<Pair<Uri, Boolean>>()
 
-        fun walk(document: DocumentFile) {
+        val queue = ArrayDeque<DocumentFile>()
+        queue.add(treeDocument)
+        while (queue.isNotEmpty()) {
+            val document = queue.removeFirst()
             document.listFiles().forEach { file ->
                 when {
-                    file.isDirectory -> walk(file)
-                    file.isFile -> {
-                        when (wallpaperTypeByMimeOrName(file.type, file.name)) {
-                            0 -> mediaUris.add(file.uri to false)
-                            1 -> mediaUris.add(file.uri to true)
-                        }
+                    file.isDirectory -> queue.add(file)
+                    file.isFile -> when (wallpaperTypeByMimeOrName(file.type, file.name)) {
+                        WALLPAPER_TYPE_STATIC -> mediaUris.add(file.uri to false)
+                        WALLPAPER_TYPE_DYNAMIC -> mediaUris.add(file.uri to true)
                     }
                 }
             }
         }
-
-        walk(treeDocument)
         return mediaUris
     }
 
@@ -357,12 +358,13 @@ fun MainRouteScreen(
             activity?.contentResolver?.takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (e: SecurityException) {
             Log.e("MainRouteScreen", "Could not take persistable permission for tree URI: $treeUri", e)
+            toast(context.getString(R.string.main_wallpaper_directory_permission_failed))
         }
         val media = collectMediaFromDirectory(treeUri)
         if (media.isEmpty()) {
             toast(context.getString(R.string.main_wallpaper_type_directory_empty))
         } else {
-            appendMixedModels(media)
+            appendMixedModels(media, takeUriPermissions = false)
         }
     }
 
