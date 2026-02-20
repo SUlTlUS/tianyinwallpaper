@@ -382,7 +382,7 @@ class MainActivity : BaseActivity() {
 
     private fun tabSymbol(route: String): String = when (route) {
         ROUTE_MAIN -> "✈"
-        ROUTE_ABOUT -> "✈"
+        ROUTE_ABOUT -> "◎"
         else -> "•"
     }
 
