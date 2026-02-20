@@ -64,6 +64,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.documentfile.provider.DocumentFile
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
@@ -99,6 +100,33 @@ private data class ThumbnailCacheKey(
 private const val THUMBNAIL_CACHE_MEMORY_DIVISOR = 8L
 private const val THUMBNAIL_VIDEO_WIDTH = 360
 private const val THUMBNAIL_VIDEO_HEIGHT = 640
+
+internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): Int? {
+    val normalizedMime = mimeType.orEmpty().lowercase()
+    val normalizedName = fileName.orEmpty().lowercase()
+    if (normalizedMime.startsWith("image/") ||
+        normalizedName.endsWith(".jpg") ||
+        normalizedName.endsWith(".jpeg") ||
+        normalizedName.endsWith(".png") ||
+        normalizedName.endsWith(".webp") ||
+        normalizedName.endsWith(".gif") ||
+        normalizedName.endsWith(".bmp")
+    ) {
+        return 0
+    }
+    if (normalizedMime.startsWith("video/") ||
+        normalizedName.endsWith(".mp4") ||
+        normalizedName.endsWith(".mkv") ||
+        normalizedName.endsWith(".webm") ||
+        normalizedName.endsWith(".avi") ||
+        normalizedName.endsWith(".mov") ||
+        normalizedName.endsWith(".3gp")
+    ) {
+        return 1
+    }
+    return null
+}
+
 private val THUMBNAIL_CACHE = object : LruCache<ThumbnailCacheKey, Bitmap>(
     (Runtime.getRuntime().maxMemory() / THUMBNAIL_CACHE_MEMORY_DIVISOR / 1024L).toInt()
 ) {
@@ -273,9 +301,9 @@ fun MainRouteScreen(
         }.start()
     }
 
-    fun appendModels(results: List<Uri>, dynamic: Boolean) {
-        takePersistableUriPermissions(results)
-        val list = results.map { uri ->
+    fun appendMixedModels(results: List<Pair<Uri, Boolean>>) {
+        takePersistableUriPermissions(results.map { it.first })
+        val list = results.map { (uri, dynamic) ->
             TianYinWallpaperModel().apply {
                 uuid = UUID.randomUUID().toString()
                 if (dynamic) {
@@ -291,11 +319,51 @@ fun MainRouteScreen(
         saveCache()
     }
 
+    fun appendModels(results: List<Uri>, dynamic: Boolean) {
+        appendMixedModels(results.map { it to dynamic })
+    }
+
+    fun collectMediaFromDirectory(treeUri: Uri): List<Pair<Uri, Boolean>> {
+        val treeDocument = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
+        val mediaUris = mutableListOf<Pair<Uri, Boolean>>()
+
+        fun walk(document: DocumentFile) {
+            document.listFiles().forEach { file ->
+                when {
+                    file.isDirectory -> walk(file)
+                    file.isFile -> {
+                        when (wallpaperTypeByMimeOrName(file.type, file.name)) {
+                            0 -> mediaUris.add(file.uri to false)
+                            1 -> mediaUris.add(file.uri to true)
+                        }
+                    }
+                }
+            }
+        }
+
+        walk(treeDocument)
+        return mediaUris
+    }
+
     val imageLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { results ->
         if (!results.isNullOrEmpty()) appendModels(results, dynamic = false)
     }
     val videoLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { results ->
         if (!results.isNullOrEmpty()) appendModels(results, dynamic = true)
+    }
+    val directoryLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
+        if (treeUri == null) return@rememberLauncherForActivityResult
+        try {
+            activity?.contentResolver?.takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: SecurityException) {
+            Log.e("MainRouteScreen", "Could not take persistable permission for tree URI: $treeUri", e)
+        }
+        val media = collectMediaFromDirectory(treeUri)
+        if (media.isEmpty()) {
+            toast(context.getString(R.string.main_wallpaper_type_directory_empty))
+        } else {
+            appendMixedModels(media)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -549,6 +617,9 @@ fun MainRouteScreen(
                     }
                     Button(onClick = { showWallpaperTypeDialog = false; videoLaunch.launch(arrayOf("video/*")) }, modifier = Modifier.fillMaxWidth()) {
                         Text(context.getString(R.string.main_wallpaper_type_dynamic))
+                    }
+                    Button(onClick = { showWallpaperTypeDialog = false; directoryLaunch.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(context.getString(R.string.main_wallpaper_type_directory))
                     }
                 }
             },
