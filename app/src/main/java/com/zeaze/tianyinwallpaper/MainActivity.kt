@@ -444,23 +444,23 @@ class MainActivity : BaseActivity() {
                 file.mkdirs()
             }
             var s = FileUtil.loadData(this@MainActivity, FileUtil.dataPath)
-            val saveDataList = JSON.parseArray(s, SaveData::class.java)
+            val saveDataList = JSON.parseArray(s, SaveData::class.java) ?: emptyList()
             var list: List<TianYinWallpaperModel>
             for (saveData in saveDataList) {
-                list = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java)
+                list = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java) ?: emptyList()
                 for (model in list) {
                     uuids.add(model.uuid)
                 }
             }
             val cache = getSharedPreferences("tianyin", MODE_PRIVATE).getString("wallpaperCache", "")
             if (!cache.isNullOrEmpty()) {
-                list = JSON.parseArray(cache, TianYinWallpaperModel::class.java)
+                list = JSON.parseArray(cache, TianYinWallpaperModel::class.java) ?: emptyList()
                 for (model in list) {
                     uuids.add(model.uuid)
                 }
             }
             s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
-            list = JSON.parseArray(s, TianYinWallpaperModel::class.java)
+            list = JSON.parseArray(s, TianYinWallpaperModel::class.java) ?: emptyList()
             for (model in list) {
                 uuids.add(model.uuid)
             }
