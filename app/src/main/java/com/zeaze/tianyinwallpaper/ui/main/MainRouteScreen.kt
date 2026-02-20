@@ -832,7 +832,7 @@ private fun MainTopBar(
                 disabledBorderColor = Color.Transparent,
                 errorBorderColor = Color.Transparent
             ),
-            label = { Text("输入壁纸组名称") }
+            placeholder = { Text("输入壁纸组名称") }
         )
         Box {
             GlassCircleButton(
