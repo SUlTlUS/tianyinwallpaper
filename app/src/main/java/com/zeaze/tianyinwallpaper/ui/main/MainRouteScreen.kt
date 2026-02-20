@@ -807,12 +807,12 @@ private fun MainTopBar(
             onValueChange = onGroupNameChange,
             modifier = Modifier
                 .weight(1f)
-                .height(48.dp)
+                .height(52.dp)
                 .composed {
                     if (enableLiquidGlass && backdrop != null) {
                         drawBackdrop(
                             backdrop = backdrop,
-                            shape = { RoundedCornerShape(24.dp) },
+                            shape = { RoundedCornerShape(26.dp) },
                             effects = {
                                 vibrancy()
                                 blur(8.dp.toPx())
@@ -824,7 +824,7 @@ private fun MainTopBar(
                     }
                 },
             singleLine = true,
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(26.dp),
             colors = TextFieldDefaults.outlinedTextFieldColors(
                 backgroundColor = Color.Transparent,
                 focusedBorderColor = Color.Transparent,
