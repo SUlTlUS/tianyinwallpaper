@@ -59,6 +59,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -789,16 +790,30 @@ private fun MainTopBar(
     onSelect: () -> Unit,
     onOpenSetting: () -> Unit
 ) {
+    val topBarBackdrop = if (enableLiquidGlass && backdrop != null) rememberLayerBackdrop() else null
+    val controlsBackdrop = topBarBackdrop ?: backdrop
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp),
+            .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp)
+            .composed {
+                if (enableLiquidGlass && backdrop != null && topBarBackdrop != null) {
+                    drawBackdrop(
+                        backdrop = backdrop,
+                        exportedBackdrop = topBarBackdrop,
+                        shape = { RectangleShape },
+                        effects = { }
+                    )
+                } else {
+                    this
+                }
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         GlassCircleButton(
             enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
+            backdrop = controlsBackdrop,
             label = "+",
             onClick = onAdd
         )
@@ -809,9 +824,9 @@ private fun MainTopBar(
                 .weight(1f)
                 .height(52.dp)
                 .composed {
-                    if (enableLiquidGlass && backdrop != null) {
+                    if (enableLiquidGlass && controlsBackdrop != null) {
                         drawBackdrop(
-                            backdrop = backdrop,
+                            backdrop = controlsBackdrop,
                             shape = { RoundedCornerShape(26.dp) },
                             effects = {
                                 vibrancy()
@@ -837,7 +852,7 @@ private fun MainTopBar(
         Box {
             GlassCircleButton(
                 enableLiquidGlass = enableLiquidGlass,
-                backdrop = backdrop,
+                backdrop = controlsBackdrop,
                 label = "…",
                 onClick = { onMoreMenuExpandedChange(true) }
             )
@@ -855,7 +870,7 @@ private fun MainTopBar(
         }
         GlassCircleButton(
             enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
+            backdrop = controlsBackdrop,
             label = "✓",
             onClick = onApply
         )
