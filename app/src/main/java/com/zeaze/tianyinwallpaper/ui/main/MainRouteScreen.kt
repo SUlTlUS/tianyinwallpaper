@@ -59,6 +59,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -806,7 +807,7 @@ private fun MainTopBar(
                     drawBackdrop(
                         backdrop = backdrop,
                         exportedBackdrop = topBarBackdrop,
-                        shape = { RoundedCornerShape(0.dp) },
+                        shape = { RectangleShape },
                         effects = { },
                         onDrawSurface = { }
                     )
