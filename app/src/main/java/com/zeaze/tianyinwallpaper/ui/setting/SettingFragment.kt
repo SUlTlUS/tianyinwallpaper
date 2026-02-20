@@ -2,6 +2,7 @@ package com.zeaze.tianyinwallpaper.ui.setting
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.text.TextUtils
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -295,8 +296,16 @@ private fun LinkText(label: String, url: String) {
 private fun getVersionName(context: Context): String {
     var verName = "获取失败"
     try {
-        verName = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "获取失败"
+        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0)
+        }
+        verName = packageInfo.versionName ?: "获取失败"
     } catch (e: PackageManager.NameNotFoundException) {
+        e.printStackTrace()
+    } catch (e: RuntimeException) {
         e.printStackTrace()
     }
     return verName
