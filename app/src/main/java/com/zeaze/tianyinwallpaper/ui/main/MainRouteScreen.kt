@@ -781,7 +781,7 @@ fun MainRouteScreen(
 private fun MainTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: Backdrop?,
     groupName: String,
     onGroupNameChange: (String) -> Unit,
     onAdd: () -> Unit,
@@ -803,7 +803,13 @@ private fun MainTopBar(
             .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp)
             .composed {
                 if (enableLiquidGlass && backdrop != null && topBarBackdrop != null) {
-                    layerBackdrop(topBarBackdrop)
+                    drawBackdrop(
+                        backdrop = backdrop,
+                        exportedBackdrop = topBarBackdrop,
+                        shape = { RoundedCornerShape(0.dp) },
+                        effects = { },
+                        onDrawSurface = { }
+                    )
                 } else {
                     this
                 }
@@ -881,7 +887,7 @@ private fun MainTopBar(
 private fun SelectionTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
-    backdrop: LayerBackdrop?,
+    backdrop: Backdrop?,
     onCancelSelect: () -> Unit
 ) {
     Row(
