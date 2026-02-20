@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Point
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.WindowManager
 import android.widget.Toast
@@ -509,17 +511,24 @@ class MainActivity : BaseActivity() {
         }
         if (permissionList.isNotEmpty()) {
             val permissions = permissionList.toTypedArray()
-            ActivityCompat.requestPermissions(this, permissions, 1)
+            ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE)
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != PERMISSION_REQUEST_CODE) return
         for (i in grantResults.indices) {
             if (grantResults[i] == PackageManager.PERMISSION_DENIED) {
                 AlertDialog.Builder(this)
-                    .setMessage("没有获取到" + permissions[i] + "权限，无法使用，请去系统设置里开启权限")
-                    .setPositiveButton("确定") { _, _ -> finish() }
+                    .setMessage("没有获取到${permissions[i]}权限，无法使用，请去系统设置里开启权限")
+                    .setPositiveButton("去设置") { _, _ ->
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", packageName, null)
+                        }
+                        startActivity(intent)
+                    }
+                    .setNegativeButton("取消", null)
                     .setCancelable(false)
                     .create()
                     .show()
@@ -529,6 +538,7 @@ class MainActivity : BaseActivity() {
     }
 
     companion object {
+        private const val PERMISSION_REQUEST_CODE = 1
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
         private const val ROUTE_MAIN = "main"
         private const val ROUTE_ABOUT = "about"
