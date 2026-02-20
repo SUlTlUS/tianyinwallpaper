@@ -59,7 +59,6 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -804,13 +803,7 @@ private fun MainTopBar(
             .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp)
             .composed {
                 if (enableLiquidGlass && backdrop != null && topBarBackdrop != null) {
-                    drawBackdrop(
-                        backdrop = backdrop,
-                        exportedBackdrop = topBarBackdrop,
-                        shape = { RectangleShape },
-                        effects = { },
-                        onDrawSurface = { }
-                    )
+                    layerBackdrop(topBarBackdrop)
                 } else {
                     this
                 }
