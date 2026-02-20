@@ -15,7 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
-import androidx.compose.material.Checkbox
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Text
@@ -234,7 +233,10 @@ private fun SettingCheckItem(label: String, checked: Boolean, onCheckedChange: (
                 .weight(1f)
                 .clickable { onCheckedChange(!checked) }
         )
-        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        LiquidToggle(
+            selected = checked,
+            onSelect = onCheckedChange
+        )
     }
 }
 
