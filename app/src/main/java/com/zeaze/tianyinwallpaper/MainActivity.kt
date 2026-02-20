@@ -43,6 +43,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Brush
@@ -122,7 +123,6 @@ class MainActivity : BaseActivity() {
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route ?: ROUTE_MAIN
-        val glassSurfaceColor = MaterialTheme.colors.surface.copy(alpha = 0.5f)
         LaunchedEffect(pendingRoute) {
             val route = pendingRoute ?: return@LaunchedEffect
             if (currentRoute != route) {
@@ -183,7 +183,6 @@ class MainActivity : BaseActivity() {
                         tabItems = tabItems,
                         currentRoute = currentRoute,
                         liquidBackdrop = liquidBackdrop,
-                        glassSurfaceColor = glassSurfaceColor,
                         onNavigate = { route -> navigateToRoute(navController, route) }
                     )
                 } else {
@@ -233,7 +232,6 @@ class MainActivity : BaseActivity() {
         tabItems: List<Pair<String, Int>>,
         currentRoute: String,
         liquidBackdrop: com.kyant.backdrop.Backdrop,
-        glassSurfaceColor: Color,
         onNavigate: (String) -> Unit
     ) {
         if (tabItems.isEmpty()) return
@@ -261,10 +259,14 @@ class MainActivity : BaseActivity() {
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .offset {
-                        IntOffset((itemWidthPx * indicatorProgress.value).toInt(), 0)
+                        IntOffset((itemWidthPx * indicatorProgress.value).toInt(), INDICATOR_VERTICAL_OFFSET_DP.dp.roundToPx())
                     }
                     .width(itemWidth)
                     .fillMaxHeight()
+                    .padding(
+                        horizontal = INDICATOR_HORIZONTAL_PADDING_DP.dp,
+                        vertical = INDICATOR_VERTICAL_PADDING_DP.dp
+                    )
                     .drawBackdrop(
                         backdrop = combinedBackdrop,
                         shape = { RoundedCornerShape(26.dp) },
@@ -281,7 +283,7 @@ class MainActivity : BaseActivity() {
             )
             Row(
                 modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(BOTTOM_BAR_ITEM_SPACING.dp),
+                horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 tabItems.forEachIndexed { index, (route, titleRes) ->
@@ -289,28 +291,11 @@ class MainActivity : BaseActivity() {
                     val pressAnimation = pressAnimations[index]
                     Box(
                         modifier = Modifier
-                            .drawBackdrop(
-                                backdrop = combinedBackdrop,
-                                shape = { RoundedCornerShape(26.dp) },
-                                effects = {
-                                    vibrancy()
-                                    blur(BOTTOM_BAR_BLUR_RADIUS.dp.toPx())
-                                    lens(BOTTOM_BAR_LENS_WIDTH.dp.toPx(), BOTTOM_BAR_LENS_HEIGHT.dp.toPx())
-                                },
-                                layerBlock = {
-                                    val progress = pressAnimation.value
-                                    val maxScale = (size.width + BOTTOM_BAR_PRESS_EXPANSION_DP.dp.toPx()) / size.width
-                                    val scale = 1f + (maxScale - 1f) * progress
-                                    scaleX = scale
-                                    scaleY = scale
-                                },
-                                onDrawSurface = {
-                                    if (!selected) {
-                                        drawRect(glassSurfaceColor)
-                                    }
-                                }
-                            )
-                            .clip(RoundedCornerShape(26.dp))
+                            .graphicsLayer {
+                                val scale = 1f + BOTTOM_BAR_PRESS_SCALE_DELTA * pressAnimation.value
+                                scaleX = scale
+                                scaleY = scale
+                            }
                             .clickable { onNavigate(route) }
                             .pointerInput(route) {
                                 awaitEachGesture {
@@ -495,10 +480,12 @@ class MainActivity : BaseActivity() {
         private const val BOTTOM_BAR_BLUR_RADIUS = 4f
         private const val BOTTOM_BAR_LENS_WIDTH = 16f
         private const val BOTTOM_BAR_LENS_HEIGHT = 32f
-        private const val BOTTOM_BAR_PRESS_EXPANSION_DP = 16f
         private const val BOTTOM_BAR_SELECTED_TINT_ALPHA = 0.45f
         private const val BOTTOM_BAR_PRESS_DAMPING_RATIO = 0.5f
         private const val BOTTOM_BAR_PRESS_STIFFNESS = 300f
-        private const val BOTTOM_BAR_ITEM_SPACING = 8
+        private const val BOTTOM_BAR_PRESS_SCALE_DELTA = 0.08f
+        private const val INDICATOR_VERTICAL_OFFSET_DP = -4
+        private const val INDICATOR_HORIZONTAL_PADDING_DP = 6
+        private const val INDICATOR_VERTICAL_PADDING_DP = 6
     }
 }
