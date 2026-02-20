@@ -173,59 +173,37 @@ class MainActivity : BaseActivity() {
                 }
             }
             if (showBottomBar && currentRoute != ROUTE_SETTING) {
-                if (enableLiquidGlass && liquidBackdrop != null) {
-                    val selectedTabIndex = tabItems.indexOfFirst { it.first == currentRoute }
-                    if (selectedTabIndex >= 0) {
-                        LiquidBottomTabs(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .safeContentPadding()
-                                .height(64.dp)
-                                .fillMaxWidth()
-                                .padding(horizontal = 24.dp, vertical = 14.dp),
-                            tabItems = tabItems,
-                            selectedTabIndex = selectedTabIndex,
-                            backdrop = liquidBackdrop,
-                            onTabSelected = { index ->
-                                tabItems.getOrNull(index)?.first?.let { route ->
-                                    navigateToRoute(navController, route)
-                                }
-                            }
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 14.dp)
-                            .clip(RoundedCornerShape(26.dp))
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
-                                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 14.dp)
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
                             )
-                            .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
+                        )
+                        .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceAround,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            tabItems.forEach { (route, titleRes) ->
-                                Text(
-                                    text = getString(titleRes),
-                                    color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
-                                    fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier
-                                        .clickable {
-                                            navigateToRoute(navController, route)
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 8.dp)
-                                )
-                            }
+                        tabItems.forEach { (route, titleRes) ->
+                            Text(
+                                text = getString(titleRes),
+                                color = if (currentRoute == route) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
+                                fontWeight = if (currentRoute == route) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier
+                                    .clickable {
+                                        navigateToRoute(navController, route)
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 8.dp)
+                            )
                         }
                     }
                 }
