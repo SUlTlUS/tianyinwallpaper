@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
@@ -67,10 +68,16 @@ fun SettingRouteScreen(
     Column(
         modifier = Modifier
             .background(MaterialTheme.colors.background)
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        Text(
+            text = "设置",
+            style = MaterialTheme.typography.h4,
+            color = MaterialTheme.colors.onBackground
+        )
         SettingCheckItem("随机切换壁纸", rand) {
             rand = it
             editor.putBoolean("rand", it).apply()
