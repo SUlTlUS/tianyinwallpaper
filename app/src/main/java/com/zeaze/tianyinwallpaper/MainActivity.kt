@@ -438,46 +438,50 @@ class MainActivity : BaseActivity() {
 
     private fun clearNoUseFile() {
         Thread {
-            val uuids: MutableList<String?> = ArrayList()
-            val file = File(getExternalFilesDir(null).toString() + FileUtil.wallpaperFilePath)
-            if (!file.exists()) {
-                file.mkdirs()
-            }
-            var s = FileUtil.loadData(this@MainActivity, FileUtil.dataPath)
-            val saveDataList = JSON.parseArray(s, SaveData::class.java) ?: emptyList()
-            var list: List<TianYinWallpaperModel>
-            for (saveData in saveDataList) {
-                list = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java) ?: emptyList()
+            try {
+                val uuids: MutableList<String?> = ArrayList()
+                val file = File(getExternalFilesDir(null).toString() + FileUtil.wallpaperFilePath)
+                if (!file.exists()) {
+                    file.mkdirs()
+                }
+                var s = FileUtil.loadData(this@MainActivity, FileUtil.dataPath)
+                val saveDataList = JSON.parseArray(s, SaveData::class.java) ?: emptyList()
+                var list: List<TianYinWallpaperModel>
+                for (saveData in saveDataList) {
+                    list = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java) ?: emptyList()
+                    for (model in list) {
+                        uuids.add(model.uuid)
+                    }
+                }
+                val cache = getSharedPreferences("tianyin", MODE_PRIVATE).getString("wallpaperCache", "")
+                if (!cache.isNullOrEmpty()) {
+                    list = JSON.parseArray(cache, TianYinWallpaperModel::class.java) ?: emptyList()
+                    for (model in list) {
+                        uuids.add(model.uuid)
+                    }
+                }
+                s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
+                list = JSON.parseArray(s, TianYinWallpaperModel::class.java) ?: emptyList()
                 for (model in list) {
                     uuids.add(model.uuid)
                 }
-            }
-            val cache = getSharedPreferences("tianyin", MODE_PRIVATE).getString("wallpaperCache", "")
-            if (!cache.isNullOrEmpty()) {
-                list = JSON.parseArray(cache, TianYinWallpaperModel::class.java) ?: emptyList()
-                for (model in list) {
-                    uuids.add(model.uuid)
-                }
-            }
-            s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
-            list = JSON.parseArray(s, TianYinWallpaperModel::class.java) ?: emptyList()
-            for (model in list) {
-                uuids.add(model.uuid)
-            }
-            val papers = file.list()
-            if (papers != null) {
-                for (paper in papers) {
-                    var keep = false
-                    for (uuid in uuids) {
-                        if (uuid != null && paper.startsWith(uuid)) {
-                            keep = true
-                            break
+                val papers = file.list()
+                if (papers != null) {
+                    for (paper in papers) {
+                        var keep = false
+                        for (uuid in uuids) {
+                            if (uuid != null && paper.startsWith(uuid)) {
+                                keep = true
+                                break
+                            }
+                        }
+                        if (!keep) {
+                            File(file, paper).delete()
                         }
                     }
-                    if (!keep) {
-                        File(file, paper).delete()
-                    }
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }.start()
     }
