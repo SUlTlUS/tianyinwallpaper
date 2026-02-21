@@ -2,8 +2,8 @@ package com.zeaze.tianyinwallpaper.ui.main
 
 import android.app.Activity
 import android.app.WallpaperManager
-import android.content.Context
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -70,10 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
 import com.alibaba.fastjson.JSON
-import com.zeaze.tianyinwallpaper.App
-import com.zeaze.tianyinwallpaper.R
-import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
-import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -81,6 +78,10 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
+import com.zeaze.tianyinwallpaper.App
+import com.zeaze.tianyinwallpaper.R
+import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
+import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
