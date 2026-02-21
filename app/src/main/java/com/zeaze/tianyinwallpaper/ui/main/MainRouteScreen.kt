@@ -19,6 +19,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -222,7 +223,7 @@ fun MainRouteScreen(
     val context = LocalContext.current
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val activity = context as? Activity
-    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
+    val pref = remember { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
 
     val wallpapers = remember { mutableStateListOf<TianYinWallpaperModel>() }
@@ -247,8 +248,7 @@ fun MainRouteScreen(
     }
     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
-    // 创建底部工作表的 backdrop
-    val bottomSheetBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    // 定义统一的 backdrop 变量，仅在启用玻璃效果时创建
     val mainBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
     fun toast(msg: String) {
@@ -473,22 +473,17 @@ fun MainRouteScreen(
     
     val contentLayerBackground = MaterialTheme.colors.background
     
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(if (enableLiquidGlass) Color.Transparent else contentLayerBackground)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 背景层：包含壁纸列表和顶部渐变遮罩，作为 backdrop 的采样源
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (enableLiquidGlass && mainBackdrop != null) Modifier.layerBackdrop(mainBackdrop) else Modifier)
+        ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (enableLiquidGlass) contentLayerBackground else Color.Transparent)
-                .composed {
-                    if (enableLiquidGlass && mainBackdrop != null) {
-                        layerBackdrop(mainBackdrop)
-                    } else {
-                        this
-                    }
-                },
+                .background(if (enableLiquidGlass) Color.Transparent else contentLayerBackground),
             contentPadding = PaddingValues(
                 start = 8.dp,
                 end = 8.dp,
@@ -571,10 +566,11 @@ fun MainRouteScreen(
             }
         }
 
-        TopMask(statusBarTopPaddingDp)
+        TopMask(statusBarTopPaddingDp)  // 现在位于背景层内，会被 backdrop 捕获
+        }
 
-        // 使用 GlassBottomSheet 包裹顶部工具栏
-        if (enableLiquidGlass && bottomSheetBackdrop != null && mainBackdrop != null) {
+        // 上层 UI：工具栏（玻璃效果），使用同一个 mainBackdrop
+        if (enableLiquidGlass && mainBackdrop != null) {
             GlassBottomSheet(
                 backdrop = mainBackdrop,
                 modifier = Modifier
@@ -583,12 +579,12 @@ fun MainRouteScreen(
             ) {
                 if (selectionMode) {
                     SelectionToolbar(
-                        backdrop = bottomSheetBackdrop,
+                        backdrop = mainBackdrop,
                         onCancelSelect = { exitSelectionMode() }
                     )
                 } else {
                     MainToolbar(
-                        backdrop = bottomSheetBackdrop,
+                        backdrop = mainBackdrop,
                         groupName = groupName,
                         onGroupNameChange = {
                             groupName = it
@@ -644,14 +640,14 @@ fun MainRouteScreen(
             }
         }
 
-        // 选择模式下的删除按钮
-        if (selectionMode && enableLiquidGlass && bottomSheetBackdrop != null) {
+        // 选择模式下的删除按钮（玻璃效果）
+        if (selectionMode && enableLiquidGlass && mainBackdrop != null) {
             GlassButton(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 26.dp)
                     .width(120.dp),
-                backdrop = bottomSheetBackdrop,
+                backdrop = mainBackdrop,
                 label = context.getString(R.string.delete_symbol),
                 onClick = {
                     if (selectedPositions.isEmpty()) {
@@ -661,6 +657,58 @@ fun MainRouteScreen(
                     }
                 }
             )
+        }
+
+        // 玻璃样式操作菜单 (Android 13+)
+        actionDialogIndex?.let { index ->
+            if (enableLiquidGlass && mainBackdrop != null) {
+                GlassMenuCard(
+                    backdrop = mainBackdrop,
+                    onSetTime = { timeDialogIndex = index; actionDialogIndex = null },
+                    onSetLoop = { loopDialogIndex = index; actionDialogIndex = null },
+                    onDelete = { delete(index); actionDialogIndex = null },
+                    onDismiss = { actionDialogIndex = null }
+                )
+            }
+        }
+
+        // 玻璃样式时间设置对话框 (Android 13+)
+        timeDialogIndex?.let { index ->
+            val model = wallpapers.getOrNull(index)
+            if (model != null && enableLiquidGlass && mainBackdrop != null) {
+                GlassTimeDialog(
+                    backdrop = mainBackdrop,
+                    initialStartText = if (model.startTime == -1) "" else getTimeString(model.startTime),
+                    initialEndText = if (model.endTime == -1) "" else getTimeString(model.endTime),
+                    validateTime = { text, label -> parseAndValidateTime(text, label) },
+                    onSave = { st, et ->
+                        model.startTime = st
+                        model.endTime = et
+                        if (model.startTime != -1 && model.endTime == -1) model.endTime = 24 * 60
+                        if (model.endTime != -1 && model.startTime == -1) model.startTime = 0
+                        saveCache()
+                        timeDialogIndex = null
+                    },
+                    onDismiss = { timeDialogIndex = null }
+                )
+            }
+        }
+
+        // 玻璃样式循环播放对话框 (Android 13+)
+        loopDialogIndex?.let { index ->
+            val model = wallpapers.getOrNull(index)
+            if (model != null && enableLiquidGlass && mainBackdrop != null) {
+                GlassLoopDialog(
+                    backdrop = mainBackdrop,
+                    initialLoop = model.loop,
+                    onSave = { loop ->
+                        model.loop = loop
+                        saveCache()
+                        loopDialogIndex = null
+                    },
+                    onDismiss = { loopDialogIndex = null }
+                )
+            }
         }
     }
 
@@ -730,6 +778,7 @@ fun MainRouteScreen(
     }
 
     actionDialogIndex?.let { index ->
+        if (!enableLiquidGlass) {
         AlertDialog(
             onDismissRequest = { actionDialogIndex = null },
             title = { Text("请选择操作") },
@@ -744,11 +793,12 @@ fun MainRouteScreen(
                 Button(onClick = { actionDialogIndex = null }) { Text(context.getString(R.string.common_cancel)) }
             }
         )
+        }
     }
 
     timeDialogIndex?.let { index ->
         val model = wallpapers.getOrNull(index)
-        if (model != null) {
+        if (model != null && !enableLiquidGlass) {
             var startTime by remember(index) { mutableStateOf(model.startTime) }
             var endTime by remember(index) { mutableStateOf(model.endTime) }
             var startText by remember(index) { mutableStateOf(if (startTime == -1) "" else getTimeString(startTime)) }
@@ -803,7 +853,7 @@ fun MainRouteScreen(
 
     loopDialogIndex?.let { index ->
         val model = wallpapers.getOrNull(index)
-        if (model != null) {
+        if (model != null && !enableLiquidGlass) {
             var loop by remember(index) { mutableStateOf(model.loop) }
             AlertDialog(
                 onDismissRequest = { loopDialogIndex = null },
@@ -1127,5 +1177,197 @@ private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWall
             modifier = modifier,
             contentScale = ContentScale.Crop
         )
+    }
+}
+
+private fun Modifier.preventClickThrough(): Modifier = composed {
+    clickable(
+        indication = null,
+        interactionSource = remember { MutableInteractionSource() }
+    ) {}
+}
+
+@Composable
+private fun BoxScope.GlassMenuCard(
+    backdrop: Backdrop,
+    onSetTime: () -> Unit,
+    onSetLoop: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .matchParentSize()
+            .background(Color(0x66000000))
+            .clickable(onClick = onDismiss)
+    )
+    Column(
+        modifier = Modifier
+            .width(280.dp)
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { RoundedCornerShape(24.dp) },
+                effects = {
+                    vibrancy()
+                    blur(4.dp.toPx())
+                    lens(24.dp.toPx(), 48.dp.toPx(), true)
+                },
+                onDrawSurface = {
+                    drawRect(Color.White.copy(alpha = 0.5f))
+                }
+            )
+            .clip(RoundedCornerShape(24.dp))
+            .preventClickThrough()
+            .padding(16.dp)
+            .align(Alignment.Center),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        GlassButton(backdrop = backdrop, label = "设置时间条件", modifier = Modifier.fillMaxWidth(), onClick = onSetTime)
+        GlassButton(backdrop = backdrop, label = "设置循环播放", modifier = Modifier.fillMaxWidth(), onClick = onSetLoop)
+        GlassButton(backdrop = backdrop, label = "删除", modifier = Modifier.fillMaxWidth(), onClick = onDelete)
+        GlassButton(backdrop = backdrop, label = "取消", modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
+    }
+}
+
+@Composable
+private fun BoxScope.GlassTimeDialog(
+    backdrop: Backdrop,
+    initialStartText: String,
+    initialEndText: String,
+    validateTime: (String, String) -> Int?,
+    onSave: (Int, Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var startText by remember(initialStartText) { mutableStateOf(initialStartText) }
+    var endText by remember(initialEndText) { mutableStateOf(initialEndText) }
+    Box(
+        modifier = Modifier
+            .matchParentSize()
+            .background(Color(0x66000000))
+            .clickable(onClick = onDismiss)
+    )
+    Column(
+        modifier = Modifier
+            .width(280.dp)
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { RoundedCornerShape(24.dp) },
+                effects = {
+                    vibrancy()
+                    blur(4.dp.toPx())
+                    lens(24.dp.toPx(), 48.dp.toPx(), true)
+                },
+                onDrawSurface = {
+                    drawRect(Color.White.copy(alpha = 0.5f))
+                }
+            )
+            .clip(RoundedCornerShape(24.dp))
+            .preventClickThrough()
+            .padding(16.dp)
+            .align(Alignment.Center),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(text = "设置时间条件", color = Color(0xFF1A2433), fontSize = 18.sp)
+        OutlinedTextField(
+            value = startText,
+            onValueChange = { startText = it },
+            singleLine = true,
+            label = { Text("开始时间(HH:mm)") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                backgroundColor = Color.Transparent
+            )
+        )
+        OutlinedTextField(
+            value = endText,
+            onValueChange = { endText = it },
+            singleLine = true,
+            label = { Text("结束时间(HH:mm)") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                backgroundColor = Color.Transparent
+            )
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassButton(
+                backdrop = backdrop,
+                label = "重置",
+                modifier = Modifier.weight(1f),
+                onClick = { startText = ""; endText = "" }
+            )
+            GlassButton(
+                backdrop = backdrop,
+                label = "取消",
+                modifier = Modifier.weight(1f),
+                onClick = onDismiss
+            )
+            GlassButton(
+                backdrop = backdrop,
+                label = "确定",
+                modifier = Modifier.weight(1f),
+                onClick = confirm@{
+                    val st = validateTime(startText, "开始时间") ?: return@confirm
+                    val et = validateTime(endText, "结束时间") ?: return@confirm
+                    onSave(st, et)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.GlassLoopDialog(
+    backdrop: Backdrop,
+    initialLoop: Boolean,
+    onSave: (Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var loop by remember(initialLoop) { mutableStateOf(initialLoop) }
+    Box(
+        modifier = Modifier
+            .matchParentSize()
+            .background(Color(0x66000000))
+            .clickable(onClick = onDismiss)
+    )
+    Column(
+        modifier = Modifier
+            .width(280.dp)
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { RoundedCornerShape(24.dp) },
+                effects = {
+                    vibrancy()
+                    blur(4.dp.toPx())
+                    lens(24.dp.toPx(), 48.dp.toPx(), true)
+                },
+                onDrawSurface = {
+                    drawRect(Color.White.copy(alpha = 0.5f))
+                }
+            )
+            .clip(RoundedCornerShape(24.dp))
+            .preventClickThrough()
+            .padding(16.dp)
+            .align(Alignment.Center),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(text = "设置循环播放", color = Color(0xFF1A2433), fontSize = 18.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = loop, onCheckedChange = { loop = it })
+            Text(text = "循环播放", color = Color(0xFF1A2433))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassButton(
+                backdrop = backdrop,
+                label = "取消",
+                modifier = Modifier.weight(1f),
+                onClick = onDismiss
+            )
+            GlassButton(
+                backdrop = backdrop,
+                label = "确定",
+                modifier = Modifier.weight(1f),
+                onClick = { onSave(loop) }
+            )
+        }
     }
 }
