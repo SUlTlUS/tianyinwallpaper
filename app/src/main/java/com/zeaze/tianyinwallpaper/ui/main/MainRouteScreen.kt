@@ -1188,7 +1188,7 @@ private fun Modifier.preventClickThrough(): Modifier = composed {
 }
 
 @Composable
-private fun GlassMenuCard(
+private fun BoxScope.GlassMenuCard(
     backdrop: Backdrop,
     onSetTime: () -> Unit,
     onSetLoop: () -> Unit,
@@ -1197,40 +1197,40 @@ private fun GlassMenuCard(
 ) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .matchParentSize()
             .background(Color(0x66000000))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center
+            .clickable(onClick = onDismiss)
+    )
+    Column(
+        modifier = Modifier
+            .width(280.dp)
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { RoundedCornerShape(24.dp) },
+                effects = {
+                    vibrancy()
+                    blur(4.dp.toPx())
+                    lens(24.dp.toPx(), 48.dp.toPx(), true)
+                },
+                onDrawSurface = {
+                    drawRect(Color.White.copy(alpha = 0.5f))
+                }
+            )
+            .clip(RoundedCornerShape(24.dp))
+            .preventClickThrough()
+            .padding(16.dp)
+            .align(Alignment.Center),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .width(280.dp)
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { RoundedCornerShape(24.dp) },
-                    effects = {
-                        vibrancy()
-                        blur(4.dp.toPx())
-                        lens(24.dp.toPx(), 48.dp.toPx(), true)
-                    },
-                    onDrawSurface = {
-                        drawRect(Color.White.copy(alpha = 0.5f))
-                    }
-                )
-                .padding(16.dp)
-                .preventClickThrough(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            GlassButton(backdrop = backdrop, label = "设置时间条件", modifier = Modifier.fillMaxWidth(), onClick = onSetTime)
-            GlassButton(backdrop = backdrop, label = "设置循环播放", modifier = Modifier.fillMaxWidth(), onClick = onSetLoop)
-            GlassButton(backdrop = backdrop, label = "删除", modifier = Modifier.fillMaxWidth(), onClick = onDelete)
-            GlassButton(backdrop = backdrop, label = "取消", modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
-        }
+        GlassButton(backdrop = backdrop, label = "设置时间条件", modifier = Modifier.fillMaxWidth(), onClick = onSetTime)
+        GlassButton(backdrop = backdrop, label = "设置循环播放", modifier = Modifier.fillMaxWidth(), onClick = onSetLoop)
+        GlassButton(backdrop = backdrop, label = "删除", modifier = Modifier.fillMaxWidth(), onClick = onDelete)
+        GlassButton(backdrop = backdrop, label = "取消", modifier = Modifier.fillMaxWidth(), onClick = onDismiss)
     }
 }
 
 @Composable
-private fun GlassTimeDialog(
+private fun BoxScope.GlassTimeDialog(
     backdrop: Backdrop,
     initialStartText: String,
     initialEndText: String,
@@ -1242,81 +1242,81 @@ private fun GlassTimeDialog(
     var endText by remember(initialEndText) { mutableStateOf(initialEndText) }
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .matchParentSize()
             .background(Color(0x66000000))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center
+            .clickable(onClick = onDismiss)
+    )
+    Column(
+        modifier = Modifier
+            .width(280.dp)
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { RoundedCornerShape(24.dp) },
+                effects = {
+                    vibrancy()
+                    blur(4.dp.toPx())
+                    lens(24.dp.toPx(), 48.dp.toPx(), true)
+                },
+                onDrawSurface = {
+                    drawRect(Color.White.copy(alpha = 0.5f))
+                }
+            )
+            .clip(RoundedCornerShape(24.dp))
+            .preventClickThrough()
+            .padding(16.dp)
+            .align(Alignment.Center),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .width(280.dp)
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { RoundedCornerShape(24.dp) },
-                    effects = {
-                        vibrancy()
-                        blur(4.dp.toPx())
-                        lens(24.dp.toPx(), 48.dp.toPx(), true)
-                    },
-                    onDrawSurface = {
-                        drawRect(Color.White.copy(alpha = 0.5f))
-                    }
-                )
-                .padding(16.dp)
-                .preventClickThrough(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(text = "设置时间条件", color = Color(0xFF1A2433), fontSize = 18.sp)
-            OutlinedTextField(
-                value = startText,
-                onValueChange = { startText = it },
-                singleLine = true,
-                label = { Text("开始时间(HH:mm)") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
-                    backgroundColor = Color.Transparent
-                )
+        Text(text = "设置时间条件", color = Color(0xFF1A2433), fontSize = 18.sp)
+        OutlinedTextField(
+            value = startText,
+            onValueChange = { startText = it },
+            singleLine = true,
+            label = { Text("开始时间(HH:mm)") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                backgroundColor = Color.Transparent
             )
-            OutlinedTextField(
-                value = endText,
-                onValueChange = { endText = it },
-                singleLine = true,
-                label = { Text("结束时间(HH:mm)") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = TextFieldDefaults.outlinedTextFieldColors(
-                    backgroundColor = Color.Transparent
-                )
+        )
+        OutlinedTextField(
+            value = endText,
+            onValueChange = { endText = it },
+            singleLine = true,
+            label = { Text("结束时间(HH:mm)") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = TextFieldDefaults.outlinedTextFieldColors(
+                backgroundColor = Color.Transparent
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GlassButton(
-                    backdrop = backdrop,
-                    label = "重置",
-                    modifier = Modifier.weight(1f),
-                    onClick = { startText = ""; endText = "" }
-                )
-                GlassButton(
-                    backdrop = backdrop,
-                    label = "取消",
-                    modifier = Modifier.weight(1f),
-                    onClick = onDismiss
-                )
-                GlassButton(
-                    backdrop = backdrop,
-                    label = "确定",
-                    modifier = Modifier.weight(1f),
-                    onClick = confirm@{
-                        val st = validateTime(startText, "开始时间") ?: return@confirm
-                        val et = validateTime(endText, "结束时间") ?: return@confirm
-                        onSave(st, et)
-                    }
-                )
-            }
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassButton(
+                backdrop = backdrop,
+                label = "重置",
+                modifier = Modifier.weight(1f),
+                onClick = { startText = ""; endText = "" }
+            )
+            GlassButton(
+                backdrop = backdrop,
+                label = "取消",
+                modifier = Modifier.weight(1f),
+                onClick = onDismiss
+            )
+            GlassButton(
+                backdrop = backdrop,
+                label = "确定",
+                modifier = Modifier.weight(1f),
+                onClick = confirm@{
+                    val st = validateTime(startText, "开始时间") ?: return@confirm
+                    val et = validateTime(endText, "结束时间") ?: return@confirm
+                    onSave(st, et)
+                }
+            )
         }
     }
 }
 
 @Composable
-private fun GlassLoopDialog(
+private fun BoxScope.GlassLoopDialog(
     backdrop: Backdrop,
     initialLoop: Boolean,
     onSave: (Boolean) -> Unit,
@@ -1325,49 +1325,49 @@ private fun GlassLoopDialog(
     var loop by remember(initialLoop) { mutableStateOf(initialLoop) }
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .matchParentSize()
             .background(Color(0x66000000))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center
+            .clickable(onClick = onDismiss)
+    )
+    Column(
+        modifier = Modifier
+            .width(280.dp)
+            .drawBackdrop(
+                backdrop = backdrop,
+                shape = { RoundedCornerShape(24.dp) },
+                effects = {
+                    vibrancy()
+                    blur(4.dp.toPx())
+                    lens(24.dp.toPx(), 48.dp.toPx(), true)
+                },
+                onDrawSurface = {
+                    drawRect(Color.White.copy(alpha = 0.5f))
+                }
+            )
+            .clip(RoundedCornerShape(24.dp))
+            .preventClickThrough()
+            .padding(16.dp)
+            .align(Alignment.Center),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .width(280.dp)
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { RoundedCornerShape(24.dp) },
-                    effects = {
-                        vibrancy()
-                        blur(4.dp.toPx())
-                        lens(24.dp.toPx(), 48.dp.toPx(), true)
-                    },
-                    onDrawSurface = {
-                        drawRect(Color.White.copy(alpha = 0.5f))
-                    }
-                )
-                .padding(16.dp)
-                .preventClickThrough(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(text = "设置循环播放", color = Color(0xFF1A2433), fontSize = 18.sp)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = loop, onCheckedChange = { loop = it })
-                Text(text = "循环播放", color = Color(0xFF1A2433))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                GlassButton(
-                    backdrop = backdrop,
-                    label = "取消",
-                    modifier = Modifier.weight(1f),
-                    onClick = onDismiss
-                )
-                GlassButton(
-                    backdrop = backdrop,
-                    label = "确定",
-                    modifier = Modifier.weight(1f),
-                    onClick = { onSave(loop) }
-                )
-            }
+        Text(text = "设置循环播放", color = Color(0xFF1A2433), fontSize = 18.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = loop, onCheckedChange = { loop = it })
+            Text(text = "循环播放", color = Color(0xFF1A2433))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassButton(
+                backdrop = backdrop,
+                label = "取消",
+                modifier = Modifier.weight(1f),
+                onClick = onDismiss
+            )
+            GlassButton(
+                backdrop = backdrop,
+                label = "确定",
+                modifier = Modifier.weight(1f),
+                onClick = { onSave(loop) }
+            )
         }
     }
 }
