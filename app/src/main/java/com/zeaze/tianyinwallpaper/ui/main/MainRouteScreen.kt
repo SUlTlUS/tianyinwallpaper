@@ -103,6 +103,7 @@ private const val THUMBNAIL_VIDEO_WIDTH = 360
 private const val THUMBNAIL_VIDEO_HEIGHT = 640
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
+private val TOP_BAR_EXTRA_PADDING = 10.dp
 
 internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): Int? {
     val normalizedMime = mimeType.orEmpty().lowercase()
@@ -561,22 +562,24 @@ fun MainRouteScreen(
             }
         }
         TopMask(statusBarTopPaddingDp)
-        if (enableLiquidGlass && liquidBackdrop != null) {
+        val enableTopBarGlass = enableLiquidGlass && liquidBackdrop != null
+        val glassPathStatusBarPadding = 0.dp
+        if (enableTopBarGlass) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = statusBarTopPaddingDp + 10.dp)
+                    .padding(top = statusBarTopPaddingDp + TOP_BAR_EXTRA_PADDING)
             ) {
                 if (selectionMode) {
                     SelectionTopBar(
-                        statusBarTopPaddingDp = 0.dp,
+                        statusBarTopPaddingDp = glassPathStatusBarPadding,
                         enableLiquidGlass = true,
                         backdrop = liquidBackdrop,
                         onCancelSelect = { exitSelectionMode() }
                     )
                 } else {
                     MainTopBar(
-                        statusBarTopPaddingDp = 0.dp,
+                        statusBarTopPaddingDp = glassPathStatusBarPadding,
                         enableLiquidGlass = true,
                         backdrop = liquidBackdrop,
                         groupName = groupName,
@@ -635,8 +638,8 @@ fun MainRouteScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 26.dp),
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
+                enableLiquidGlass = enableTopBarGlass,
+                backdrop = if (enableTopBarGlass) liquidBackdrop else null,
                 label = context.getString(R.string.delete_symbol),
                 onClick = {
                     if (selectedPositions.isEmpty()) {
@@ -832,7 +835,7 @@ private fun MainTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp),
+            .padding(top = statusBarTopPaddingDp + TOP_BAR_EXTRA_PADDING, start = 8.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -912,7 +915,7 @@ private fun SelectionTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = statusBarTopPaddingDp + 10.dp, end = 8.dp),
+            .padding(top = statusBarTopPaddingDp + TOP_BAR_EXTRA_PADDING, end = 8.dp),
         horizontalArrangement = Arrangement.End
     ) {
         GlassCircleButton(
