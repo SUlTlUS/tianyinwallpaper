@@ -215,75 +215,6 @@ private fun getVideoThumbnailFile(context: Context, model: TianYinWallpaperModel
 }
 
 @Composable
-fun GlassBottomSheet(
-    backdrop: Backdrop,
-    modifier: Modifier = Modifier,
-    content: @Composable BoxScope.() -> Unit
-) {
-    Column(
-        modifier = modifier
-            .safeContentPadding()
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { RoundedCornerShape(44.dp) },
-                effects = {
-                    vibrancy()
-                    blur(4.dp.toPx())
-                    lens(24.dp.toPx(), 48.dp.toPx(), true)
-                },
-                onDrawSurface = {
-                    drawRect(Color.White.copy(alpha = 0.5f))
-                }
-            )
-            .fillMaxWidth()
-            .align(Alignment.BottomCenter)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            content()
-        }
-    }
-}
-
-@Composable
-fun GlassButton(
-    modifier: Modifier = Modifier,
-    backdrop: Backdrop,
-    label: String,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = modifier
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { CircleShape },
-                shadow = null,
-                effects = {
-                    vibrancy()
-                    blur(4.dp.toPx())
-                    lens(16.dp.toPx(), 32.dp.toPx())
-                },
-                onDrawSurface = {
-                    drawRect(Color.White.copy(alpha = 0.5f))
-                }
-            )
-            .height(56.dp)
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = Color(0xFF1A2433),
-            fontSize = 20.sp
-        )
-    }
-}
-
-@Composable
 fun MainRouteScreen(
     onOpenSettingPage: () -> Unit,
     onBottomBarVisibleChange: (Boolean) -> Unit
@@ -291,9 +222,7 @@ fun MainRouteScreen(
     val context = LocalContext.current
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val activity = context as? Activity
-    val pref = remember(context)
-    val bottomSheetBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
-    val mainBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null { context.getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE) }
+    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
 
     val wallpapers = remember { mutableStateListOf<TianYinWallpaperModel>() }
