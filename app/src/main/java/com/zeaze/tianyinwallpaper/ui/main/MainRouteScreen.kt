@@ -222,7 +222,7 @@ fun MainRouteScreen(
     val context = LocalContext.current
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val activity = context as? Activity
-    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
+    val pref = remember { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
 
     val wallpapers = remember { mutableStateListOf<TianYinWallpaperModel>() }
@@ -247,8 +247,7 @@ fun MainRouteScreen(
     }
     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
-    // 创建底部工作表的 backdrop
-    val bottomSheetBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    // 定义统一的 backdrop 变量，仅在启用玻璃效果时创建
     val mainBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
     fun toast(msg: String) {
@@ -473,22 +472,17 @@ fun MainRouteScreen(
     
     val contentLayerBackground = MaterialTheme.colors.background
     
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(if (enableLiquidGlass) Color.Transparent else contentLayerBackground)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 背景层：包含壁纸列表和顶部渐变遮罩，作为 backdrop 的采样源
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (enableLiquidGlass && mainBackdrop != null) Modifier.layerBackdrop(mainBackdrop) else Modifier)
+        ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (enableLiquidGlass) contentLayerBackground else Color.Transparent)
-                .composed {
-                    if (enableLiquidGlass && mainBackdrop != null) {
-                        layerBackdrop(mainBackdrop)
-                    } else {
-                        this
-                    }
-                },
+                .background(if (enableLiquidGlass) Color.Transparent else contentLayerBackground),
             contentPadding = PaddingValues(
                 start = 8.dp,
                 end = 8.dp,
@@ -571,10 +565,11 @@ fun MainRouteScreen(
             }
         }
 
-        TopMask(statusBarTopPaddingDp)
+        TopMask(statusBarTopPaddingDp)  // 现在位于背景层内，会被 backdrop 捕获
+        }
 
-        // 使用 GlassBottomSheet 包裹顶部工具栏
-        if (enableLiquidGlass && bottomSheetBackdrop != null && mainBackdrop != null) {
+        // 上层 UI：工具栏（玻璃效果），使用同一个 mainBackdrop
+        if (enableLiquidGlass && mainBackdrop != null) {
             GlassBottomSheet(
                 backdrop = mainBackdrop,
                 modifier = Modifier
@@ -583,12 +578,12 @@ fun MainRouteScreen(
             ) {
                 if (selectionMode) {
                     SelectionToolbar(
-                        backdrop = bottomSheetBackdrop,
+                        backdrop = mainBackdrop,
                         onCancelSelect = { exitSelectionMode() }
                     )
                 } else {
                     MainToolbar(
-                        backdrop = bottomSheetBackdrop,
+                        backdrop = mainBackdrop,
                         groupName = groupName,
                         onGroupNameChange = {
                             groupName = it
@@ -644,14 +639,14 @@ fun MainRouteScreen(
             }
         }
 
-        // 选择模式下的删除按钮
-        if (selectionMode && enableLiquidGlass && bottomSheetBackdrop != null) {
+        // 选择模式下的删除按钮（玻璃效果）
+        if (selectionMode && enableLiquidGlass && mainBackdrop != null) {
             GlassButton(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 26.dp)
                     .width(120.dp),
-                backdrop = bottomSheetBackdrop,
+                backdrop = mainBackdrop,
                 label = context.getString(R.string.delete_symbol),
                 onClick = {
                     if (selectedPositions.isEmpty()) {
