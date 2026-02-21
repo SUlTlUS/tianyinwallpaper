@@ -291,7 +291,9 @@ fun MainRouteScreen(
     val context = LocalContext.current
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val activity = context as? Activity
-    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE) }
+    val pref = remember(context)
+    val bottomSheetBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val mainBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null { context.getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
 
     val wallpapers = remember { mutableStateListOf<TianYinWallpaperModel>() }
