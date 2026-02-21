@@ -2,8 +2,8 @@ package com.zeaze.tianyinwallpaper.ui.main
 
 import android.app.Activity
 import android.app.WallpaperManager
-import android.content.Context
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -17,9 +17,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -30,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -67,10 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
 import com.alibaba.fastjson.JSON
-import com.zeaze.tianyinwallpaper.App
-import com.zeaze.tianyinwallpaper.R
-import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
-import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
+import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -78,6 +78,10 @@ import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
+import com.zeaze.tianyinwallpaper.App
+import com.zeaze.tianyinwallpaper.R
+import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
+import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
@@ -219,6 +223,8 @@ fun MainRouteScreen(
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val activity = context as? Activity
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE) }
+    val bottomSheetBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val mainBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
     val editor = remember(pref) { pref.edit() }
 
     val wallpapers = remember { mutableStateListOf<TianYinWallpaperModel>() }
@@ -235,6 +241,7 @@ fun MainRouteScreen(
     var actionDialogIndex by remember { mutableStateOf<Int?>(null) }
     var timeDialogIndex by remember { mutableStateOf<Int?>(null) }
     var loopDialogIndex by remember { mutableStateOf<Int?>(null) }
+    
     val density = LocalDensity.current
     val statusBarTopPadding = remember(context) {
         val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
@@ -461,8 +468,9 @@ fun MainRouteScreen(
     val rowGroups = remember(wallpapers.size) {
         wallpapers.indices.toList().chunked(3)
     }
-    val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    
     val contentLayerBackground = MaterialTheme.colors.background
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -473,8 +481,8 @@ fun MainRouteScreen(
                 .fillMaxSize()
                 .background(if (enableLiquidGlass) contentLayerBackground else Color.Transparent)
                 .composed {
-                    if (enableLiquidGlass && liquidBackdrop != null) {
-                        layerBackdrop(liquidBackdrop)
+                    if (enableLiquidGlass && mainBackdrop != null) {
+                        layerBackdrop(mainBackdrop)
                     } else {
                         this
                     }
@@ -560,20 +568,88 @@ fun MainRouteScreen(
                 }
             }
         }
+
         TopMask(statusBarTopPaddingDp)
-        if (selectionMode) {
-            SelectionTopBar(
-                statusBarTopPaddingDp = statusBarTopPaddingDp,
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
-                onCancelSelect = { exitSelectionMode() }
-            )
-            GlassCircleButton(
+
+        // 使用 GlassBottomSheet 包裹顶部工具栏
+        if (enableLiquidGlass && bottomSheetBackdrop != null && mainBackdrop != null) {
+            GlassBottomSheet(
+                backdrop = mainBackdrop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+            ) {
+                if (selectionMode) {
+                    SelectionToolbar(
+                        backdrop = bottomSheetBackdrop,
+                        onCancelSelect = { exitSelectionMode() }
+                    )
+                } else {
+                    MainToolbar(
+                        backdrop = bottomSheetBackdrop,
+                        groupName = groupName,
+                        onGroupNameChange = {
+                            groupName = it
+                            saveCache()
+                        },
+                        onAdd = { showWallpaperTypeDialog = true },
+                        onApply = { applyWallpapers() },
+                        moreMenuExpanded = showMoreMenu,
+                        onMoreMenuExpandedChange = { showMoreMenu = it },
+                        onSelect = {
+                            showMoreMenu = false
+                            enterSelectionMode()
+                        },
+                        onOpenSetting = {
+                            showMoreMenu = false
+                            onOpenSettingPage()
+                        }
+                    )
+                }
+            }
+        } else {
+            // 降级方案：不使用玻璃效果时的原始工具栏
+            if (selectionMode) {
+                SelectionTopBar(
+                    statusBarTopPaddingDp = statusBarTopPaddingDp,
+                    enableLiquidGlass = false,
+                    backdrop = null,
+                    onCancelSelect = { exitSelectionMode() }
+                )
+            } else {
+                MainTopBar(
+                    statusBarTopPaddingDp = statusBarTopPaddingDp,
+                    enableLiquidGlass = false,
+                    backdrop = null,
+                    groupName = groupName,
+                    onGroupNameChange = {
+                        groupName = it
+                        saveCache()
+                    },
+                    onAdd = { showWallpaperTypeDialog = true },
+                    onApply = { applyWallpapers() },
+                    moreMenuExpanded = showMoreMenu,
+                    onMoreMenuExpandedChange = { showMoreMenu = it },
+                    onSelect = {
+                        showMoreMenu = false
+                        enterSelectionMode()
+                    },
+                    onOpenSetting = {
+                        showMoreMenu = false
+                        onOpenSettingPage()
+                    }
+                )
+            }
+        }
+
+        // 选择模式下的删除按钮
+        if (selectionMode && enableLiquidGlass && bottomSheetBackdrop != null) {
+            GlassButton(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 26.dp),
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
+                    .padding(bottom = 26.dp)
+                    .width(120.dp),
+                backdrop = bottomSheetBackdrop,
                 label = context.getString(R.string.delete_symbol),
                 onClick = {
                     if (selectedPositions.isEmpty()) {
@@ -581,29 +657,6 @@ fun MainRouteScreen(
                     } else {
                         showDeleteSelectedDialog = true
                     }
-                }
-            )
-        } else {
-            MainTopBar(
-                statusBarTopPaddingDp = statusBarTopPaddingDp,
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
-                groupName = groupName,
-                onGroupNameChange = {
-                    groupName = it
-                    saveCache()
-                },
-                onAdd = { showWallpaperTypeDialog = true },
-                onApply = { applyWallpapers() },
-                moreMenuExpanded = showMoreMenu,
-                onMoreMenuExpandedChange = { showMoreMenu = it },
-                onSelect = {
-                    showMoreMenu = false
-                    enterSelectionMode()
-                },
-                onOpenSetting = {
-                    showMoreMenu = false
-                    onOpenSettingPage()
                 }
             )
         }
@@ -772,7 +825,119 @@ fun MainRouteScreen(
             )
         }
     }
+}
 
+@Composable
+private fun MainToolbar(
+    backdrop: Backdrop,
+    groupName: String,
+    onGroupNameChange: (String) -> Unit,
+    onAdd: () -> Unit,
+    onApply: () -> Unit,
+    moreMenuExpanded: Boolean,
+    onMoreMenuExpandedChange: (Boolean) -> Unit,
+    onSelect: () -> Unit,
+    onOpenSetting: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // + 按钮
+            GlassButton(
+                modifier = Modifier.size(48.dp),
+                backdrop = backdrop,
+                label = "+",
+                onClick = onAdd
+            )
+
+            // 输入框
+            OutlinedTextField(
+                value = groupName,
+                onValueChange = onGroupNameChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RoundedCornerShape(24.dp) },
+                        effects = {
+                            vibrancy()
+                            blur(4.dp.toPx())
+                            lens(16.dp.toPx(), 32.dp.toPx())
+                        },
+                        onDrawSurface = {
+                            drawRect(Color.White.copy(alpha = 0.5f))
+                        }
+                    ),
+                singleLine = true,
+                shape = RoundedCornerShape(24.dp),
+                colors = TextFieldDefaults.outlinedTextFieldColors(
+                    backgroundColor = Color.Transparent,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    disabledBorderColor = Color.Transparent,
+                    errorBorderColor = Color.Transparent
+                ),
+                placeholder = { Text("输入壁纸组名称") }
+            )
+
+            // 更多菜单按钮
+            Box {
+                GlassButton(
+                    modifier = Modifier.size(48.dp),
+                    backdrop = backdrop,
+                    label = "…",
+                    onClick = { onMoreMenuExpandedChange(true) }
+                )
+                DropdownMenu(
+                    expanded = moreMenuExpanded,
+                    onDismissRequest = { onMoreMenuExpandedChange(false) }
+                ) {
+                    DropdownMenuItem(onClick = onSelect) {
+                        Text("选择")
+                    }
+                    DropdownMenuItem(onClick = onOpenSetting) {
+                        Text("设置")
+                    }
+                }
+            }
+
+            // ✓ 按钮
+            GlassButton(
+                modifier = Modifier.size(48.dp),
+                backdrop = backdrop,
+                label = "✓",
+                onClick = onApply
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectionToolbar(
+    backdrop: Backdrop,
+    onCancelSelect: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.End
+    ) {
+        GlassButton(
+            modifier = Modifier.size(48.dp),
+            backdrop = backdrop,
+            label = "×",
+            onClick = onCancelSelect
+        )
+    }
 }
 
 @Composable
