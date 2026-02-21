@@ -561,33 +561,56 @@ fun MainRouteScreen(
             }
         }
         TopMask(statusBarTopPaddingDp)
-        if (selectionMode) {
+        if (enableLiquidGlass && liquidBackdrop != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = statusBarTopPaddingDp + 10.dp)
+            ) {
+                if (selectionMode) {
+                    SelectionTopBar(
+                        statusBarTopPaddingDp = 0.dp,
+                        enableLiquidGlass = true,
+                        backdrop = liquidBackdrop,
+                        onCancelSelect = { exitSelectionMode() }
+                    )
+                } else {
+                    MainTopBar(
+                        statusBarTopPaddingDp = 0.dp,
+                        enableLiquidGlass = true,
+                        backdrop = liquidBackdrop,
+                        groupName = groupName,
+                        onGroupNameChange = {
+                            groupName = it
+                            saveCache()
+                        },
+                        onAdd = { showWallpaperTypeDialog = true },
+                        onApply = { applyWallpapers() },
+                        moreMenuExpanded = showMoreMenu,
+                        onMoreMenuExpandedChange = { showMoreMenu = it },
+                        onSelect = {
+                            showMoreMenu = false
+                            enterSelectionMode()
+                        },
+                        onOpenSetting = {
+                            showMoreMenu = false
+                            onOpenSettingPage()
+                        }
+                    )
+                }
+            }
+        } else if (selectionMode) {
             SelectionTopBar(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
+                enableLiquidGlass = false,
+                backdrop = null,
                 onCancelSelect = { exitSelectionMode() }
-            )
-            GlassCircleButton(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 26.dp),
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
-                label = context.getString(R.string.delete_symbol),
-                onClick = {
-                    if (selectedPositions.isEmpty()) {
-                        toast(context.getString(R.string.no_selected_tip))
-                    } else {
-                        showDeleteSelectedDialog = true
-                    }
-                }
             )
         } else {
             MainTopBar(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
+                enableLiquidGlass = false,
+                backdrop = null,
                 groupName = groupName,
                 onGroupNameChange = {
                     groupName = it
@@ -604,6 +627,23 @@ fun MainRouteScreen(
                 onOpenSetting = {
                     showMoreMenu = false
                     onOpenSettingPage()
+                }
+            )
+        }
+        if (selectionMode) {
+            GlassCircleButton(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 26.dp),
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = liquidBackdrop,
+                label = context.getString(R.string.delete_symbol),
+                onClick = {
+                    if (selectedPositions.isEmpty()) {
+                        toast(context.getString(R.string.no_selected_tip))
+                    } else {
+                        showDeleteSelectedDialog = true
+                    }
                 }
             )
         }
