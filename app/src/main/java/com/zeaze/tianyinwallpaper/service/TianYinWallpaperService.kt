@@ -115,7 +115,7 @@ class TianYinWallpaperService : WallpaperService() {
         private fun nextWallpaper() {
             if (list.isNullOrEmpty()) return
             index = (index + 1) % list!!.size
-            eglThread?.postRunnable(Runnable { loadContent() })
+            eglThread?.post { loadContent() }
         }
 
         private fun loadContent() {
@@ -288,21 +288,21 @@ class TianYinWallpaperService : WallpaperService() {
                 cH = if (h > 0) h else 1
             }
 
-            fun postRunnable(r: Runnable) {
+            fun post(r: () -> Unit) {
                 handler?.post(r)
             }
 
             fun resetVideoMatrix() {
-                postRunnable(Runnable { Matrix.setIdentityM(videoSTMatrix, 0) })
+                post { Matrix.setIdentityM(videoSTMatrix, 0) }
             }
 
             override fun onLooperPrepared() {
                 if (!initEGL()) return
                 initGL()
                 handler = Handler(looper)
-                postRunnable(Runnable {
+                post {
                     if (index == -1) nextWallpaper() else loadContent()
-                })
+                }
             }
 
             private fun initEGL(): Boolean {
@@ -359,12 +359,12 @@ class TianYinWallpaperService : WallpaperService() {
             }
 
             fun uploadBitmap(b: Bitmap) {
-                postRunnable(Runnable {
+                post {
                     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId)
                     GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
                     b.recycle()
                     requestRender()
-                })
+                }
             }
 
             fun requestRender() {

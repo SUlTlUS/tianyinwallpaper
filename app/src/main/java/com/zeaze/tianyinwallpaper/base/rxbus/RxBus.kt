@@ -4,7 +4,7 @@ import io.reactivex.Observable
 import io.reactivex.subjects.PublishSubject
 import io.reactivex.subjects.Subject
 
-class RxBus private constructor() {
+object RxBus {
     private val bus: Subject<Any> = PublishSubject.create<Any>().toSerialized()
 
     fun post(action: Any) {
@@ -26,14 +26,7 @@ class RxBus private constructor() {
             .cast(eventType)
     }
 
-    companion object {
-        @Volatile
-        private var defaultInstance: RxBus? = null
-
-        fun getDefault(): RxBus {
-            return defaultInstance ?: synchronized(RxBus::class.java) {
-                defaultInstance ?: RxBus().also { defaultInstance = it }
-            }
-        }
-    }
+    // Keep getDefault for existing Java/early-Kotlin callers
+    @JvmStatic
+    fun getDefault(): RxBus = this
 }

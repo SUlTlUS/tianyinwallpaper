@@ -155,22 +155,19 @@ class CommomSave {
                                 saveList(context, path, list, listener)
                                 opIndex = null
                             }, modifier = Modifier.fillMaxWidth()) { Text("删除") }
+                            Button(onClick = { opIndex = null }, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
                         }
                     },
-                    confirmButton = {
-                        Button(onClick = { opIndex = null }) { Text("关闭") }
-                    }
+                    confirmButton = {}
                 )
             }
         }
     }
 
     private fun saveList(context: Context, path: String, list: List<SaveData>, listener: OnClickListener) {
-        FileUtil.save(context, JSON.toJSONString(list), path, object : FileUtil.OnSave {
-            override fun onSave() {
-                listener.onListChange()
-            }
-        })
+        FileUtil.save(context, JSON.toJSONString(list), path) {
+            listener.onListChange()
+        }
     }
 
     interface OnClickListener {

@@ -11,72 +11,80 @@ import androidx.recyclerview.widget.RecyclerView
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.utils.FileUtil
+import kotlin.concurrent.thread
 
 class SaveAdapter(private val context: Context, dataPath: String, private val onClick: OnClick) :
     RecyclerView.Adapter<SaveAdapter.ViewHolder>() {
 
+    private var saveDataList: MutableList<SaveData> = mutableListOf()
+
     init {
-        Thread {
-            val s = FileUtil.loadData(context, dataPath)
-            saveDataList = JSON.parseArray(s, SaveData::class.java)
-            (context as AppCompatActivity).runOnUiThread { notifyDataSetChanged() }
-        }.start()
+        thread {
+            try {
+                val s = FileUtil.loadData(context, dataPath)
+                val list = JSON.parseArray(s, SaveData::class.java)
+                if (list != null) {
+                    saveDataList = list
+                    (context as? AppCompatActivity)?.runOnUiThread { notifyDataSetChanged() }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
-    override fun onCreateViewHolder(viewGroup: ViewGroup, i: Int): ViewHolder {
-        val view = LayoutInflater.from(viewGroup.context).inflate(R.layout.adapter_save, viewGroup, false)
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.adapter_save, parent, false)
         return ViewHolder(view)
     }
 
-    override fun onBindViewHolder(viewHolder: ViewHolder, ii: Int) {
-        val i = ii
-        viewHolder.tv.text = saveDataList[i].name
-        viewHolder.tv.setOnClickListener { onClick.onClick(saveDataList[i].s, saveDataList[i].name) }
-        viewHolder.tvde.setOnClickListener {
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val data = saveDataList[position]
+        holder.tv.text = data.name
+        holder.tv.setOnClickListener { onClick.onClick(data.s, data.name) }
+        holder.tvde.setOnClickListener {
             AlertDialog.Builder(context)
                 .setMessage("选择操作")
-                .setPositiveButton("上移一格") { _, _ -> up(i) }
-                .setNegativeButton("下移一格") { _, _ -> down(i) }
-                .setNeutralButton("删除") { _, _ -> delete(i) }
+                .setPositiveButton("上移一格") { _, _ -> moveUp(position) }
+                .setNegativeButton("下移一格") { _, _ -> moveDown(position) }
+                .setNeutralButton("删除") { _, _ -> delete(position) }
                 .create()
                 .show()
         }
     }
 
-    private fun up(i: Int) {
-        if (i == 0) return
-        val saveData = saveDataList[i - 1]
-        saveDataList[i - 1] = saveDataList[i]
-        saveDataList[i] = saveData
-        notifyDataSetChanged()
-        onClick.onChange(i)
+    private fun moveUp(position: Int) {
+        if (position <= 0) return
+        val item = saveDataList.removeAt(position)
+        saveDataList.add(position - 1, item)
+        notifyItemMoved(position, position - 1)
+        onClick.onChange(position)
     }
 
-    private fun down(i: Int) {
-        if (i == saveDataList.size - 1) return
-        val saveData = saveDataList[i + 1]
-        saveDataList[i + 1] = saveDataList[i]
-        saveDataList[i] = saveData
-        notifyDataSetChanged()
-        onClick.onChange(i)
+    private fun moveDown(position: Int) {
+        if (position >= saveDataList.size - 1) return
+        val item = saveDataList.removeAt(position)
+        saveDataList.add(position + 1, item)
+        notifyItemMoved(position, position + 1)
+        onClick.onChange(position)
     }
 
-    private fun delete(i: Int) {
+    private fun delete(position: Int) {
         AlertDialog.Builder(context)
             .setMessage("确认删除")
             .setPositiveButton("删除") { _, _ ->
-                saveDataList.removeAt(i)
-                notifyDataSetChanged()
-                onClick.onChange(i)
+                saveDataList.removeAt(position)
+                notifyItemRemoved(position)
+                notifyItemRangeChanged(position, saveDataList.size - position)
+                onClick.onChange(position)
             }
             .setNegativeButton("取消", null)
-            .create()
             .show()
     }
 
-    override fun getItemCount(): Int {
-        return saveDataList.size
-    }
+    override fun getItemCount(): Int = saveDataList.size
+
+    fun getSaveDataList(): MutableList<SaveData> = saveDataList
 
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val tv: TextView = itemView.findViewById(R.id.tv)
@@ -86,16 +94,5 @@ class SaveAdapter(private val context: Context, dataPath: String, private val on
     interface OnClick {
         fun onClick(s: String?, name: String?)
         fun onChange(i: Int)
-    }
-
-    companion object {
-        private var saveDataList: MutableList<SaveData> = ArrayList()
-
-        fun getSaveDataList(): MutableList<SaveData> {
-            if (saveDataList.isEmpty()) {
-                saveDataList = ArrayList()
-            }
-            return saveDataList
-        }
     }
 }

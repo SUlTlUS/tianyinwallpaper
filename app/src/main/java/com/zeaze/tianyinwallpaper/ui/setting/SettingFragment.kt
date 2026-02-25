@@ -6,18 +6,27 @@ import android.text.TextUtils
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.Button
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.OutlinedTextField
+import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,11 +35,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.MainActivity
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
@@ -66,66 +87,119 @@ fun SettingRouteScreen(
     var showAutoModeDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .background(MaterialTheme.colors.background)
-            .verticalScroll(rememberScrollState())
-            .statusBarsPadding()
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = "设置",
-            style = MaterialTheme.typography.h4,
-            fontWeight = FontWeight.Bold
-        )
-        SettingCheckItem("随机切换壁纸", rand) {
-            rand = it
-            editor.putBoolean("rand", it).apply()
+    val isLightTheme = !isSystemInDarkTheme()
+    val contentColor = if (isLightTheme) Color.Black else Color.White
+    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+    val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
+    val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF121212).copy(0.56f)
+
+    val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+    val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Capture layer
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .let { m ->
+                    if (enableLiquidGlass && liquidBackdrop != null) {
+                        m.layerBackdrop(liquidBackdrop)
+                    } else m
+                }
+        ) {
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colors.background))
         }
-        SettingCheckItem("进入桌面切换壁纸", pageChange) {
-            pageChange = it
-            editor.putBoolean("pageChange", it).apply()
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .statusBarsPadding()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "设置",
+                style = TextStyle(
+                    color = contentColor,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold
+                ),
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            // Settings Group 1: General
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colors.surface, RoundedCornerShape(48.dp))
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SettingCheckItem("随机切换壁纸", rand, contentColor, liquidBackdrop) {
+                    rand = it
+                    editor.putBoolean("rand", it).apply()
+                }
+                SettingCheckItem("进入桌面切换壁纸", pageChange, contentColor, liquidBackdrop) {
+                    pageChange = it
+                    editor.putBoolean("pageChange", it).apply()
+                }
+                SettingCheckItem("后台播放动态壁纸", needBackgroundPlay, contentColor, liquidBackdrop) {
+                    needBackgroundPlay = it
+                    editor.putBoolean("needBackgroundPlay", it).apply()
+                }
+                SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, liquidBackdrop) {
+                    wallpaperScroll = it
+                    editor.putBoolean("wallpaperScroll", it).apply()
+                }
+            }
+
+            // Settings Group 2: Advanced
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colors.surface, RoundedCornerShape(48.dp))
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor) {
+                    minTimeInput = minTime.toString()
+                    showMinTimeDialog = true
+                }
+                val themeModeText = when (themeMode) {
+                    MainActivity.THEME_MODE_LIGHT -> "浅色"
+                    MainActivity.THEME_MODE_DARK -> "深色"
+                    else -> "跟随系统"
+                }
+                SettingTextItem("主题模式：$themeModeText", contentColor) {
+                    showThemeDialog = true
+                }
+                val modeText = if (autoSwitchMode >= AUTO_SWITCH_MODE_NONE && autoSwitchMode < AUTO_SWITCH_MODE_ITEMS.size) {
+                    AUTO_SWITCH_MODE_ITEMS[autoSwitchMode]
+                } else {
+                    AUTO_SWITCH_MODE_ITEMS[AUTO_SWITCH_MODE_NONE]
+                }
+                SettingTextItem("自动切换模式：$modeText", contentColor) {
+                    showAutoModeDialog = true
+                }
+
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    Text(
+                        text = "自动切换间隔：${autoSwitchInterval}分钟",
+                        style = TextStyle(contentColor.copy(0.6f), 14.sp)
+                    )
+                    Text(
+                        text = "自动切换时间点：$autoSwitchPoints",
+                        style = TextStyle(contentColor.copy(0.6f), 14.sp)
+                    )
+                }
+            }
+
+            AboutSection(
+                context = context,
+                contentColor = contentColor
+            )
         }
-        SettingCheckItem("后台播放动态壁纸", needBackgroundPlay) {
-            needBackgroundPlay = it
-            editor.putBoolean("needBackgroundPlay", it).apply()
-        }
-        SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll) {
-            wallpaperScroll = it
-            editor.putBoolean("wallpaperScroll", it).apply()
-        }
-        SettingTextItem("壁纸最小切换时间:${minTime}秒（点击修改）") {
-            minTimeInput = minTime.toString()
-            showMinTimeDialog = true
-        }
-        val themeModeText = when (themeMode) {
-            MainActivity.THEME_MODE_LIGHT -> "浅色"
-            MainActivity.THEME_MODE_DARK -> "深色"
-            else -> "跟随系统"
-        }
-        SettingTextItem("主题模式：$themeModeText（点击修改）") {
-            showThemeDialog = true
-        }
-        val modeText = if (autoSwitchMode >= AUTO_SWITCH_MODE_NONE && autoSwitchMode < AUTO_SWITCH_MODE_ITEMS.size) {
-            AUTO_SWITCH_MODE_ITEMS[autoSwitchMode]
-        } else {
-            AUTO_SWITCH_MODE_ITEMS[AUTO_SWITCH_MODE_NONE]
-        }
-        SettingTextItem("自动切换模式：$modeText（点击修改）") {
-            showAutoModeDialog = true
-        }
-        Text(
-            text = "自动切换间隔：${autoSwitchInterval}分钟",
-            style = MaterialTheme.typography.body2,
-            color = MaterialTheme.colors.onBackground
-        )
-        Text(
-            text = "自动切换时间点：$autoSwitchPoints",
-            style = MaterialTheme.typography.body2,
-            color = MaterialTheme.colors.onBackground
-        )
-        AboutSection(context = context)
     }
 
     if (showMinTimeDialog) {
@@ -186,11 +260,10 @@ fun SettingRouteScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) { Text(if (index == checked) "✓ $mode" else mode) }
                     }
+                    Button(onClick = { showAutoModeDialog = false }, modifier = Modifier.fillMaxWidth()) { Text("取消") }
                 }
             },
-            confirmButton = {
-                Button(onClick = { showAutoModeDialog = false }) { Text("取消") }
-            }
+            confirmButton = {}
         )
     }
 
@@ -216,77 +289,107 @@ fun SettingRouteScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) { Text(if (themeMode == mode) "✓ $label" else label) }
                     }
+                    Button(onClick = { showThemeDialog = false }, modifier = Modifier.fillMaxWidth()) { Text("取消") }
                 }
             },
-            confirmButton = {
-                Button(onClick = { showThemeDialog = false }) { Text("取消") }
-            }
+            confirmButton = {}
         )
     }
 }
 
 @Composable
-private fun SettingCheckItem(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SettingCheckItem(
+    label: String,
+    checked: Boolean,
+    contentColor: Color,
+    liquidBackdrop: LayerBackdrop?,
+    onCheckedChange: (Boolean) -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.body1,
-            modifier = Modifier
-                .weight(1f)
-                .clickable { onCheckedChange(!checked) }
+            style = TextStyle(
+                color = contentColor,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            ),
+            modifier = Modifier.weight(1f)
         )
         LiquidToggle(
-            selected = checked,
-            onSelect = onCheckedChange
+            selected = { checked },
+            onSelect = onCheckedChange,
+            backdrop = liquidBackdrop
         )
     }
 }
 
 @Composable
-private fun SettingTextItem(label: String, onClick: () -> Unit) {
+private fun SettingTextItem(label: String, contentColor: Color, onClick: () -> Unit) {
     Text(
         text = label,
-        style = MaterialTheme.typography.body1,
+        style = TextStyle(
+            color = contentColor,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(vertical = 6.dp)
+            .padding(vertical = 10.dp)
     )
 }
 
 @Composable
-private fun AboutSection(context: Context) {
+private fun AboutSection(
+    context: Context,
+    contentColor: Color
+) {
     val verName = getVersionName(context)
     val aboutText = remember { getAboutText() }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colors.surface)
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .background(MaterialTheme.colors.surface, RoundedCornerShape(48.dp))
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(text = aboutText)
-        LinkText("欢迎加入天音壁纸QQ群,BUG和意见都可以提：722673402", "https://jq.qq.com/?_wv=1027&k=vjcrjY7L")
-        LinkText("项目开源地址：https://github.com/prpr12/tianyinwallpaper.git", "https://github.com/prpr12/tianyinwallpaper.git")
-        LinkText("软件下载地址：https://www.pgyer.com/eEna", "https://www.pgyer.com/eEna")
-        Text(text = "当前版本号：$verName")
+        Text(
+            text = "关于",
+            style = TextStyle(contentColor, 18.sp, FontWeight.Bold)
+        )
+        Text(
+            text = aboutText,
+            style = TextStyle(contentColor.copy(0.8f), 14.sp)
+        )
+        Spacer(Modifier.height(8.dp))
+        LinkText("QQ群: 722673402", "https://jq.qq.com/?_wv=1027&k=vjcrjY7L", contentColor)
+        LinkText("项目开源地址", "https://github.com/prpr12/tianyinwallpaper.git", contentColor)
+        LinkText("软件下载地址", "https://www.pgyer.com/eEna", contentColor)
+        Text(
+            text = "当前版本号：$verName",
+            style = TextStyle(contentColor.copy(0.5f), 12.sp)
+        )
     }
 }
 
 @Composable
-private fun LinkText(label: String, url: String) {
+private fun LinkText(label: String, url: String, contentColor: Color) {
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     Text(
         text = label,
-        style = MaterialTheme.typography.body2,
-        color = Color(0xFF1565C0),
-        textDecoration = TextDecoration.Underline,
+        style = TextStyle(
+            color = Color(0xFF0088FF),
+            fontSize = 14.sp,
+            textDecoration = TextDecoration.Underline
+        ),
         modifier = Modifier.clickable { uriHandler.openUri(url) }
     )
 }

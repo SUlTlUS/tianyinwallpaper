@@ -5,25 +5,17 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import androidx.viewpager.widget.ViewPager
 
-class NoScrollViewPager : ViewPager {
+class NoScrollViewPager @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : ViewPager(context, attrs) {
     var isNoScroll = false
 
-    constructor(context: Context, attrs: AttributeSet) : super(context, attrs)
-    constructor(context: Context) : super(context)
-
     override fun onTouchEvent(ev: MotionEvent): Boolean {
-        return if (isNoScroll) {
-            false
-        } else {
-            super.onTouchEvent(ev)
-        }
+        return !isNoScroll && super.onTouchEvent(ev)
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        return if (isNoScroll) {
-            false
-        } else {
-            super.onInterceptTouchEvent(ev)
-        }
+        return !isNoScroll && super.onInterceptTouchEvent(ev)
     }
 }

@@ -6,24 +6,20 @@ package com.zeaze.tianyinwallpaper.bitmapstomp4
  * @data 2020-07-30
  * @wechat yaphetzhao92
  */
-interface IYapVideoProvider<Bitmap> {
+interface IYapVideoProvider<T> {
 
     /**
-     * bitmap list size, you can set like
-     *
-     * return bitmapList.size()
+     * list size
      */
     fun size(): Int
 
     /**
-     * the next bitmap
+     * next item
      */
-    operator fun next(): Bitmap
+    operator fun next(): T
 
     /**
-     * progress
-     * If 1f is returned, progress is complete
-     * A return of -1 indicates failure
+     * progress (0..1f)
      */
     fun progress(progress: Float)
 
