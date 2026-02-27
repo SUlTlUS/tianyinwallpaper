@@ -27,33 +27,29 @@ import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.VectorConverter
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.material.AlertDialog
-import androidx.compose.material.Button
-import androidx.compose.material.Checkbox
-import androidx.compose.material.DropdownMenu
-import androidx.compose.material.DropdownMenuItem
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.MaterialTheme
-import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
-import androidx.compose.material.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -66,9 +62,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -78,27 +74,29 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.toSize
-import androidx.compose.ui.util.fastCoerceAtMost
-import androidx.compose.ui.util.lerp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.documentfile.provider.DocumentFile
 import com.alibaba.fastjson.JSON
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.colorControls
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
+import com.kyant.shapes.Capsule
+import com.kyant.shapes.RoundedRectangle
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.effects.blur
+import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
+import com.zeaze.tianyinwallpaper.backdrop.effects.lens
+import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
+import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.setting.LiquidToggle
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import io.reactivex.functions.Consumer
@@ -108,15 +106,10 @@ import java.io.IOException
 import java.util.Collections
 import java.util.UUID
 import kotlin.concurrent.thread
-import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.tanh
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.IntOffset
 private data class ThumbnailCacheKey(
     val type: Int,
     val uuid: String,
@@ -155,6 +148,16 @@ internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): In
         return WALLPAPER_TYPE_DYNAMIC
     }
     return null
+}
+
+private sealed class DialogState {
+    data class Action(val index: Int) : DialogState()
+    object Type : DialogState()
+    object Permission : DialogState()
+    object Delete : DialogState()
+    object Overwrite : DialogState()
+    data class Time(val index: Int) : DialogState()
+    object Save : DialogState()
 }
 
 private val THUMBNAIL_CACHE = object : LruCache<ThumbnailCacheKey, Bitmap>(
@@ -253,7 +256,7 @@ fun MainRouteScreen(
 
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val activity = context as? Activity
-    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, android.content.Context.MODE_PRIVATE) }
+    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
 
     val wallpapers = remember { mutableStateListOf<TianYinWallpaperModel>() }
@@ -266,9 +269,24 @@ fun MainRouteScreen(
     var showPermissionDialog by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
+    var showOverwriteDialog by remember { mutableStateOf(false) }
+    var showSaveDialog by remember { mutableStateOf(false) }
 
     var actionDialogIndex by remember { mutableStateOf<Int?>(null) }
     var timeDialogIndex by remember { mutableStateOf<Int?>(null) }
+    var fullScreenPreviewModel by remember { mutableStateOf<TianYinWallpaperModel?>(null) }
+
+    val currentDialogState = when {
+        actionDialogIndex != null -> DialogState.Action(actionDialogIndex!!)
+        showWallpaperTypeDialog -> DialogState.Type
+        showPermissionDialog -> DialogState.Permission
+        showDeleteSelectedDialog -> DialogState.Delete
+        showOverwriteDialog -> DialogState.Overwrite
+        showSaveDialog -> DialogState.Save
+        timeDialogIndex != null -> DialogState.Time(timeDialogIndex!!)
+        else -> null
+    }
+
     val density = LocalDensity.current
     val statusBarTopPadding = remember(context) {
         val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
@@ -278,6 +296,44 @@ fun MainRouteScreen(
 
     fun toast(msg: String) {
         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    fun checkAndSaveGroup() {
+        if (groupName.isBlank() || wallpapers.isEmpty()) return
+
+        val currentContent = JSON.toJSONString(wallpapers)
+        val data = FileUtil.loadData(context, FileUtil.dataPath)
+        val list = JSON.parseArray(data, SaveData::class.java)?.toMutableList() ?: mutableListOf()
+
+        val existing = list.find { it.name == groupName }
+        if (existing != null) {
+            if (existing.s != currentContent) {
+                showOverwriteDialog = true
+            }
+        } else {
+            list.add(0, SaveData(currentContent, groupName))
+            FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
+                toast("壁纸组已保存到列表")
+            }
+        }
+    }
+
+    fun performOverwriteSave() {
+        if (groupName.isBlank()) return
+        val currentContent = JSON.toJSONString(wallpapers)
+        val data = FileUtil.loadData(context, FileUtil.dataPath)
+        val list = JSON.parseArray(data, SaveData::class.java)?.toMutableList() ?: mutableListOf()
+
+        val index = list.indexOfFirst { it.name == groupName }
+        if (index != -1) {
+            list[index].s = currentContent
+            val item = list.removeAt(index)
+            list.add(0, item)
+            FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
+                toast("壁纸组已覆盖保存")
+            }
+        }
+        showOverwriteDialog = false
     }
 
     fun saveCache() {
@@ -305,13 +361,9 @@ fun MainRouteScreen(
         }
     }
 
-    fun applyWallpapers() {
-        if (wallpapers.isEmpty()) {
-            toast("至少需要1张壁纸才能开始设置")
-            return
-        }
+    fun performApply(list: List<TianYinWallpaperModel>) {
         thread {
-            FileUtil.save(context, JSON.toJSONString(wallpapers), FileUtil.wallpaperPath) {
+            FileUtil.save(context, JSON.toJSONString(list), FileUtil.wallpaperPath) {
                 val hostActivity = activity ?: run {
                     Log.w("MainRouteScreen", "onSave skipped: activity is null")
                     return@save
@@ -334,6 +386,18 @@ fun MainRouteScreen(
                 }
             }
         }
+    }
+
+    fun applyWallpapers() {
+        if (wallpapers.isEmpty()) {
+            toast("至少需要1张壁纸才能开始设置")
+            return
+        }
+        performApply(wallpapers.toList())
+    }
+
+    fun applySingleWallpaper(model: TianYinWallpaperModel) {
+        performApply(listOf(model))
     }
 
     fun appendMixedModels(results: List<Pair<Uri, Boolean>>, takeUriPermissions: Boolean = true) {
@@ -426,8 +490,8 @@ fun MainRouteScreen(
         }
     }
 
-    LaunchedEffect(selectionMode) {
-        onBottomBarVisibleChange(!selectionMode)
+    LaunchedEffect(selectionMode, fullScreenPreviewModel) {
+        onBottomBarVisibleChange(!selectionMode && fullScreenPreviewModel == null)
     }
 
     DisposableEffect(Unit) {
@@ -490,10 +554,26 @@ fun MainRouteScreen(
         }
     }
 
-    val rowGroups = remember(wallpapers.size) {
-        wallpapers.indices.toList().chunked(3
-        )
+    val gridState = rememberLazyGridState()
+    var draggingItemIndex by remember { mutableStateOf<Int?>(null) }
+    var draggingItemKey by remember { mutableStateOf<Any?>(null) }
+    var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var startViewportOffset by remember { mutableStateOf(0) }
+
+    // 辅助函数：更新排序后的选中索引
+    fun updateSelectedIndices(from: Int, to: Int) {
+        val currentSelected = selectedPositions.toList()
+        selectedPositions.clear()
+        currentSelected.forEach { index ->
+            when {
+                index == from -> selectedPositions.add(to)
+                from < to && index in (from + 1)..to -> selectedPositions.add(index - 1)
+                from > to && index in to..(from - 1) -> selectedPositions.add(index + 1)
+                else -> selectedPositions.add(index)
+            }
+        }
     }
+
     val contentLayerBackground = MaterialTheme.colors.background
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
@@ -509,84 +589,196 @@ fun MainRouteScreen(
                 }
         ) {
             Box(Modifier.fillMaxSize().background(contentLayerBackground))
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(3),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { offset ->
+                                dragOffset = Offset.Zero
+                                val touchOffset = offset
+
+                                val layoutInfo = gridState.layoutInfo
+                                startViewportOffset = layoutInfo.viewportStartOffset
+
+                                // 1. 查找触摸点所在的item（考虑滚动偏移）
+                                val touchedItem = layoutInfo.visibleItemsInfo
+                                    .filter { it.index != -1 }
+                                    .firstOrNull { item ->
+                                        val left = item.offset.x.toFloat()
+                                        val right = (item.offset.x + item.size.width).toFloat()
+                                        val top = (item.offset.y - startViewportOffset).toFloat()
+                                        val bottom = (item.offset.y - startViewportOffset + item.size.height).toFloat()
+                                        touchOffset.x in left..right && touchOffset.y in top..bottom
+                                    }
+
+                                if (touchedItem != null) {
+                                    draggingItemIndex = touchedItem.index
+                                    draggingItemKey = touchedItem.key
+                                } else {
+                                    // 2. 回退方案：按屏幕中心距离最近选择
+                                    layoutInfo.visibleItemsInfo
+                                        .filter { it.index != -1 }
+                                        .minByOrNull { item ->
+                                            val screenCenterX = item.offset.x + item.size.width / 2f
+                                            val screenCenterY = item.offset.y - startViewportOffset + item.size.height / 2f
+                                            (screenCenterX - touchOffset.x) * (screenCenterX - touchOffset.x) +
+                                                    (screenCenterY - touchOffset.y) * (screenCenterY - touchOffset.y)
+                                        }?.let { item ->
+                                            draggingItemIndex = item.index
+                                            draggingItemKey = item.key
+                                        }
+                                }
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffset += dragAmount
+                                draggingItemKey?.let { currentKey ->
+                                    val draggingItem = gridState.layoutInfo.visibleItemsInfo.find { it.key == currentKey }
+                                    if (draggingItem != null) {
+                                        val currentIndex = draggingItem.index
+
+                                        // 被拖动项的当前屏幕中心
+                                        val draggingScreenCenter = Offset(
+                                            draggingItem.offset.x + draggingItem.size.width / 2f,
+                                            draggingItem.offset.y - startViewportOffset + draggingItem.size.height / 2f
+                                        ) + dragOffset
+
+                                        // 查找最近的其他可见项
+                                        gridState.layoutInfo.visibleItemsInfo
+                                            .filter { it.key != currentKey && it.index != -1 }
+                                            .minByOrNull { item ->
+                                                val screenCenterX = item.offset.x + item.size.width / 2f
+                                                val screenCenterY = item.offset.y - startViewportOffset + item.size.height / 2f
+                                                (screenCenterX - draggingScreenCenter.x) * (screenCenterX - draggingScreenCenter.x) +
+                                                        (screenCenterY - draggingScreenCenter.y) * (screenCenterY - draggingScreenCenter.y)
+                                            }?.let { targetItem ->
+                                                val targetScreenCenter = Offset(
+                                                    targetItem.offset.x + targetItem.size.width / 2f,
+                                                    targetItem.offset.y - startViewportOffset + targetItem.size.height / 2f
+                                                )
+                                                val distSq = (targetScreenCenter.x - draggingScreenCenter.x) * (targetScreenCenter.x - draggingScreenCenter.x) +
+                                                        (targetScreenCenter.y - draggingScreenCenter.y) * (targetScreenCenter.y - draggingScreenCenter.y)
+
+                                                if (distSq < (targetItem.size.width * targetItem.size.width * 0.6f)) {
+                                                    val targetIndex = targetItem.index
+                                                    updateSelectedIndices(currentIndex, targetIndex)
+
+                                                    val movedItem = wallpapers.removeAt(currentIndex)
+                                                    wallpapers.add(targetIndex, movedItem)
+
+                                                    // 更新dragOffset以保持视觉连续性
+                                                    val oldScreenCenter = Offset(
+                                                        draggingItem.offset.x + draggingItem.size.width / 2f,
+                                                        draggingItem.offset.y - startViewportOffset + draggingItem.size.height / 2f
+                                                    )
+                                                    val newScreenCenter = Offset(
+                                                        targetItem.offset.x + targetItem.size.width / 2f,
+                                                        targetItem.offset.y - startViewportOffset + targetItem.size.height / 2f
+                                                    )
+                                                    dragOffset -= (newScreenCenter - oldScreenCenter)
+                                                    draggingItemIndex = targetIndex
+                                                }
+                                            }
+                                    }
+                                }
+                            },
+                            onDragEnd = {
+                                draggingItemIndex = null
+                                draggingItemKey = null
+                                dragOffset = Offset.Zero
+                                startViewportOffset = 0
+                                saveCache()
+                            },
+                            onDragCancel = {
+                                draggingItemIndex = null
+                                draggingItemKey = null
+                                dragOffset = Offset.Zero
+                                startViewportOffset = 0
+                            }
+                        )
+                    },
                 contentPadding = PaddingValues(
                     start = 12.dp,
                     end = 12.dp,
-                    top = statusBarTopPaddingDp + 88.dp,
-                    bottom = if (selectionMode) 90.dp else 12.dp
+                    top = statusBarTopPaddingDp + 76.dp,
+                    bottom = if (selectionMode) 90.dp else 110.dp
                 ),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(rowGroups) { row ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        repeat(3) { columnIndex ->
-                            val itemIndex = row.getOrNull(columnIndex)
-                            if (itemIndex == null) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            } else {
-                                val model = wallpapers[itemIndex]
-                                val selected = selectedPositions.contains(itemIndex)
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .aspectRatio(0.62f)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable {
-                                            if (selectionMode) {
-                                                if (selected) selectedPositions.remove(itemIndex) else selectedPositions.add(itemIndex)
-                                            } else {
-                                                actionDialogIndex = itemIndex
-                                            }
-                                        }
-                                        .background(Color.Black)
-                                ) {
-                                    WallpaperCardImage(
-                                        modifier = Modifier.fillMaxSize(),
-                                        model = model
-                                    )
-                                    Text(
-                                        text = if (model.type == 0) "静态" else "动态",
-                                        color = Color.White,
-                                        fontSize = 12.sp,
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .background(Color(0x66000000))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                    if (model.startTime != -1 && model.endTime != -1) {
-                                        Text(
-                                            text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            modifier = Modifier
-                                                .align(Alignment.BottomCenter)
-                                                .background(Color(0x66000000))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                    if (selected) {
-                                        Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
-                                        Surface(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .padding(6.dp),
-                                            shape = CircleShape,
-                                            color = Color(0xD91A1A1A)
-                                        ) {
-                                            Text(
-                                                text = "✓",
-                                                color = Color.White,
-                                                fontSize = 12.sp,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
+                itemsIndexed(wallpapers, key = { _, model -> model.uuid ?: UUID.randomUUID().toString() }) { index, model ->
+                    val selected = selectedPositions.contains(index)
+                    val isDragging = draggingItemKey != null && draggingItemKey == (model.uuid ?: index)
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(0.62f)
+                            .zIndex(if (isDragging) 1f else 0f)
+                            .graphicsLayer {
+                                if (isDragging) {
+                                    translationX = dragOffset.x
+                                    translationY = dragOffset.y
+                                    scaleX = 1.05f
+                                    scaleY = 1.05f
+                                    alpha = 0.9f
                                 }
+                            }
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable {
+                                if (selectionMode) {
+                                    if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
+                                } else {
+                                    actionDialogIndex = index
+                                }
+                            }
+                            .background(Color.Black)
+                    ) {
+                        WallpaperCardImage(
+                            modifier = Modifier.fillMaxSize(),
+                            model = model
+                        )
+                        Text(
+                            text = if (model.type == 0) "静态" else "动态",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(3.dp)
+                                .background(Color(0x66000000), shape = RoundedCornerShape(16.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                        if (model.startTime != -1 && model.endTime != -1) {
+                            Text(
+                                text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 3.dp)
+                                    .background(Color(0x66000000), shape = RoundedCornerShape(16.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        if (selected) {
+                            Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(4.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color(0xD91A1A1A)
+                            ) {
+                                Text(
+                                    text = "✓",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 0.dp)
+                                )
                             }
                         }
                     }
@@ -595,24 +787,26 @@ fun MainRouteScreen(
         }
         // 前景层：包含 TopBar 和删除按钮，它们采样底层捕获的内容
         if (selectionMode) {
+            val isAllSelected = selectedPositions.size == wallpapers.size && wallpapers.isNotEmpty()
             SelectionTopBar(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = liquidBackdrop,
-                onCancelSelect = { exitSelectionMode() }
-            )
-            GlassCircleButton(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 26.dp),
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
-                label = context.getString(R.string.delete_symbol),
-                onClick = {
+                isAllSelected = isAllSelected,
+                onCancelSelect = { exitSelectionMode() },
+                onDelete = {
                     if (selectedPositions.isEmpty()) {
                         toast(context.getString(R.string.no_selected_tip))
                     } else {
                         showDeleteSelectedDialog = true
+                    }
+                },
+                onToggleSelectAll = {
+                    if (isAllSelected) {
+                        selectedPositions.clear()
+                    } else {
+                        selectedPositions.clear()
+                        wallpapers.indices.forEach { selectedPositions.add(it) }
                     }
                 }
             )
@@ -621,29 +815,80 @@ fun MainRouteScreen(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = liquidBackdrop,
-                groupName = groupName,
-                onGroupNameChange = {
-                    groupName = it
-                    saveCache()
-                },
                 onAdd = { showWallpaperTypeDialog = true },
                 onApply = { applyWallpapers() },
-                moreMenuExpanded = showMoreMenu,
-                onMoreMenuExpandedChange = { showMoreMenu = it },
-                onSelect = {
-                    showMoreMenu = false
-                    enterSelectionMode()
-                },
-                onOpenSetting = {
-                    showMoreMenu = false
-                    onOpenSettingPage()
-                }
+                onMoreClick = { showMoreMenu = true }
             )
+
+            // 下拉菜单作为顶层 Overlay 以确保坐标采样正确 (避免 Popup 窗口偏移问题)
+            if (showMoreMenu) {
+                // 点击外部消失
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures { showMoreMenu = false }
+                        }
+                ) {
+                    val menuBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
+                    Column(
+                        Modifier
+                            .padding(top = statusBarTopPaddingDp + 66.dp, end = 12.dp)
+                            .width(140.dp)
+                            .align(Alignment.TopEnd)
+                            .drawBackdrop(
+                                backdrop = menuBackdrop,
+                                shape = { RoundedRectangle(20f.dp) },
+                                effects = {
+                                    colorControls(
+                                        brightness = if (isLightTheme) 0.2f else 0f,
+                                        saturation = 1.5f
+                                    )
+                                    blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
+                                    lens(16f.dp.toPx(), 32f.dp.toPx(), depthEffect = true)
+                                },
+                                highlight = { Highlight.Plain },
+                                onDrawSurface = { drawRect(containerColor) }
+                            )
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val menuItems = listOf(
+                            "保存" to {
+                                showMoreMenu = false
+                                showSaveDialog = true
+                            },
+                            "选择" to {
+                                showMoreMenu = false
+                                enterSelectionMode()
+                            },
+                            "设置" to {
+                                showMoreMenu = false
+                                onOpenSettingPage()
+                            }
+                        )
+                        menuItems.forEach { (label, onClick) ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .clip(Capsule())
+                                    .clickable { onClick() }
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                BasicText(label, style = TextStyle(contentColor, 15.sp))
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // 1. Background dimming layer
         AnimatedVisibility(
-            visible = actionDialogIndex != null,
+            visible = currentDialogState != null,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
@@ -654,13 +899,21 @@ fun MainRouteScreen(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { actionDialogIndex = null }
+                    ) {
+                        actionDialogIndex = null
+                        showWallpaperTypeDialog = false
+                        showPermissionDialog = false
+                        showDeleteSelectedDialog = false
+                        showOverwriteDialog = false
+                        showSaveDialog = false
+                        timeDialogIndex = null
+                    }
             )
         }
 
         // 2. Custom Liquid Glass Dialog
         AnimatedContent(
-            targetState = actionDialogIndex,
+            targetState = currentDialogState,
             transitionSpec = {
                 (fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
                         scaleIn(
@@ -673,20 +926,18 @@ fun MainRouteScreen(
                     .togetherWith(fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)))
             },
             contentAlignment = Alignment.Center,
-            label = "ActionDialog",
+            label = "DialogOverlay",
             modifier = Modifier.fillMaxSize()
-        ) { targetIndex ->
-            if (targetIndex != null) {
-                val model = wallpapers.getOrNull(targetIndex) ?: return@AnimatedContent
-                var loopState by remember(targetIndex) { mutableStateOf(model.loop) }
-
+        ) { state ->
+            if (state != null) {
+                val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
                 Column(
-                    modifier = Modifier
-                        .requiredWidth(260.dp)
+                    Modifier
+                        .padding(50f.dp)
                         .wrapContentHeight()
                         .drawBackdrop(
-                            backdrop = liquidBackdrop!!,
-                            shape = { RoundedCornerShape(32.dp) },
+                            backdrop = dialogBackdrop,
+                            shape = { RoundedRectangle(48f.dp) },
                             effects = {
                                 colorControls(
                                     brightness = if (isLightTheme) 0.2f else 0f,
@@ -695,114 +946,607 @@ fun MainRouteScreen(
                                 blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
                                 lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
                             },
-                            highlight = { Highlight.Default },
+                            highlight = { Highlight.Plain },
                             onDrawSurface = { drawRect(containerColor) }
                         )
                         .pointerInput(Unit) { detectTapGestures { /* consume */ } }
                 ) {
-                    BasicText(
-                        "壁纸选项",
-                        Modifier.padding(20.dp, 20.dp, 20.dp, 4.dp),
-                        style = TextStyle(contentColor, 18.sp, FontWeight.Medium)
-                    )
+                    when (state) {
+                        is DialogState.Action -> {
+                            val targetIndex = state.index
+                            val model = wallpapers.getOrNull(targetIndex)
+                            if (model != null) {
+                                var loopState by remember(targetIndex) { mutableStateOf(model.loop) }
 
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 16.dp)
+                                        .padding(horizontal = 9f.dp)
+                                        .clickable { fullScreenPreviewModel = model },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    WallpaperThumbnail(
+                                        model = model,
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.946f)
+                                            .aspectRatio(0.62f)
+                                            .clip(RoundedRectangle(35f.dp))
+                                    )
+                                }
+
+                                Column(
+                                    Modifier
+                                        .padding(16.dp, 4.dp, 16.dp, 20.dp)
+                                        .fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    // Time Button
+                                    Row(
+                                        Modifier
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable {
+                                                timeDialogIndex = targetIndex
+                                                actionDialogIndex = null
+                                            }
+                                            .height(48.dp)
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText("时间", style = TextStyle(contentColor, 16.sp))
+                                    }
+
+                                    // Loop Toggle
+                                    Row(
+                                        Modifier
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .height(48.dp)
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 24.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText("循环播放", style = TextStyle(contentColor, 16.sp))
+                                        LiquidToggle(
+                                            selected = { loopState },
+                                            onSelect = {
+                                                loopState = it
+                                                model.loop = it
+                                                saveCache()
+                                            },
+                                            backdrop = dialogBackdrop
+                                        )
+                                    }
+
+                                    // Delete & Cancel Buttons
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        // Delete Button
+                                        Row(
+                                            Modifier
+                                                .weight(1f)
+                                                .clip(Capsule())
+                                                .background(Color(0xFFFF4D4F))
+                                                .clickable {
+                                                    delete(targetIndex)
+                                                    actionDialogIndex = null
+                                                }
+                                                .height(48.dp)
+                                                .padding(horizontal = 16f.dp),
+
+                                            horizontalArrangement = Arrangement.spacedBy(4f.dp, Alignment.CenterHorizontally),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            BasicText("删除", style = TextStyle(Color.White, 16.sp))
+                                        }
+
+                                        // Cancel Button
+                                        Row(
+                                            Modifier
+                                                .weight(1f)
+                                                .clip(Capsule())
+                                                .background(accentColor)
+                                                .clickable { actionDialogIndex = null }
+                                                .height(48.dp)
+                                                .padding(horizontal = 16f.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(4f.dp, Alignment.CenterHorizontally),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            BasicText("取消", style = TextStyle(Color.White, 16.sp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        DialogState.Type -> {
+                            Column(
+                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                BasicText(context.getString(R.string.main_select_wallpaper_type_tip), style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+                                Spacer(Modifier.height(8.dp))
+                                val items = listOf(
+                                    context.getString(R.string.main_wallpaper_type_static) to { showWallpaperTypeDialog = false; imageLaunch.launch(arrayOf("image/*")) },
+                                    context.getString(R.string.main_wallpaper_type_dynamic) to { showWallpaperTypeDialog = false; videoLaunch.launch(arrayOf("video/*")) },
+                                    context.getString(R.string.main_wallpaper_type_directory) to { showWallpaperTypeDialog = false; directoryLaunch.launch(null) },
+                                    context.getString(R.string.common_cancel) to { showWallpaperTypeDialog = false }
+                                )
+                                items.forEach { (label, onClick) ->
+                                    Row(
+                                        Modifier
+                                            .clip(Capsule())
+                                            .background(if(label == context.getString(R.string.common_cancel)) containerColor.copy(0.2f) else accentColor)
+                                            .clickable { onClick() }
+                                            .height(48.dp)
+                                            .fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(label, style = TextStyle(if(label == context.getString(R.string.common_cancel)) contentColor else Color.White, 16.sp))
+                                    }
+                                }
+                            }
+                        }
+                        DialogState.Permission -> {
+                            Column(
+                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                BasicText(context.getString(R.string.main_set_wallpaper_failed_permission_tip), style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+                                Spacer(Modifier.height(12.dp))
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(accentColor)
+                                            .clickable {
+                                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                    data = Uri.fromParts("package", context.packageName, null)
+                                                }
+                                                context.startActivity(intent)
+                                                showPermissionDialog = false
+                                            }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_confirm), style = TextStyle(Color.White, 16.sp))
+                                    }
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable { showPermissionDialog = false }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_cancel), style = TextStyle(contentColor, 16.sp))
+                                    }
+                                }
+                            }
+                        }
+                        DialogState.Delete -> {
+                            Column(
+                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                BasicText(context.getString(R.string.delete_selected_confirm), style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+                                Spacer(Modifier.height(12.dp))
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(Color(0xFFFF4D4F))
+                                            .clickable {
+                                                val indexes = selectedPositions.toMutableList()
+                                                Collections.sort(indexes, Collections.reverseOrder())
+                                                for (index in indexes) {
+                                                    if (index in wallpapers.indices) wallpapers.removeAt(index)
+                                                }
+                                                selectedPositions.clear()
+                                                saveCache()
+                                                exitSelectionMode()
+                                                showDeleteSelectedDialog = false
+                                            }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_delete), style = TextStyle(Color.White, 16.sp))
+                                    }
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable { showDeleteSelectedDialog = false }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_cancel), style = TextStyle(contentColor, 16.sp))
+                                    }
+                                }
+                            }
+                        }
+                        DialogState.Overwrite -> {
+                            Column(
+                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                BasicText(context.getString(R.string.overwrite_wallpaper_group_confirm), style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+                                Spacer(Modifier.height(12.dp))
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(Color(0xFF4CAF50))
+                                            .clickable {
+                                                performOverwriteSave()
+                                            }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_confirm), style = TextStyle(Color.White, 16.sp))
+                                    }
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable { showOverwriteDialog = false }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_cancel), style = TextStyle(contentColor, 16.sp))
+                                    }
+                                }
+                            }
+                        }
+                        DialogState.Save -> {
+                            Column(
+                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                BasicText("保存当前壁纸组", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .clip(Capsule())
+                                        .background(containerColor.copy(0.2f)),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    BasicTextField(
+                                        value = groupName,
+                                        onValueChange = { groupName = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(color = contentColor, fontSize = 16.sp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp),
+                                        cursorBrush = SolidColor(accentColor),
+                                        decorationBox = { innerTextField ->
+                                            if (groupName.isEmpty()) {
+                                                Text(
+                                                    text = "项目名称",
+                                                    color = contentColor.copy(alpha = 0.5f),
+                                                    fontSize = 16.sp
+                                                )
+                                            }
+                                            innerTextField()
+                                        }
+                                    )
+                                }
+
+                                Spacer(Modifier.height(8.dp))
+
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(accentColor)
+                                            .clickable {
+                                                if (groupName.isNotBlank()) {
+                                                    checkAndSaveGroup()
+                                                    showSaveDialog = false
+                                                } else {
+                                                    toast("请输入名称")
+                                                }
+                                            }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText("确认", style = TextStyle(Color.White, 16.sp))
+                                    }
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable { showSaveDialog = false }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText("取消", style = TextStyle(contentColor, 16.sp))
+                                    }
+                                }
+                            }
+                        }
+                        is DialogState.Time -> {
+                            val targetIndex = state.index
+                            val model = wallpapers.getOrNull(targetIndex)
+                            if (model != null) {
+                                var startTime by remember(targetIndex) { mutableStateOf(model.startTime) }
+                                var endTime by remember(targetIndex) { mutableStateOf(model.endTime) }
+                                var startText by remember(targetIndex) { mutableStateOf(if (startTime == -1) "" else getTimeString(startTime)) }
+                                var endText by remember(targetIndex) { mutableStateOf(if (endTime == -1) "" else getTimeString(endTime)) }
+
+                                Column(
+                                    Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    BasicText("设置时间条件", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f)),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        BasicTextField(
+                                            value = startText,
+                                            onValueChange = { startText = it },
+                                            singleLine = true,
+                                            textStyle = TextStyle(color = contentColor, fontSize = 16.sp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 20.dp),
+                                            cursorBrush = SolidColor(accentColor),
+                                            decorationBox = { innerTextField ->
+                                                if (startText.isEmpty()) {
+                                                    Text(
+                                                        text = "开始时间(HH:mm)",
+                                                        color = contentColor.copy(alpha = 0.5f),
+                                                        fontSize = 16.sp
+                                                    )
+                                                }
+                                                innerTextField()
+                                            }
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f)),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        BasicTextField(
+                                            value = endText,
+                                            onValueChange = { endText = it },
+                                            singleLine = true,
+                                            textStyle = TextStyle(color = contentColor, fontSize = 16.sp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 20.dp),
+                                            cursorBrush = SolidColor(accentColor),
+                                            decorationBox = { innerTextField ->
+                                                if (endText.isEmpty()) {
+                                                    Text(
+                                                        text = "结束时间(HH:mm)",
+                                                        color = contentColor.copy(alpha = 0.5f),
+                                                        fontSize = 16.sp
+                                                    )
+                                                }
+                                                innerTextField()
+                                            }
+                                        )
+                                    }
+
+                                    Spacer(Modifier.height(8.dp))
+
+                                    Row(
+                                        Modifier
+                                            .clip(Capsule())
+                                            .background(accentColor)
+                                            .clickable {
+                                                startTime = parseAndValidateTime(startText, "开始时间") ?: return@clickable
+                                                endTime = parseAndValidateTime(endText, "结束时间") ?: run {
+                                                    if (endText.isEmpty()) -1 else return@clickable
+                                                }
+                                                model.startTime = startTime
+                                                model.endTime = endTime
+                                                if (model.startTime != -1 && model.endTime == -1) model.endTime = 24 * 60
+                                                if (model.endTime != -1 && model.startTime == -1) model.startTime = 0
+                                                saveCache()
+                                                timeDialogIndex = null
+                                            }
+                                            .height(48.dp)
+                                            .fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_confirm), style = TextStyle(Color.White, 16.sp))
+                                    }
+
+                                    Row(
+                                        Modifier
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable {
+                                                startTime = -1
+                                                endTime = -1
+                                                startText = ""
+                                                endText = ""
+                                                model.startTime = -1
+                                                model.endTime = -1
+                                                saveCache()
+                                            }
+                                            .height(48.dp)
+                                            .fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText("重置", style = TextStyle(contentColor, 16.sp))
+                                    }
+
+                                    Row(
+                                        Modifier
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable { timeDialogIndex = null }
+                                            .height(48.dp)
+                                            .fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_cancel), style = TextStyle(contentColor, 16.sp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Full screen preview overlay
+        AnimatedContent(
+            targetState = fullScreenPreviewModel,
+            transitionSpec = {
+                scaleIn(
+                    initialScale = 0.8f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessLow
+                    )
+                ).togetherWith(
+                    scaleOut(
+                        targetScale = 0.8f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessLow
+                        )
+                    )
+                )
+            },
+            contentAlignment = Alignment.Center,
+            label = "FullScreenPreview",
+            modifier = Modifier.fillMaxSize()
+        ) { model ->
+            if (model != null) {
+                val previewBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        //.padding(horizontal = 16.dp, vertical = 32.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(Color.Black)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            fullScreenPreviewModel = null
+                        }
+                ) {
                     Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .let { m ->
+                                if (enableLiquidGlass && previewBackdrop != null) {
+                                    m.layerBackdrop(previewBackdrop)
+                                } else m
+                            }
                     ) {
                         WallpaperThumbnail(
                             model = model,
-                            modifier = Modifier
-                                .fillMaxWidth(0.92f)
-                                .aspectRatio(0.62f)
-                                .clip(RoundedCornerShape(16.dp))
+                            modifier = Modifier.fillMaxSize(),
+                            useClip = false
                         )
                     }
 
-                    Column(
-                        Modifier
-                            .padding(16.dp, 4.dp, 16.dp, 20.dp)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 24.dp)
                     ) {
-                        // Time Button
-                        Row(
-                            Modifier
-                                .clip(CircleShape)
-                                .background(containerColor.copy(0.2f))
-                                .clickable {
-                                    timeDialogIndex = targetIndex
-                                    actionDialogIndex = null
+                        val isDark = isSystemInDarkTheme()
+                        val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
+                        val textColor = if (isDark) Color.White else Color.Black
+
+                        if (enableLiquidGlass && previewBackdrop != null) {
+                            LiquidButton(
+                                onClick = { applySingleWallpaper(model) },
+                                backdrop = previewBackdrop,
+                                surfaceColor = accentColor.copy(alpha = 0.75f),
+                                modifier = Modifier.height(44.dp)
+                            ) {
+                                BasicText(
+                                    "应用壁纸",
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Medium)
+                                )
+                            }
+                        } else {
+                            Surface(
+                                modifier = Modifier
+                                    .height(44.dp)
+                                    .clickable { applySingleWallpaper(model) },
+                                shape = Capsule(),
+                                color = accentColor
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                ) {
+                                    Text(
+                                        text = "应用壁纸",
+                                        color = textColor,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
                                 }
-                                .height(48.dp)
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("时间", style = TextStyle(contentColor, 16.sp))
-                        }
-
-                        // Loop Toggle
-                        Row(
-                            Modifier
-                                .clip(CircleShape)
-                                .background(containerColor.copy(0.2f))
-                                .height(48.dp)
-                                .fillMaxWidth()
-                                .padding(horizontal = 24.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("循环播放", style = TextStyle(contentColor, 16.sp))
-                            LiquidToggle(
-                                selected = { loopState },
-                                onSelect = {
-                                    loopState = it
-                                    model.loop = it
-                                    saveCache()
-                                },
-                                backdrop = liquidBackdrop
-                            )
-                        }
-
-                        // Delete & Cancel Buttons
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            // Delete Button
-                            Row(
-                                Modifier
-                                    .weight(1f)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFFF4D4F))
-                                    .clickable {
-                                        delete(targetIndex)
-                                        actionDialogIndex = null
-                                    }
-                                    .height(48.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                BasicText("删除", style = TextStyle(Color.White, 16.sp))
-                            }
-
-                            // Cancel Button
-                            Row(
-                                Modifier
-                                    .weight(1f)
-                                    .clip(CircleShape)
-                                    .background(accentColor)
-                                    .clickable { actionDialogIndex = null }
-                                    .height(48.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                BasicText("取消", style = TextStyle(Color.White, 16.sp))
                             }
                         }
                     }
@@ -810,131 +1554,6 @@ fun MainRouteScreen(
             }
         }
     }
-
-    if (showWallpaperTypeDialog) {
-        AlertDialog(
-            onDismissRequest = { showWallpaperTypeDialog = false },
-            title = { Text(context.getString(R.string.main_select_wallpaper_type_tip)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { showWallpaperTypeDialog = false; imageLaunch.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(context.getString(R.string.main_wallpaper_type_static))
-                    }
-                    Button(onClick = { showWallpaperTypeDialog = false; videoLaunch.launch(arrayOf("video/*")) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(context.getString(R.string.main_wallpaper_type_dynamic))
-                    }
-                    Button(onClick = { showWallpaperTypeDialog = false; directoryLaunch.launch(null) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(context.getString(R.string.main_wallpaper_type_directory))
-                    }
-                    Button(onClick = { showWallpaperTypeDialog = false }, modifier = Modifier.fillMaxWidth()) {
-                        Text(context.getString(R.string.common_cancel))
-                    }
-                }
-            },
-            confirmButton = {}
-        )
-    }
-
-    if (showPermissionDialog) {
-        AlertDialog(
-            onDismissRequest = { showPermissionDialog = false },
-            title = { Text(context.getString(R.string.main_set_wallpaper_failed_permission_tip)) },
-            confirmButton = {
-                Button(onClick = {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", context.packageName, null)
-                    }
-                    context.startActivity(intent)
-                    showPermissionDialog = false
-                }) { Text(context.getString(R.string.common_confirm)) }
-            },
-            dismissButton = {
-                Button(onClick = { showPermissionDialog = false }) { Text(context.getString(R.string.common_cancel)) }
-            }
-        )
-    }
-
-    if (showDeleteSelectedDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteSelectedDialog = false },
-            title = { Text(context.getString(R.string.delete_selected_confirm)) },
-            confirmButton = {
-                Button(onClick = {
-                    val indexes = selectedPositions.toMutableList()
-                    Collections.sort(indexes, Collections.reverseOrder())
-                    for (index in indexes) {
-                        if (index in wallpapers.indices) wallpapers.removeAt(index)
-                    }
-                    selectedPositions.clear()
-                    saveCache()
-                    exitSelectionMode()
-                    showDeleteSelectedDialog = false
-                }) { Text(context.getString(R.string.common_delete)) }
-                Button(onClick = { showDeleteSelectedDialog = false }) { Text(context.getString(R.string.common_cancel)) }
-            }
-        )
-    }
-
-    timeDialogIndex?.let { index ->
-        val model = wallpapers.getOrNull(index)
-        if (model != null) {
-            var startTime by remember(index) { mutableStateOf(model.startTime) }
-            var endTime by remember(index) { mutableStateOf(model.endTime) }
-            var startText by remember(index) { mutableStateOf(if (startTime == -1) "" else getTimeString(startTime)) }
-            var endText by remember(index) { mutableStateOf(if (endTime == -1) "" else getTimeString(endTime)) }
-            AlertDialog(
-                onDismissRequest = { timeDialogIndex = null },
-                title = { Text("设置时间条件") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = startText,
-                            onValueChange = { startText = it },
-                            singleLine = true,
-                            label = { Text("开始时间(HH:mm)") }
-                        )
-                        OutlinedTextField(
-                            value = endText,
-                            onValueChange = { endText = it },
-                            singleLine = true,
-                            label = { Text("结束时间(HH:mm)") }
-                        )
-                    }
-                },
-                confirmButton = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Button(onClick = {
-                            startTime = -1
-                            endTime = -1
-                            startText = ""
-                            endText = ""
-                        }) { Text("重置") }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(onClick = { timeDialogIndex = null }) { Text(context.getString(R.string.common_cancel)) }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(onClick = {
-                            startTime = parseAndValidateTime(startText, "开始时间") ?: return@Button
-                            endTime = parseAndValidateTime(endText, "结束时间") ?: run {
-                                return@Button
-                            }
-                            model.startTime = startTime
-                            model.endTime = endTime
-                            if (model.startTime != -1 && model.endTime == -1) model.endTime = 24 * 60
-                            if (model.endTime != -1 && model.startTime == -1) model.startTime = 0
-                            saveCache()
-                            timeDialogIndex = null
-                        }) { Text(context.getString(R.string.common_confirm)) }
-                    }
-                }
-            )
-        }
-    }
-
-
 }
 
 @Composable
@@ -942,108 +1561,109 @@ private fun MainTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
     backdrop: LayerBackdrop?,
-    groupName: String,
-    onGroupNameChange: (String) -> Unit,
     onAdd: () -> Unit,
     onApply: () -> Unit,
-    moreMenuExpanded: Boolean,
-    onMoreMenuExpandedChange: (Boolean) -> Unit,
-    onSelect: () -> Unit,
-    onOpenSetting: () -> Unit
+    onMoreClick: () -> Unit
 ) {
-    val animationScope = androidx.compose.runtime.rememberCoroutineScope()
-    val inputInteractiveHighlight = remember(animationScope) { LiquidInteractiveHighlight(animationScope) }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        GlassCircleButton(
-            enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
-            label = "+",
-            onClick = onAdd
-        )
+        val isDark = isSystemInDarkTheme()
+        val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
+        val textColor = if (isDark) Color.White else Color.Black
 
-        val inputModifier = if (enableLiquidGlass && backdrop != null) {
-            Modifier.drawBackdrop(
+        // Add Button
+        if (enableLiquidGlass && backdrop != null) {
+            LiquidButton(
+                onClick = onAdd,
                 backdrop = backdrop,
-                shape = { RoundedCornerShape(26.dp) },
-                effects = {
-                    vibrancy()
-                    blur(2f.dp.toPx())
-                    lens(12f.dp.toPx(), 24f.dp.toPx())
-                },
-                layerBlock = {
-                    if (size.width > 0f && size.height > 0f) {
-                        val progress = inputInteractiveHighlight.pressProgress
-                        val scale = lerp(1f, 1f + 4f.dp.toPx() / size.height, progress)
-
-                        val maxOffset = size.minDimension.coerceAtLeast(1f)
-                        val initialDerivative = 0.05f
-                        val offset = inputInteractiveHighlight.offset
-                        translationX = maxOffset * tanh(initialDerivative * offset.x / maxOffset)
-                        translationY = maxOffset * tanh(initialDerivative * offset.y / maxOffset)
-
-                        val maxDragScale = 4f.dp.toPx() / size.height
-                        val offsetAngle = atan2(offset.y, offset.x)
-                        val width = size.width
-                        val height = size.height
-                        scaleX = scale + maxDragScale * abs(cos(offsetAngle) * offset.x / size.maxDimension.coerceAtLeast(1f)) * (width / height).fastCoerceAtMost(1f)
-                        scaleY = scale + maxDragScale * abs(sin(offsetAngle) * offset.y / size.maxDimension.coerceAtLeast(1f)) * (height / width).fastCoerceAtMost(1f)
-                    }
-                }
-            ).then(inputInteractiveHighlight.gestureModifier)
-        } else {
-            Modifier
-        }
-
-        OutlinedTextField(
-            value = groupName,
-            onValueChange = onGroupNameChange,
-            modifier = Modifier
-                .weight(1f)
-                .height(52.dp)
-                .then(inputModifier),
-            singleLine = true,
-            shape = RoundedCornerShape(26.dp),
-            colors = TextFieldDefaults.outlinedTextFieldColors(
-                backgroundColor = Color.Transparent,
-                focusedBorderColor = Color.Transparent,
-                unfocusedBorderColor = Color.Transparent,
-                disabledBorderColor = Color.Transparent,
-                errorBorderColor = Color.Transparent
-            ),
-            placeholder = { Text("输入壁纸组名称") }
-        )
-        Box {
-            GlassCircleButton(
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = backdrop,
-                label = "…",
-                onClick = { onMoreMenuExpandedChange(true) }
-            )
-            DropdownMenu(
-                expanded = moreMenuExpanded,
-                onDismissRequest = { onMoreMenuExpandedChange(false) }
+                modifier = Modifier.size(48.dp),
+                surfaceColor = adaptiveSurfaceColor
             ) {
-                DropdownMenuItem(onClick = onSelect) {
-                    Text("选择")
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    BasicText(text = "+", style = TextStyle(textColor, 20.sp))
                 }
-                DropdownMenuItem(onClick = onOpenSetting) {
-                    Text("设置")
+            }
+        } else {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF)
+                )
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize().clickable(onClick = onAdd),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "+", color = textColor, fontSize = 20.sp)
                 }
             }
         }
-        GlassCircleButton(
-            enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
-            label = "✓",
-            onClick = onApply
-        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Apply Button
+        if (enableLiquidGlass && backdrop != null) {
+            LiquidButton(
+                onClick = onApply,
+                backdrop = backdrop,
+                modifier = Modifier.size(48.dp),
+                surfaceColor = adaptiveSurfaceColor
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    BasicText(text = "✓", style = TextStyle(textColor, 20.sp))
+                }
+            }
+        } else {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize().clickable(onClick = onApply),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "✓", color = textColor, fontSize = 20.sp)
+                }
+            }
+        }
+
+        // More Button
+        if (enableLiquidGlass && backdrop != null) {
+            LiquidButton(
+                onClick = onMoreClick,
+                backdrop = backdrop,
+                modifier = Modifier.size(48.dp),
+                surfaceColor = adaptiveSurfaceColor
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    BasicText(text = "…", style = TextStyle(textColor, 20.sp))
+                }
+            }
+        } else {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize().clickable(onClick = onMoreClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "…", color = textColor, fontSize = 20.sp)
+                }
+            }
+        }
     }
 }
 
@@ -1052,88 +1672,108 @@ private fun SelectionTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
     backdrop: LayerBackdrop?,
-    onCancelSelect: () -> Unit
+    isAllSelected: Boolean,
+    onCancelSelect: () -> Unit,
+    onDelete: () -> Unit,
+    onToggleSelectAll: () -> Unit
 ) {
+    val context = LocalContext.current
+    val isDark = isSystemInDarkTheme()
+    val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
+    val textColor = if (isDark) Color.White else Color.Black
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = statusBarTopPaddingDp + 10.dp, end = 8.dp),
-        horizontalArrangement = Arrangement.End
+            .padding(top = statusBarTopPaddingDp + 10.dp, start = 12.dp, end = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        GlassCircleButton(
-            enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
-            label = "×",
-            onClick = onCancelSelect
-        )
-    }
-}
-
-
-@Composable
-private fun GlassCircleButton(
-    modifier: Modifier = Modifier,
-    enableLiquidGlass: Boolean,
-    backdrop: LayerBackdrop?,
-    label: String,
-    onClick: () -> Unit
-) {
-    val animationScope = androidx.compose.runtime.rememberCoroutineScope()
-    val interactiveHighlight = remember(animationScope) { LiquidInteractiveHighlight(animationScope) }
-
-    val glassModifier = if (enableLiquidGlass && backdrop != null) {
-        Modifier.drawBackdrop(
-            backdrop = backdrop,
-            shape = { CircleShape },
-            effects = {
-                vibrancy()
-                blur(2f.dp.toPx())
-                lens(12f.dp.toPx(), 24f.dp.toPx())
-            },
-            layerBlock = {
-                if (size.width > 0f && size.height > 0f) {
-                    val progress = interactiveHighlight.pressProgress
-                    val scale = lerp(1f, 1f + 4f.dp.toPx() / size.height, progress)
-
-                    val maxOffset = size.minDimension.coerceAtLeast(1f)
-                    val initialDerivative = 0.05f
-                    val offset = interactiveHighlight.offset
-                    translationX = maxOffset * tanh(initialDerivative * offset.x / maxOffset)
-                    translationY = maxOffset * tanh(initialDerivative * offset.y / maxOffset)
-
-                    val maxDragScale = 4f.dp.toPx() / size.height
-                    val offsetAngle = atan2(offset.y, offset.x)
-                    val width = size.width
-                    val height = size.height
-                    scaleX = scale + maxDragScale * abs(cos(offsetAngle) * offset.x / size.maxDimension.coerceAtLeast(1f)) * (width / height).fastCoerceAtMost(1f)
-                    scaleY = scale + maxDragScale * abs(sin(offsetAngle) * offset.y / size.maxDimension.coerceAtLeast(1f)) * (height / width).fastCoerceAtMost(1f)
+        // Delete Button (Red)
+        if (enableLiquidGlass && backdrop != null) {
+            LiquidButton(
+                onClick = onDelete,
+                backdrop = backdrop,
+                surfaceColor = Color(0xFFFF4D4F).copy(alpha = 0.8f),
+                modifier = Modifier.height(44.dp)
+            ) {
+                BasicText(
+                    context.getString(R.string.common_delete),
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Medium)
+                )
+            }
+        } else {
+            Surface(
+                modifier = Modifier
+                    .height(44.dp)
+                    .clickable { onDelete() },
+                shape = Capsule(),
+                color = Color(0xFFFF4D4F)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Text(text = context.getString(R.string.common_delete), color = Color.White, fontSize = 15.sp)
                 }
             }
-        ).then(interactiveHighlight.gestureModifier)
-    } else {
-        Modifier
-    }
+        }
 
-    val isDark = isSystemInDarkTheme()
-    val surfaceColor = if (enableLiquidGlass) Color.Transparent else (if (isDark) Color(0x33000000) else Color(0xAAFFFFFF))
-    val borderColor = if (enableLiquidGlass) null else androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
-    val textColor = if (isDark) Color.White else Color(0xFF1A2433)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Select All Toggle Button
+            val selectAllLabel = if (isAllSelected) "取消全选" else "全选"
+            if (enableLiquidGlass && backdrop != null) {
+                LiquidButton(
+                    onClick = onToggleSelectAll,
+                    backdrop = backdrop,
+                    surfaceColor = adaptiveSurfaceColor,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        selectAllLabel,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = TextStyle(textColor, 15.sp)
+                    )
+                }
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clickable { onToggleSelectAll() },
+                    shape = Capsule(),
+                    color = adaptiveSurfaceColor
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Text(text = selectAllLabel, color = textColor, fontSize = 15.sp)
+                    }
+                }
+            }
 
-    Surface(
-        modifier = modifier
-            .size(48.dp)
-            .then(glassModifier),
-        shape = CircleShape,
-        color = surfaceColor,
-        border = borderColor
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = label, color = textColor, fontSize = 20.sp)
+            // Cancel Button
+            if (enableLiquidGlass && backdrop != null) {
+                LiquidButton(
+                    onClick = onCancelSelect,
+                    backdrop = backdrop,
+                    surfaceColor = adaptiveSurfaceColor,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        context.getString(R.string.common_cancel),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = TextStyle(textColor, 15.sp)
+                    )
+                }
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clickable { onCancelSelect() },
+                    shape = Capsule(),
+                    color = adaptiveSurfaceColor
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Text(text = context.getString(R.string.common_cancel), color = textColor, fontSize = 15.sp)
+                    }
+                }
+            }
         }
     }
 }
@@ -1163,8 +1803,13 @@ private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWall
 }
 
 @Composable
-private fun WallpaperThumbnail(model: TianYinWallpaperModel, modifier: Modifier = Modifier) {
+private fun WallpaperThumbnail(
+    model: TianYinWallpaperModel,
+    modifier: Modifier = Modifier,
+    useClip: Boolean = true
+) {
     val context = LocalContext.current
+    val dialogShape = RoundedRectangle(35f.dp)
     if (model.type == 1 && !model.videoUri.isNullOrEmpty()) {
         AndroidView(
             factory = { ctx ->
@@ -1188,16 +1833,12 @@ private fun WallpaperThumbnail(model: TianYinWallpaperModel, modifier: Modifier 
                                 val videoRatio = vWidth / vHeight
                                 val viewRatio = viewWidth / viewHeight
 
-                                // TextureView 默认会拉伸填充。
-                                // 我们通过缩放来抵消拉伸并实现 Center Crop。
                                 var scaleX = 1f
                                 var scaleY = 1f
 
                                 if (videoRatio > viewRatio) {
-                                    // 视频比视图宽 -> 保持高度，拉伸宽度以裁剪两侧
                                     scaleX = videoRatio / viewRatio
                                 } else {
-                                    // 视频比视图高 -> 保持宽度，拉伸高度以裁剪顶底
                                     scaleY = viewRatio / videoRatio
                                 }
 
@@ -1247,7 +1888,7 @@ private fun WallpaperThumbnail(model: TianYinWallpaperModel, modifier: Modifier 
                     }
                 }
             },
-            modifier = modifier
+            modifier = if (useClip) modifier.clip(dialogShape) else modifier
         )
     } else {
         val cacheKey = buildThumbnailCacheKey(model)
@@ -1265,49 +1906,9 @@ private fun WallpaperThumbnail(model: TianYinWallpaperModel, modifier: Modifier 
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = null,
-                modifier = modifier,
+                modifier = if (useClip) modifier.clip(dialogShape) else modifier,
                 contentScale = ContentScale.Crop
             )
         }
-    }
-}
-
-private class LiquidInteractiveHighlight(
-    val animationScope: kotlinx.coroutines.CoroutineScope
-) {
-    var touchOffset by mutableStateOf(Offset.Zero)
-    var isPressed by mutableStateOf(false)
-    val pressAnim = Animatable(0f)
-    val pressProgress: Float get() = pressAnim.value
-
-    val offsetAnim = Animatable(Offset.Zero, Offset.VectorConverter)
-    val offset: Offset get() = offsetAnim.value
-
-    val gestureModifier = Modifier.pointerInput(Unit) {
-        detectTapGestures(
-            onPress = { offset ->
-                isPressed = true
-                touchOffset = offset
-                val center = size.toSize().center
-                val targetOffset = offset - center
-                animationScope.launch {
-                    pressAnim.animateTo(1f, spring(0.8f, 400f))
-                }
-                animationScope.launch {
-                    offsetAnim.animateTo(targetOffset, spring(0.8f, 400f))
-                }
-                try {
-                    tryAwaitRelease()
-                } finally {
-                    isPressed = false
-                    animationScope.launch {
-                        pressAnim.animateTo(0f, spring(0.8f, 400f))
-                    }
-                    animationScope.launch {
-                        offsetAnim.animateTo(Offset.Zero, spring(0.8f, 400f))
-                    }
-                }
-            }
-        )
     }
 }

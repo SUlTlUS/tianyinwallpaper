@@ -465,7 +465,7 @@ class TianYinWallpaperService : WallpaperService() {
 
     companion object {
         const val PREF_AUTO_SWITCH_MODE = "autoSwitchMode"
-        const val PREF_AUTO_SWITCH_INTERVAL_MINUTES = "autoSwitchIntervalMinutes"
+        const val PREF_AUTO_SWITCH_INTERVAL_SECONDS = "autoSwitchIntervalSeconds"
         const val PREF_AUTO_SWITCH_TIME_POINTS = "autoSwitchTimePoints"
         const val PREF_AUTO_SWITCH_ANCHOR_AT = "autoSwitchAnchorAt"
         const val PREF_AUTO_SWITCH_LAST_SWITCH_AT = "autoSwitchLastSwitchAt"

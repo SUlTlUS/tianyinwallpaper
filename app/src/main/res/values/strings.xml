@@ -9,7 +9,7 @@
     <string name="cancel_select_action">取消选择</string>
     <string name="cancel_symbol">×</string>
     <string name="delete_selected_action">删除选中壁纸</string>
-    <string name="delete_symbol">🗑</string>
+    <string name="delete_symbol">🗑️</string>
     <string name="menu_select_mode">选择</string>
     <string name="menu_setting">设置</string>
     <string name="select_mode_tip">已进入多选模式</string>
@@ -22,11 +22,12 @@
     <string name="main_tab_wallpaper">壁纸</string>
     <string name="main_tab_groups">壁纸组</string>
     <string name="main_tab_settings">设置</string>
-    <string name="main_select_wallpaper_type_tip">请选择壁纸类型，可长按选中的壁纸来多选</string>
+    <string name="main_select_wallpaper_type_tip">请选择壁纸类型</string>
     <string name="main_wallpaper_type_static">静态</string>
     <string name="main_wallpaper_type_dynamic">动态</string>
     <string name="main_wallpaper_type_directory">目录</string>
     <string name="main_wallpaper_type_directory_empty">所选目录中没有可导入的图片或视频</string>
     <string name="main_wallpaper_directory_permission_failed">无法获取目录读取权限，请重新选择并授权</string>
-    <string name="main_set_wallpaper_failed_permission_tip">设置失败，可能是没有设置动态壁纸权限，是否去设置</string>
+    <string name="main_set_wallpaper_failed_permission_tip">设置失败，可能是没有设置动态壁纸权限，是否去设置？</string>
+    <string name="overwrite_wallpaper_group_confirm">壁纸组名称已存在，是否覆盖保存？</string>
 </resources>

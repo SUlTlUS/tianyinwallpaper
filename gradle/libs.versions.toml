@@ -1,0 +1,69 @@
+[versions]
+agp = "9.0.0"
+kotlin = "2.3.10"
+
+activity = "1.12.4"
+core = "1.17.0"
+compose = "1.9.4"
+kyantShapes = "1.2.0"
+
+# 定义版本号
+appcompat = "1.7.1"
+material = "1.13.0"
+constraintlayout = "2.0.4"
+compose-material = "1.9.4"
+navigation-compose = "2.8.3"
+junit = "4.13.2"
+androidx-junit = "1.1.3"
+espresso = "3.4.0"
+fragment = "1.8.5"
+documentfile = "1.0.1"
+glide = "4.9.0"
+fastjson = "1.1.56.android"
+android-picker = "4.1.7"
+rxjava = "2.2.10"
+rxandroid = "2.1.1"
+okhttp = "4.9.3"
+backdrop = "1.0.0"
+xpopup = "2.6.6"
+multidex = "2.0.1"
+
+[libraries]
+# --- 第一部分合并过来的库 ---
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+google-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
+androidx-compose-material = { group = "androidx.compose.material", name = "material", version.ref = "compose-material" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview", version.ref = "compose-material" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling", version.ref = "compose-material" }
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation-compose" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidx-junit" }
+androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }
+androidx-fragment = { group = "androidx.fragment", name = "fragment", version.ref = "fragment" }
+androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentfile" }
+glide = { group = "com.github.bumptech.glide", name = "glide", version.ref = "glide" }
+fastjson = { group = "com.alibaba", name = "fastjson", version.ref = "fastjson" }
+android-picker-common = { group = "com.github.gzu-liyujiang.AndroidPicker", name = "Common", version.ref = "android-picker" }
+android-picker-wheel = { group = "com.github.gzu-liyujiang.AndroidPicker", name = "WheelPicker", version.ref = "android-picker" }
+rxjava = { group = "io.reactivex.rxjava2", name = "rxjava", version.ref = "rxjava" }
+rxandroid = { group = "io.reactivex.rxjava2", name = "rxandroid", version.ref = "rxandroid" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
+xpopup = { group = "com.github.li-xiaojun", name = "XPopup", version.ref = "xpopup" }
+androidx-multidex = { group = "androidx.multidex", name = "multidex", version.ref = "multidex" }
+
+# --- 第二部分合并过来的库 ---
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activity" }
+androidx-compose-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "compose" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "compose" }
+androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics", version.ref = "compose" }
+androidx-compose-material-ripple = { group = "androidx.compose.material", name = "material-ripple", version.ref = "compose" }
+kyant-shapes = { group = "io.github.kyant0", name = "shapes", version.ref = "kyantShapes" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
