@@ -275,6 +275,29 @@ fun MainRouteScreen(
     var actionDialogIndex by remember { mutableStateOf<Int?>(null) }
     var timeDialogIndex by remember { mutableStateOf<Int?>(null) }
     var fullScreenPreviewModel by remember { mutableStateOf<TianYinWallpaperModel?>(null) }
+    var showLivePreview by remember { mutableStateOf(false) }
+
+    // Observe current index from SharedPreferences
+    var liveSyncIndex by remember { mutableStateOf(pref.getInt(TianYinWallpaperService.PREF_CURRENT_INDEX, 0)) }
+    val preferenceListener = remember {
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
+            if (key == TianYinWallpaperService.PREF_CURRENT_INDEX) {
+                val newIndex = p.getInt(key, 0)
+                Log.d("MainRouteScreen", "Live sync index updated: $newIndex")
+                liveSyncIndex = newIndex
+            }
+        }
+    }
+    DisposableEffect(showLivePreview) {
+        if (showLivePreview) {
+            pref.registerOnSharedPreferenceChangeListener(preferenceListener)
+            // Sync current index immediately when opening
+            liveSyncIndex = pref.getInt(TianYinWallpaperService.PREF_CURRENT_INDEX, 0)
+            onDispose { pref.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+        } else {
+            onDispose { }
+        }
+    }
 
     val currentDialogState = when {
         actionDialogIndex != null -> DialogState.Action(actionDialogIndex!!)
@@ -285,6 +308,13 @@ fun MainRouteScreen(
         showSaveDialog -> DialogState.Save
         timeDialogIndex != null -> DialogState.Time(timeDialogIndex!!)
         else -> null
+    }
+
+    fun sendServiceIntent(action: String) {
+        val intent = Intent(context, TianYinWallpaperService::class.java).apply {
+            this.action = action
+        }
+        context.startService(intent)
     }
 
     val density = LocalDensity.current
@@ -490,8 +520,8 @@ fun MainRouteScreen(
         }
     }
 
-    LaunchedEffect(selectionMode, fullScreenPreviewModel) {
-        onBottomBarVisibleChange(!selectionMode && fullScreenPreviewModel == null)
+    LaunchedEffect(selectionMode, fullScreenPreviewModel, showLivePreview) {
+        onBottomBarVisibleChange(!selectionMode && fullScreenPreviewModel == null && !showLivePreview)
     }
 
     DisposableEffect(Unit) {
@@ -817,7 +847,8 @@ fun MainRouteScreen(
                 backdrop = liquidBackdrop,
                 onAdd = { showWallpaperTypeDialog = true },
                 onApply = { applyWallpapers() },
-                onMoreClick = { showMoreMenu = true }
+                onMoreClick = { showMoreMenu = true },
+                onPreview = { showLivePreview = true }
             )
 
             // 下拉菜单作为顶层 Overlay 以确保坐标采样正确 (避免 Popup 窗口偏移问题)
@@ -1052,7 +1083,7 @@ fun MainRouteScreen(
                                             Modifier
                                                 .weight(1f)
                                                 .clip(Capsule())
-                                                .background(accentColor)
+                                                .background(accentColor.copy(alpha = 0.75f))
                                                 .clickable { actionDialogIndex = null }
                                                 .height(48.dp)
                                                 .padding(horizontal = 16f.dp),
@@ -1156,7 +1187,7 @@ fun MainRouteScreen(
                                         Modifier
                                             .weight(1f)
                                             .clip(Capsule())
-                                            .background(Color(0xFFFF4D4F))
+                                            .background(Color(0xFFFF4D4F).copy(alpha = 0.75f))
                                             .clickable {
                                                 val indexes = selectedPositions.toMutableList()
                                                 Collections.sort(indexes, Collections.reverseOrder())
@@ -1254,7 +1285,7 @@ fun MainRouteScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(horizontal = 20.dp),
-                                        cursorBrush = SolidColor(accentColor),
+                                        cursorBrush = SolidColor(accentColor.copy(alpha = 0.75f)),
                                         decorationBox = { innerTextField ->
                                             if (groupName.isEmpty()) {
                                                 Text(
@@ -1278,7 +1309,7 @@ fun MainRouteScreen(
                                         Modifier
                                             .weight(1f)
                                             .clip(Capsule())
-                                            .background(accentColor)
+                                            .background(accentColor.copy(alpha = 0.75f))
                                             .clickable {
                                                 if (groupName.isNotBlank()) {
                                                     checkAndSaveGroup()
@@ -1340,7 +1371,7 @@ fun MainRouteScreen(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(horizontal = 20.dp),
-                                            cursorBrush = SolidColor(accentColor),
+                                            cursorBrush = SolidColor(accentColor.copy(alpha = 0.75f)),
                                             decorationBox = { innerTextField ->
                                                 if (startText.isEmpty()) {
                                                     Text(
@@ -1370,7 +1401,7 @@ fun MainRouteScreen(
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .padding(horizontal = 20.dp),
-                                            cursorBrush = SolidColor(accentColor),
+                                            cursorBrush = SolidColor(accentColor.copy(alpha = 0.75f)),
                                             decorationBox = { innerTextField ->
                                                 if (endText.isEmpty()) {
                                                     Text(
@@ -1389,7 +1420,7 @@ fun MainRouteScreen(
                                     Row(
                                         Modifier
                                             .clip(Capsule())
-                                            .background(accentColor)
+                                            .background(accentColor.copy(alpha = 0.75f))
                                             .clickable {
                                                 startTime = parseAndValidateTime(startText, "开始时间") ?: return@clickable
                                                 endTime = parseAndValidateTime(endText, "结束时间") ?: run {
@@ -1523,9 +1554,9 @@ fun MainRouteScreen(
                                 modifier = Modifier.height(44.dp)
                             ) {
                                 BasicText(
-                                    "应用壁纸",
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Medium)
+                                    "应用此壁纸",
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    style = TextStyle(Color.White, 16.sp, fontWeight = FontWeight.Medium)
                                 )
                             }
                         } else {
@@ -1534,16 +1565,16 @@ fun MainRouteScreen(
                                     .height(44.dp)
                                     .clickable { applySingleWallpaper(model) },
                                 shape = Capsule(),
-                                color = accentColor
+                                color = accentColor.copy(alpha = 0.75f)
                             ) {
                                 Box(
                                     contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                    modifier = Modifier.padding(horizontal = 32.dp)
                                 ) {
                                     Text(
-                                        text = "应用壁纸",
-                                        color = textColor,
-                                        fontSize = 15.sp,
+                                        text = "应用此壁纸",
+                                        color = Color.White,
+                                        fontSize = 16.sp,
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
@@ -1552,6 +1583,25 @@ fun MainRouteScreen(
                     }
                 }
             }
+        }
+
+        // Live preview overlay
+        AnimatedVisibility(
+            visible = showLivePreview,
+            enter = fadeIn() + scaleIn(initialScale = 0.8f),
+            exit = fadeOut() + scaleOut(targetScale = 0.8f)
+        ) {
+            val wallpaperList = remember(showLivePreview) {
+                val listData = FileUtil.loadData(context, FileUtil.wallpaperPath)
+                JSON.parseArray(listData, TianYinWallpaperModel::class.java) ?: emptyList()
+            }
+            LiveSyncPreview(
+                wallpaperList = wallpaperList,
+                currentIndex = liveSyncIndex,
+                onClose = { showLivePreview = false },
+                onPrev = { sendServiceIntent(TianYinWallpaperService.ACTION_PREV_WALLPAPER) },
+                onNext = { sendServiceIntent(TianYinWallpaperService.ACTION_NEXT_WALLPAPER) }
+            )
         }
     }
 }
@@ -1563,7 +1613,8 @@ private fun MainTopBar(
     backdrop: LayerBackdrop?,
     onAdd: () -> Unit,
     onApply: () -> Unit,
-    onMoreClick: () -> Unit
+    onMoreClick: () -> Unit,
+    onPreview: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -1608,6 +1659,34 @@ private fun MainTopBar(
         }
 
         Spacer(modifier = Modifier.weight(1f))
+
+        // Preview Button
+        if (enableLiquidGlass && backdrop != null) {
+            LiquidButton(
+                onClick = onPreview,
+                backdrop = backdrop,
+                modifier = Modifier.height(48.dp),
+                surfaceColor = adaptiveSurfaceColor
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp).fillMaxHeight()) {
+                    BasicText(text = "预览", style = TextStyle(textColor, 15.sp))
+                }
+            }
+        } else {
+            Surface(
+                modifier = Modifier.height(48.dp).clickable(onClick = onPreview),
+                shape = Capsule(),
+                color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF)
+                )
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp).fillMaxHeight()) {
+                    Text(text = "预览", color = textColor, fontSize = 15.sp)
+                }
+            }
+        }
 
         // Apply Button
         if (enableLiquidGlass && backdrop != null) {
@@ -1661,6 +1740,116 @@ private fun MainTopBar(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(text = "…", color = textColor, fontSize = 20.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveSyncPreview(
+    wallpaperList: List<TianYinWallpaperModel>,
+    currentIndex: Int,
+    onClose: () -> Unit,
+    onPrev: () -> Unit,
+    onNext: () -> Unit
+) {
+    val currentModel = if (currentIndex in wallpaperList.indices) wallpaperList[currentIndex] else null
+
+    val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+    val previewBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        if (currentModel != null) {
+            Box(modifier = Modifier.fillMaxSize().let { if (enableLiquidGlass && previewBackdrop != null) it.layerBackdrop(previewBackdrop) else it }) {
+                WallpaperThumbnail(
+                    model = currentModel,
+                    modifier = Modifier.fillMaxSize(),
+                    useClip = false
+                )
+            }
+        } else {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无播放中的壁纸", color = Color.White)
+            }
+        }
+
+        // Close detection layer
+        Box(modifier = Modifier.fillMaxSize().clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null
+        ) { onClose() })
+
+        // Bottom Controls
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp, start = 12.dp, end = 12.dp)
+                .fillMaxWidth()
+                .pointerInput(Unit) { detectTapGestures { } }, // consume taps
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val controlColor = Color.Black.copy(0.4f)
+            val textColor = Color.White
+
+            // Previous Button
+            if (enableLiquidGlass && previewBackdrop != null) {
+                LiquidButton(
+                    onClick = onPrev,
+                    backdrop = previewBackdrop,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    surfaceColor = controlColor
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        BasicText(text = "上一张", style = TextStyle(textColor, 16.sp, fontWeight = FontWeight.Medium))
+                    }
+                }
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clickable { onPrev() },
+                    shape = Capsule(),
+                    color = controlColor,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(text = "上一张", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+
+            // Next Button
+            if (enableLiquidGlass && previewBackdrop != null) {
+                LiquidButton(
+                    onClick = onNext,
+                    backdrop = previewBackdrop,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    surfaceColor = controlColor
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        BasicText(text = "下一张", style = TextStyle(textColor, 16.sp, fontWeight = FontWeight.Medium))
+                    }
+                }
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clickable { onNext() },
+                    shape = Capsule(),
+                    color = controlColor,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(text = "下一张", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    }
                 }
             }
         }
@@ -1810,83 +1999,82 @@ private fun WallpaperThumbnail(
 ) {
     val context = LocalContext.current
     val dialogShape = RoundedRectangle(35f.dp)
+
     if (model.type == 1 && !model.videoUri.isNullOrEmpty()) {
         AndroidView(
             factory = { ctx ->
                 TextureView(ctx).apply {
-                    val textureView = this
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
+                    // 初始化播放器并存入 tag
+                    val player = MediaPlayer().apply {
+                        setVolume(0f, 0f)
+                        isLooping = true
+                    }
+                    val holder = VideoPlayerHolder(player, model.videoUri)
+                    tag = holder
+
+                    // 设置 SurfaceTextureListener
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                        private var mediaPlayer: MediaPlayer? = null
-
-                        private fun updateMatrix(mp: MediaPlayer, view: TextureView) {
-                            val vWidth = mp.videoWidth.toFloat()
-                            val vHeight = mp.videoHeight.toFloat()
-                            val viewWidth = view.width.toFloat()
-                            val viewHeight = view.height.toFloat()
-
-                            if (vWidth > 0 && vHeight > 0 && viewWidth > 0 && viewHeight > 0) {
-                                val matrix = Matrix()
-                                val videoRatio = vWidth / vHeight
-                                val viewRatio = viewWidth / viewHeight
-
-                                var scaleX = 1f
-                                var scaleY = 1f
-
-                                if (videoRatio > viewRatio) {
-                                    scaleX = videoRatio / viewRatio
-                                } else {
-                                    scaleY = viewRatio / videoRatio
-                                }
-
-                                matrix.setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
-                                view.setTransform(matrix)
-                            }
-                        }
-
-                        override fun onSurfaceTextureAvailable(
-                            surface: SurfaceTexture,
-                            width: Int,
-                            height: Int
-                        ) {
+                        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                            val holder = tag as? VideoPlayerHolder ?: return
+                            val uri = holder.uri ?: return
                             try {
-                                mediaPlayer = MediaPlayer().apply {
-                                    setSurface(Surface(surface))
-                                    setDataSource(ctx, Uri.parse(model.videoUri))
-                                    isLooping = true
-                                    setVolume(0f, 0f)
-                                    setOnPreparedListener { mp ->
-                                        updateMatrix(mp, textureView)
-                                        mp.start()
-                                    }
-                                    prepareAsync()
+                                holder.player.setSurface(Surface(surface))
+                                holder.player.reset()
+                                holder.player.setDataSource(ctx, Uri.parse(uri))
+                                holder.player.setOnPreparedListener { mp ->
+                                    updateMatrix(mp, this@apply)
+                                    mp.start()
                                 }
+                                holder.player.prepareAsync()
                             } catch (e: Exception) {
                                 e.printStackTrace()
                             }
                         }
 
-                        override fun onSurfaceTextureSizeChanged(
-                            surface: SurfaceTexture,
-                            width: Int,
-                            height: Int
-                        ) {
-                            mediaPlayer?.let { updateMatrix(it, textureView) }
+                        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                            (tag as? VideoPlayerHolder)?.player?.let { updateMatrix(it, this@apply) }
                         }
 
                         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                            mediaPlayer?.stop()
-                            mediaPlayer?.release()
-                            mediaPlayer = null
+                            (tag as? VideoPlayerHolder)?.player?.let {
+                                it.pause()
+                                it.stop()
+                            }
                             return true
                         }
 
                         override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
                     }
                 }
+            },
+            update = { textureView ->
+                // 当 model 变化时，更新 holder 中的 URI 并重新准备（如果 surface 已可用）
+                val holder = textureView.tag as? VideoPlayerHolder ?: return@AndroidView
+                val newUri = model.videoUri ?: return@AndroidView
+                holder.uri = newUri
+
+                if (textureView.isAvailable) {
+                    try {
+                        holder.player.reset()
+                        holder.player.setDataSource(context, Uri.parse(newUri))
+                        holder.player.setSurface(Surface(textureView.surfaceTexture))
+                        holder.player.setOnPreparedListener { mp ->
+                            updateMatrix(mp, textureView)
+                            mp.start()
+                        }
+                        holder.player.prepareAsync()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            },
+            onRelease = { textureView ->
+                (textureView.tag as? VideoPlayerHolder)?.player?.release()
+                textureView.tag = null
             },
             modifier = if (useClip) modifier.clip(dialogShape) else modifier
         )
@@ -1912,3 +2100,33 @@ private fun WallpaperThumbnail(
         }
     }
 }
+
+private fun updateMatrix(mp: MediaPlayer, view: TextureView) {
+    val vWidth = mp.videoWidth.toFloat()
+    val vHeight = mp.videoHeight.toFloat()
+    val viewWidth = view.width.toFloat()
+    val viewHeight = view.height.toFloat()
+
+    if (vWidth > 0 && vHeight > 0 && viewWidth > 0 && viewHeight > 0) {
+        val matrix = Matrix()
+        val videoRatio = vWidth / vHeight
+        val viewRatio = viewWidth / viewHeight
+
+        var scaleX = 1f
+        var scaleY = 1f
+
+        if (videoRatio > viewRatio) {
+            scaleX = videoRatio / viewRatio
+        } else {
+            scaleY = viewRatio / videoRatio
+        }
+
+        matrix.setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
+        view.setTransform(matrix)
+    }
+}
+
+private data class VideoPlayerHolder(
+    val player: MediaPlayer,
+    var uri: String?
+)

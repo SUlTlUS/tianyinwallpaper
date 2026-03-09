@@ -1,10 +1,10 @@
 package com.zeaze.tianyinwallpaper.ui.setting
 
+import java.util.Locale
 import android.content.Context
 import android.content.pm.PackageManager
 import android.text.TextUtils
 import android.widget.Toast
-import java.util.Locale
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
@@ -12,7 +12,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -23,7 +22,6 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,36 +33,23 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.shapes.Capsule
@@ -80,14 +65,8 @@ import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.MainActivity
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
+import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
-import kotlinx.coroutines.launch
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.LocalOverscrollConfiguration
-import androidx.compose.foundation.pager.PagerDefaults
-import androidx.compose.foundation.pager.PagerSnapDistance
-import androidx.compose.foundation.pager.VerticalPager
-import androidx.compose.foundation.pager.rememberPagerState
 
 private sealed class SettingsDialogState {
     object MinTime : SettingsDialogState()
@@ -109,7 +88,6 @@ fun SettingRouteScreen(
 
     var rand by remember { mutableStateOf(pref.getBoolean("rand", false)) }
     var pageChange by remember { mutableStateOf(pref.getBoolean("pageChange", false)) }
-    var needBackgroundPlay by remember { mutableStateOf(pref.getBoolean("needBackgroundPlay", false)) }
     var wallpaperScroll by remember { mutableStateOf(pref.getBoolean("wallpaperScroll", false)) }
     var minTime by remember { mutableStateOf(pref.getInt("minTime", 1)) }
     var themeMode by remember { mutableStateOf(pref.getInt(MainActivity.PREF_THEME_MODE, MainActivity.THEME_MODE_FOLLOW_SYSTEM)) }
@@ -133,7 +111,6 @@ fun SettingRouteScreen(
         )
     }
     var showMinTimeDialog by remember { mutableStateOf(false) }
-    var minTimeInput by remember { mutableStateOf(minTime.toString()) }
     var tempMinTime by remember { mutableStateOf(minTime) }
     var showAutoModeDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -211,17 +188,21 @@ fun SettingRouteScreen(
                         rand = it
                         editor.putBoolean("rand", it).apply()
                     }
-                    SettingCheckItem("进入桌面切换壁纸", pageChange, contentColor, backgroundColor) {
+                    SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, backgroundColor) {
                         pageChange = it
                         editor.putBoolean("pageChange", it).apply()
-                    }
-                    SettingCheckItem("后台播放动态壁纸", needBackgroundPlay, contentColor, backgroundColor) {
-                        needBackgroundPlay = it
-                        editor.putBoolean("needBackgroundPlay", it).apply()
+                        if (it && wallpaperScroll) {
+                            wallpaperScroll = false
+                            editor.putBoolean("wallpaperScroll", false).apply()
+                        }
                     }
                     SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, backgroundColor) {
                         wallpaperScroll = it
                         editor.putBoolean("wallpaperScroll", it).apply()
+                        if (it && pageChange) {
+                            pageChange = false
+                            editor.putBoolean("pageChange", false).apply()
+                        }
                     }
                 }
 
@@ -921,114 +902,3 @@ private const val DEFAULT_AUTO_SWITCH_INTERVAL_SECONDS = 3600L
 private const val DEFAULT_AUTO_SWITCH_TIME_POINTS = "12:00"
 private const val AUTO_SWITCH_MODE_NONE = 0
 private val AUTO_SWITCH_MODE_ITEMS = arrayOf("手动切换", "按固定时间间隔切换", "按每日时间点切换")
-
-@OptIn(ExperimentalAnimationApi::class, ExperimentalFoundationApi::class)
-@Composable
-private fun WheelPicker(
-    count: Int,
-    initialIndex: Int,
-    onItemSelected: (Int) -> Unit,
-    contentColor: Color,
-    label: String,
-    modifier: Modifier = Modifier
-) {
-    val haptic = LocalHapticFeedback.current
-    val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { count })
-    val coroutineScope = rememberCoroutineScope()
-    val overscrollOffset = remember { Animatable(0f) }
-
-    LaunchedEffect(pagerState.currentPage) {
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        onItemSelected(pagerState.currentPage)
-    }
-
-    val nestedScrollConnection = remember {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource
-            ): Offset {
-                // 当 Pager 无法消耗位移时（即到达边界），我们手动处理位移产生回弹感
-                if (available.y != 0f) {
-                    val isAtTop = pagerState.currentPage == 0 && available.y > 0
-                    val isAtBottom = pagerState.currentPage == count - 1 && available.y < 0
-                    if (isAtTop || isAtBottom) {
-                        coroutineScope.launch {
-                            // 减小系数以产生拉力感
-                            overscrollOffset.snapTo(overscrollOffset.value + available.y * 0.4f)
-                        }
-                        return Offset(0f, available.y)
-                    }
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                // 如果目前有回弹偏移，停止任何惯性滚动，直接准备回弹
-                if (Math.abs(overscrollOffset.value) > 0.1f) {
-                    return available
-                }
-                return Velocity.Zero
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                overscrollOffset.animateTo(
-                    0f,
-                    spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioMediumBouncy)
-                )
-                return super.onPostFling(consumed, available)
-            }
-        }
-    }
-
-    Row(
-        modifier = modifier
-            .nestedScroll(nestedScrollConnection)
-            .graphicsLayer {
-                translationY = overscrollOffset.value
-                val scale = 1f - (Math.abs(overscrollOffset.value) / 1000f).coerceAtMost(0.05f)
-                scaleX = scale
-                scaleY = scale
-            },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        Box(modifier = Modifier.weight(1f)) {
-            // 彻底禁用 Pager 的原生越界效果，防止其吞掉滚动增量
-            CompositionLocalProvider(
-                LocalOverscrollConfiguration provides null
-            ) {
-                VerticalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 60.dp),
-                    flingBehavior = PagerDefaults.flingBehavior(
-                        state = pagerState,
-                        pagerSnapDistance = PagerSnapDistance.atMost(count)
-                    )
-                ) { page ->
-                    val isSelected = pagerState.currentPage == page
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (page < 10) "0$page" else "$page",
-                            style = TextStyle(
-                                color = if (isSelected) contentColor else contentColor.copy(alpha = 0.3f),
-                                fontSize = if (isSelected) 22.sp else 18.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        )
-                    }
-                }
-            }
-        }
-        Text(
-            text = label,
-            style = TextStyle(color = contentColor, fontSize = 14.sp),
-            modifier = Modifier.padding(start = 4.dp, end = 8.dp)
-        )
-    }
-}

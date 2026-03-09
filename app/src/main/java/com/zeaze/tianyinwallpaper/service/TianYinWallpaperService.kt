@@ -1,5 +1,6 @@
 package com.zeaze.tianyinwallpaper.service
 
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -30,7 +31,9 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.Calendar
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.roundToInt
 
 class TianYinWallpaperService : WallpaperService() {
     override fun onCreateEngine(): Engine {
@@ -42,6 +45,8 @@ class TianYinWallpaperService : WallpaperService() {
         private var eglThread: EglThread? = null
         private var list: List<TianYinWallpaperModel>? = null
         private var index = -1
+        private var shuffledIndices = mutableListOf<Int>()
+        private var shuffledPointer = -1
         private var currentXOffset = 0.5f
         private val initialLoadCompleted = AtomicBoolean(false)
         private val updateSurface = AtomicBoolean(false)
@@ -49,6 +54,12 @@ class TianYinWallpaperService : WallpaperService() {
 
         private var pref: SharedPreferences? = null
         private var wallpaperScrollEnabled = true
+        private var pageChangeEnabled = false
+        private var lastXOffset = -1f
+
+        init {
+            activeEngine = this
+        }
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
@@ -56,10 +67,17 @@ class TianYinWallpaperService : WallpaperService() {
 
             pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE)
             wallpaperScrollEnabled = pref?.getBoolean("wallpaperScroll", true) == true
+            pageChangeEnabled = pref?.getBoolean("pageChange", false) == true
+
             pref?.registerOnSharedPreferenceChangeListener { sharedPreferences, key ->
-                if ("wallpaperScroll" == key) {
-                    wallpaperScrollEnabled = sharedPreferences.getBoolean(key, true)
-                    eglThread?.requestRender()
+                when (key) {
+                    "wallpaperScroll" -> {
+                        wallpaperScrollEnabled = sharedPreferences.getBoolean(key, true)
+                        eglThread?.requestRender()
+                    }
+                    "pageChange" -> {
+                        pageChangeEnabled = sharedPreferences.getBoolean(key, false)
+                    }
                 }
             }
 
@@ -90,12 +108,28 @@ class TianYinWallpaperService : WallpaperService() {
                     mediaPlayer!!.start()
                 }
                 eglThread?.requestRender()
+
+                try {
+                    val s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
+                    val newList = JSON.parseArray(s, TianYinWallpaperModel::class.java)
+                    if (newList != list) {
+                        list = newList
+                        shuffledIndices.clear()
+                        shuffledPointer = -1
+                    }
+                } catch (_: Exception) {}
+
+                if (checkAutoSwitch()) {
+                    nextWallpaper()
+                }
             } else {
                 if (mediaPlayer != null && mediaPlayer!!.isPlaying) {
                     mediaPlayer!!.pause()
                 }
                 if (initialLoadCompleted.get()) {
-                    Handler(mainLooper).postDelayed({ nextWallpaper() }, 100)
+                    if (checkAutoSwitch()) {
+                        Handler(mainLooper).postDelayed({ nextWallpaper() }, 100)
+                    }
                 }
             }
         }
@@ -110,12 +144,191 @@ class TianYinWallpaperService : WallpaperService() {
         ) {
             currentXOffset = if (wallpaperScrollEnabled) xOffset else 0.5f
             eglThread?.requestRender()
+
+            if (pageChangeEnabled && xOffsetStep > 0 && lastXOffset != -1f) {
+                val oldPage = (lastXOffset / xOffsetStep).roundToInt()
+                val newPage = (xOffset / xOffsetStep).roundToInt()
+                if (oldPage != newPage) {
+                    nextWallpaper()
+                }
+            }
+            lastXOffset = xOffset
+        }
+
+        private fun checkAutoSwitch(): Boolean {
+            val list = this.list ?: return false
+            if (list.isEmpty()) return false
+
+            val pref = this.pref ?: return false
+            val mode = pref.getInt(PREF_AUTO_SWITCH_MODE, 0)
+
+            val now = System.currentTimeMillis()
+            val lastSwitchAt = pref.getLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
+
+            val calendar = Calendar.getInstance()
+            val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+
+            val conditionalIndex = list.indexOfFirst {
+                it.startTime != -1 && it.endTime != -1 &&
+                currentMinutes >= it.startTime && currentMinutes < it.endTime
+            }
+
+            if (conditionalIndex != -1) {
+                if (index != conditionalIndex) {
+                    index = conditionalIndex
+                    eglThread?.post { loadContent() }
+                    pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, now).apply()
+                }
+                return false
+            }
+
+            if (mode == 0) {
+                // If swipe-to-switch is enabled, we don't switch on visibility change to avoid double switching or confusion
+                return !pageChangeEnabled
+            }
+
+            var shouldSwitch = false
+            when (mode) {
+                1 -> {
+                    var intervalSeconds = pref.getLong(PREF_AUTO_SWITCH_INTERVAL_SECONDS, -1L)
+                    if (intervalSeconds == -1L) {
+                        intervalSeconds = pref.getLong("autoSwitchIntervalMinutes", 60L) * 60L
+                    }
+                    if (lastSwitchAt == 0L || now - lastSwitchAt >= intervalSeconds * 1000L) {
+                        shouldSwitch = true
+                    }
+                }
+                2 -> {
+                    val timePointsStr = pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, "") ?: ""
+                    val timePoints = timePointsStr.split(",").filter { it.isNotBlank() }
+                    if (timePoints.isNotEmpty()) {
+                        val lastSwitchCalendar = Calendar.getInstance().apply { timeInMillis = lastSwitchAt }
+                        val lastSwitchDay = lastSwitchCalendar.get(Calendar.DAY_OF_YEAR)
+                        val lastSwitchYear = lastSwitchCalendar.get(Calendar.YEAR)
+                        val lastSwitchMinutes = lastSwitchCalendar.get(Calendar.HOUR_OF_DAY) * 60 + lastSwitchCalendar.get(Calendar.MINUTE)
+
+                        val currentDay = calendar.get(Calendar.DAY_OF_YEAR)
+                        val currentYear = calendar.get(Calendar.YEAR)
+
+                        for (point in timePoints) {
+                            try {
+                                val parts = point.split(":")
+                                if (parts.size == 2) {
+                                    val pointMinutes = parts[0].trim().toInt() * 60 + parts[1].trim().toInt()
+                                    if (currentYear > lastSwitchYear || currentDay > lastSwitchDay) {
+                                        if (currentMinutes >= pointMinutes) {
+                                            shouldSwitch = true
+                                            break
+                                        }
+                                    } else {
+                                        if (currentMinutes >= pointMinutes && lastSwitchMinutes < pointMinutes) {
+                                            shouldSwitch = true
+                                            break
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (shouldSwitch) {
+                pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, now).apply()
+            }
+            return shouldSwitch
+        }
+
+        fun next() {
+            nextWallpaper()
+        }
+
+        fun prev() {
+            prevWallpaper()
         }
 
         private fun nextWallpaper() {
-            if (list.isNullOrEmpty()) return
-            index = (index + 1) % list!!.size
+            val list = this.list ?: return
+            if (list.isEmpty()) return
+
+            val calendar = Calendar.getInstance()
+            val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+            val isRand = pref?.getBoolean("rand", false) == true
+
+            if (isRand) {
+                if (shuffledIndices.size != list.size) {
+                    shuffledIndices = list.indices.toMutableList()
+                    shuffledIndices.shuffle()
+                    shuffledPointer = -1
+                }
+
+                var found = -1
+                var attempts = 0
+                while (attempts < list.size) {
+                    shuffledPointer++
+                    if (shuffledPointer >= shuffledIndices.size) {
+                        shuffledIndices.shuffle()
+                        shuffledPointer = 0
+                    }
+
+                    val nextIdx = shuffledIndices[shuffledPointer]
+                    val m = list[nextIdx]
+                    if (m.startTime == -1 || (currentMinutes >= m.startTime && currentMinutes < m.endTime)) {
+                        found = nextIdx
+                        break
+                    }
+                    attempts++
+                }
+                index = if (found != -1) found else (index + 1) % list.size
+            } else {
+                var nextIndex = (index + 1) % list.size
+                var count = 0
+                while (count < list.size) {
+                    val m = list[nextIndex]
+                    if (m.startTime == -1 || (currentMinutes >= m.startTime && currentMinutes < m.endTime)) {
+                        break
+                    }
+                    nextIndex = (nextIndex + 1) % list.size
+                    count++
+                }
+                index = nextIndex
+            }
             eglThread?.post { loadContent() }
+
+            // Save current index to prefs so activity can sync
+            pref?.edit()?.putInt(PREF_CURRENT_INDEX, index)?.apply()
+        }
+
+        fun updateIndex(newIndex: Int) {
+            if (newIndex in 0 until (list?.size ?: 0)) {
+                index = newIndex
+                eglThread?.post { loadContent() }
+            }
+        }
+
+        private fun prevWallpaper() {
+            val list = this.list ?: return
+            if (list.isEmpty()) return
+
+            val calendar = Calendar.getInstance()
+            val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+
+            var nextIndex = if (index <= 0) list.size - 1 else index - 1
+            var count = 0
+            while (count < list.size) {
+                val m = list[nextIndex]
+                if (m.startTime == -1 || (currentMinutes >= m.startTime && currentMinutes < m.endTime)) {
+                    break
+                }
+                nextIndex = if (nextIndex <= 0) list.size - 1 else nextIndex - 1
+                count++
+            }
+            index = nextIndex
+            eglThread?.post { loadContent() }
+
+            // Save current index to prefs so activity can sync
+            pref?.edit()?.putInt(PREF_CURRENT_INDEX, index)?.apply()
         }
 
         private fun loadContent() {
@@ -164,7 +377,7 @@ class TianYinWallpaperService : WallpaperService() {
                     }
                 } else {
                     mediaPlayer!!.setOnSeekCompleteListener(null)
-                    mediaPlayer!!.setOnCompletionListener { Handler(mainLooper).post { nextWallpaper() } }
+                    mediaPlayer!!.setOnCompletionListener(null)
                 }
 
                 mediaPlayer!!.setOnErrorListener { _, what, extra ->
@@ -239,6 +452,7 @@ class TianYinWallpaperService : WallpaperService() {
 
         override fun onDestroy() {
             super.onDestroy()
+            if (activeEngine == this) activeEngine = null
             mediaPlayer?.release()
             mediaPlayer = null
             eglThread?.finish()
@@ -463,7 +677,26 @@ class TianYinWallpaperService : WallpaperService() {
         }
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_PREV_WALLPAPER -> activeEngine?.prev()
+            ACTION_NEXT_WALLPAPER -> activeEngine?.next()
+            ACTION_UPDATE_INDEX -> {
+                val idx = intent.getIntExtra(EXTRA_INDEX, -1)
+                if (idx != -1) activeEngine?.updateIndex(idx)
+            }
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     companion object {
+        const val ACTION_PREV_WALLPAPER = "com.zeaze.tianyinwallpaper.PREV"
+        const val ACTION_NEXT_WALLPAPER = "com.zeaze.tianyinwallpaper.NEXT"
+        const val ACTION_UPDATE_INDEX = "com.zeaze.tianyinwallpaper.UPDATE_INDEX"
+        const val EXTRA_INDEX = "extra_index"
+        const val PREF_CURRENT_INDEX = "current_wallpaper_index"
+
+        private var activeEngine: TianYinSolaEngine? = null
         const val PREF_AUTO_SWITCH_MODE = "autoSwitchMode"
         const val PREF_AUTO_SWITCH_INTERVAL_SECONDS = "autoSwitchIntervalSeconds"
         const val PREF_AUTO_SWITCH_TIME_POINTS = "autoSwitchTimePoints"
