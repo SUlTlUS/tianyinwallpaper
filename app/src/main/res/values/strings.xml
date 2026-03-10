@@ -21,6 +21,7 @@
     <string name="save_list_title">列表</string>
     <string name="main_tab_wallpaper">壁纸</string>
     <string name="main_tab_groups">壁纸组</string>
+    <string name="main_tab_raster">光栅</string>
     <string name="main_tab_settings">设置</string>
     <string name="main_select_wallpaper_type_tip">请选择壁纸类型</string>
     <string name="main_wallpaper_type_static">静态</string>

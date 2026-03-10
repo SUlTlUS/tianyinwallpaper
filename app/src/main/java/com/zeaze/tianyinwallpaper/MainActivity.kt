@@ -13,18 +13,22 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
@@ -35,14 +39,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.Modifier
 import kotlin.math.abs
 import kotlin.math.sign
 import androidx.core.app.ActivityCompat
@@ -66,20 +72,29 @@ import com.zeaze.tianyinwallpaper.ui.about.AboutRouteScreen
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
+import com.zeaze.tianyinwallpaper.ui.raster.RasterRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
 import kotlinx.coroutines.launch
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTab
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabs
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.effects.blur
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
 import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
 import com.kyant.shapes.RoundedRectangle
+import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
+import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
+import com.zeaze.tianyinwallpaper.ui.main.MainTopBar
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
+import com.kyant.shapes.Capsule
 
 class MainActivity : BaseActivity() {
     private val tabItems: List<Pair<String, Int>> = listOf(
         ROUTE_MAIN to R.string.main_tab_wallpaper,
-        ROUTE_ABOUT to R.string.main_tab_groups
+        ROUTE_RASTER to R.string.main_tab_raster
     )
     private var showBottomBar by mutableStateOf(true)
     private var pendingRoute by mutableStateOf<String?>(null)
@@ -89,6 +104,7 @@ class MainActivity : BaseActivity() {
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
         private const val ROUTE_MAIN = "main"
         private const val ROUTE_ABOUT = "about"
+        private const val ROUTE_RASTER = "raster"
         private const val ROUTE_SETTING = "setting"
         const val PREF_THEME_MODE = "themeMode"
         const val THEME_MODE_FOLLOW_SYSTEM = 0
@@ -183,7 +199,38 @@ class MainActivity : BaseActivity() {
                             onBottomBarVisibleChange = { setBottomBarVisible(it) }
                         )
                     }
-                    composable(ROUTE_SETTING) {
+                    composable(
+                        route = ROUTE_ABOUT,
+                        enterTransition = {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Left,
+                                animationSpec = tween(280)
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Right,
+                                animationSpec = tween(280)
+                            )
+                        }
+                    ) {
+                        AboutRouteScreen(onBack = { navController.popBackStack() })
+                    }
+                    composable(
+                        route = ROUTE_SETTING,
+                        enterTransition = {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Left,
+                                animationSpec = tween(280)
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Right,
+                                animationSpec = tween(280)
+                            )
+                        }
+                    ) {
                         SettingRouteScreen(
                             onThemeModeChange = { mode ->
                                 themeMode = mode
@@ -193,7 +240,138 @@ class MainActivity : BaseActivity() {
                 }
 
 
-                if (showBottomBar && currentRoute != ROUTE_SETTING) {
+                val currentPageRoute =
+                    if (currentRoute == ROUTE_MAIN) tabItems.getOrNull(pagerState.currentPage)?.first ?: ROUTE_MAIN
+                    else currentRoute
+                val isWallpaperPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_MAIN
+                val shouldShowTopBar = showBottomBar && currentRoute == ROUTE_MAIN
+                var showMoreMenu by remember { mutableStateOf(false) }
+
+                if (shouldShowTopBar) {
+                    val density = LocalDensity.current
+                    val statusBarTopPadding = remember(this) {
+                        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+                        if (id > 0) resources.getDimensionPixelSize(id) else 0
+                    }
+                    val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
+
+                    MainTopBar(
+                        statusBarTopPaddingDp = statusBarTopPaddingDp,
+                        enableLiquidGlass = enableLiquidGlass,
+                        backdrop = liquidBackdrop,
+                        onAdd = { RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit) },
+                        onApply = { RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_WALLPAPER, Unit) },
+                        onMoreClick = { showMoreMenu = true },
+                        onPreview = { RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit) },
+                        showAddButton = isWallpaperPage,
+                        showPreviewButton = isWallpaperPage,
+                        showApplyButton = isWallpaperPage,
+                        showMoreButton = true,
+                        keepSlotWhenHidden = true
+                    )
+
+                    if (showMoreMenu) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(currentPageRoute) {
+                                    detectTapGestures { showMoreMenu = false }
+                                }
+                        ) {
+                            val menuItems = if (isWallpaperPage) {
+                                listOf(
+                                    "保存" to {
+                                        showMoreMenu = false
+                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
+                                    },
+                                    "选择" to {
+                                        showMoreMenu = false
+                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_SELECT_MODE, Unit)
+                                    },
+                                    "设置" to {
+                                        showMoreMenu = false
+                                        openSettingPage()
+                                    },
+                                    "壁纸组" to {
+                                        showMoreMenu = false
+                                        openAboutPage()
+                                    }
+                                )
+                            } else {
+                                listOf(
+                                    "壁纸组" to {
+                                        showMoreMenu = false
+                                        openAboutPage()
+                                    },
+                                    "设置" to {
+                                        showMoreMenu = false
+                                        openSettingPage()
+                                    }
+                                )
+                            }
+
+                            val menuSurfaceColor = if (useDarkTheme) Color(0xCC1E1E1E) else Color(0xEFFFFFFF)
+                            Column(
+                                Modifier
+                                    .padding(top = statusBarTopPaddingDp + 66.dp, end = 12.dp)
+                                    .width(140.dp)
+                                    .align(Alignment.TopEnd)
+                                    .let {
+                                        if (enableLiquidGlass && liquidBackdrop != null) {
+                                            it.drawBackdrop(
+                                                backdrop = liquidBackdrop,
+                                                shape = { RoundedRectangle(20f.dp) },
+                                                effects = {
+                                                    vibrancy()
+                                                    blur(if (useDarkTheme) 8f.dp.toPx() else 16f.dp.toPx())
+                                                    lens(14f.dp.toPx(), 28f.dp.toPx(), depthEffect = true)
+                                                },
+                                                onDrawSurface = { drawRect(menuSurfaceColor) }
+                                            )
+                                        } else {
+                                            it
+                                                .clip(RoundedCornerShape(20.dp))
+                                                .background(menuSurfaceColor)
+                                                .border(
+                                                    1.dp,
+                                                    if (useDarkTheme) Color.White else Color.Black,
+                                                    RoundedCornerShape(20.dp)
+                                                )
+                                        }
+                                    }
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                menuItems.forEach { (label, onClick) ->
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .height(44.dp)
+                                            .clip(Capsule())
+                                            .clickable { onClick() }
+                                            .padding(horizontal = 16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        BasicText(
+                                            text = label,
+                                            style = TextStyle(
+                                                color = if (useDarkTheme) Color.White else Color.Black,
+                                                fontSize = 15.sp
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    if (showMoreMenu) {
+                        showMoreMenu = false
+                    }
+                }
+
+                 if (showBottomBar && currentRoute == ROUTE_MAIN) {
                     val selectedIndex = pagerState.currentPage
 
                     if (enableLiquidGlass && liquidBackdrop != null) {
@@ -289,7 +467,7 @@ class MainActivity : BaseActivity() {
                     onBottomBarVisibleChange = onBottomBarVisibleChange
                 )
 
-                ROUTE_ABOUT -> AboutRouteScreen()
+                ROUTE_RASTER -> RasterRouteScreen()
             }
         }
     }
@@ -308,6 +486,9 @@ class MainActivity : BaseActivity() {
         }
     }
 
+    fun openAboutPage() {
+        pendingRoute = ROUTE_ABOUT
+    }
 
     fun openSettingPage() {
         pendingRoute = ROUTE_SETTING
