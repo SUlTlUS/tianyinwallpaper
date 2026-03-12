@@ -1,5 +1,5 @@
 [versions]
-agp = "9.0.0"
+agp = "9.1.0"
 kotlin = "2.3.10"
 
 activity = "1.12.4"
@@ -27,6 +27,7 @@ okhttp = "4.9.3"
 backdrop = "1.0.0"
 xpopup = "2.6.6"
 multidex = "2.0.1"
+media3 = "1.5.1"  # ExoPlayer (Media3) 版本
 
 [libraries]
 # --- 第一部分合并过来的库 ---
@@ -52,6 +53,10 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
 xpopup = { group = "com.github.li-xiaojun", name = "XPopup", version.ref = "xpopup" }
 androidx-multidex = { group = "androidx.multidex", name = "multidex", version.ref = "multidex" }
+
+# ExoPlayer (Media3)
+androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
+androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 
 # --- 第二部分合并过来的库 ---
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core" }

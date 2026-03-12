@@ -115,6 +115,14 @@ class MainActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 机型判断：如果是手机则锁定为竖屏
+        val displayMetrics = resources.displayMetrics
+        val widthDp = displayMetrics.widthPixels / displayMetrics.density
+        if (widthDp < 600) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        
         setContent {
             MainActivityScreen()
         }
@@ -244,6 +252,7 @@ class MainActivity : BaseActivity() {
                     if (currentRoute == ROUTE_MAIN) tabItems.getOrNull(pagerState.currentPage)?.first ?: ROUTE_MAIN
                     else currentRoute
                 val isWallpaperPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_MAIN
+                val isRasterPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_RASTER
                 val shouldShowTopBar = showBottomBar && currentRoute == ROUTE_MAIN
                 var showMoreMenu by remember { mutableStateOf(false) }
 
@@ -259,11 +268,29 @@ class MainActivity : BaseActivity() {
                         statusBarTopPaddingDp = statusBarTopPaddingDp,
                         enableLiquidGlass = enableLiquidGlass,
                         backdrop = liquidBackdrop,
-                        onAdd = { RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit) },
-                        onApply = { RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_WALLPAPER, Unit) },
+                        onAdd = {
+                            if (isRasterPage) {
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_RASTER, Unit)
+                            } else {
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit)
+                            }
+                        },
+                        onApply = {
+                            if (isRasterPage) {
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_RASTER, Unit)
+                            } else {
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_WALLPAPER, Unit)
+                            }
+                        },
                         onMoreClick = { showMoreMenu = true },
-                        onPreview = { RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit) },
-                        showAddButton = isWallpaperPage,
+                        onPreview = {
+                            if (isRasterPage) {
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_RASTER, Unit)
+                            } else {
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit)
+                            }
+                        },
+                        showAddButton = isWallpaperPage || isRasterPage,
                         showPreviewButton = isWallpaperPage,
                         showApplyButton = isWallpaperPage,
                         showMoreButton = true,
@@ -297,12 +324,19 @@ class MainActivity : BaseActivity() {
                                         openAboutPage()
                                     }
                                 )
+                            } else if (isRasterPage) {
+                                listOf(
+                                    "选择" to {
+                                        showMoreMenu = false
+                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_RASTER_SELECT_MODE, Unit)
+                                    },
+                                    "设置" to {
+                                        showMoreMenu = false
+                                        openSettingPage()
+                                    }
+                                )
                             } else {
                                 listOf(
-                                    "壁纸组" to {
-                                        showMoreMenu = false
-                                        openAboutPage()
-                                    },
                                     "设置" to {
                                         showMoreMenu = false
                                         openSettingPage()
@@ -467,7 +501,7 @@ class MainActivity : BaseActivity() {
                     onBottomBarVisibleChange = onBottomBarVisibleChange
                 )
 
-                ROUTE_RASTER -> RasterRouteScreen()
+                ROUTE_RASTER -> RasterRouteScreen(onBottomBarVisibleChange = onBottomBarVisibleChange)
             }
         }
     }

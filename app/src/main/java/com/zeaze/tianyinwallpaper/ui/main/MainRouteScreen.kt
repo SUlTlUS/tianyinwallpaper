@@ -530,7 +530,25 @@ fun MainRouteScreen(
         selectionMode = false
         selectedPositions.clear()
     }
-    
+
+    fun removeWallpaperAt(index: Int) {
+        if (index !in wallpapers.indices) return
+        wallpapers.removeAt(index)
+
+        val updatedSelection = selectedPositions
+            .asSequence()
+            .filter { it != index }
+            .map { if (it > index) it - 1 else it }
+            .toList()
+        selectedPositions.clear()
+        selectedPositions.addAll(updatedSelection)
+
+        if (wallpapers.isEmpty()) {
+            exitSelectionMode()
+        }
+        saveCache()
+    }
+
     LaunchedEffect(selectionMode, fullScreenPreviewModel, showLivePreview) {
         onBottomBarVisibleChange(!selectionMode && fullScreenPreviewModel == null && !showLivePreview)
     }
@@ -849,6 +867,22 @@ fun MainRouteScreen(
                                     modifier = Modifier.padding(horizontal = 7.dp, vertical = 0.dp)
                                 )
                             }
+                        }
+
+                        if (selectionMode) {
+                            Text(
+                                text = "×",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(6.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFE53935))
+                                    .clickable { removeWallpaperAt(index) }
+                                    .padding(horizontal = 5.dp)
+                            )
                         }
                     }
                 }
@@ -1643,7 +1677,7 @@ fun MainTopBar(
                     surfaceColor = adaptiveSurfaceColor
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp).fillMaxHeight()) {
-                        BasicText(text = "预览", style = TextStyle(textColor, 15.sp))
+                        BasicText(text = "当前播放", style = TextStyle(textColor, 15.sp))
                     }
                 }
             } else {
@@ -1654,7 +1688,7 @@ fun MainTopBar(
                     border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp).fillMaxHeight()) {
-                        Text(text = "预览", color = textColor, fontSize = 15.sp)
+                        Text(text = "当前播放", color = textColor, fontSize = 15.sp)
                     }
                 }
             }

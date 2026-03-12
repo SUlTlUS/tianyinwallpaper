@@ -11,4 +11,9 @@ object RxConstants {
     const val RX_TRIGGER_GROUP_OPTIONS = 0x15
     const val RX_GROUPS_CHANGED = 0x16
     const val RX_TRIGGER_OVERWRITE_WALLPAPER_LIST = 0x17
+
+    const val RX_TRIGGER_ADD_RASTER = 0x20
+    const val RX_TRIGGER_APPLY_RASTER = 0x21
+    const val RX_TRIGGER_PREVIEW_RASTER = 0x22
+    const val RX_TRIGGER_ENTER_RASTER_SELECT_MODE = 0x23
 }

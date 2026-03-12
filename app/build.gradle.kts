@@ -94,6 +94,10 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.backdrop)
     implementation(libs.xpopup)
+    
+    // ExoPlayer (Media3) - 用于视频光栅的精确控制
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
 
     // 其他
     implementation(libs.androidx.multidex)
