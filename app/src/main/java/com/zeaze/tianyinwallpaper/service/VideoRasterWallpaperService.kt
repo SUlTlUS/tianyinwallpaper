@@ -4,44 +4,34 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.PixelFormat
-import android.graphics.SurfaceTexture
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.net.Uri
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
 import android.opengl.EGLDisplay
 import android.opengl.EGLSurface
-import android.opengl.GLES11Ext
 import android.opengl.GLES20
-import android.opengl.Matrix
 import android.os.Handler
 import android.os.HandlerThread
 import android.service.wallpaper.WallpaperService
 import android.util.Log
-import android.view.Surface
 import android.view.SurfaceHolder
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.SeekParameters
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.FloatBuffer
+import com.zeaze.tianyinwallpaper.service.raster.RVEffectPreCtrl
+import com.zeaze.tianyinwallpaper.service.raster.RasterVideoPreRenderParamBean
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.sqrt
 
-@UnstableApi
+/**
+ * 视频光栅壁纸服务
+ * 参考 vivo GLRasterWallpaperPrePlugin 架构重构
+ */
 class VideoRasterWallpaperService : WallpaperService() {
     private var activeEngine: VideoRasterEngine? = null
 
@@ -104,7 +94,6 @@ class VideoRasterWallpaperService : WallpaperService() {
         override fun onSensorChanged(event: SensorEvent?) {
             val e = event ?: return
             if (e.sensor.type != Sensor.TYPE_GYROSCOPE) return
-
             processGyroscopeEvent(e)
         }
 
@@ -137,7 +126,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
     }
 
-    inner class VideoRasterEngine : Engine(), SurfaceTexture.OnFrameAvailableListener {
+    inner class VideoRasterEngine : Engine() {
 
         init {
             activeEngine = this
@@ -153,16 +142,6 @@ class VideoRasterWallpaperService : WallpaperService() {
         private var currentPlaybackPosition = 0f
         private var lastUpdateTime = System.currentTimeMillis()
 
-        private var exoPlayer: ExoPlayer? = null
-        private var isPlayerPrepared = false
-        private var videoDurationUs = 0L
-        private var videoTime = 0L
-        private var videoDuration = 0L
-        private var videoFrameIndex = 0
-        private var videoFrameCount = 0
-        private var videoFrameRate = 30f
-        private var lastFrameIndex = -1
-
         private var eglHandler: Handler? = null
         private var isWaitingForSurface = false
 
@@ -172,6 +151,9 @@ class VideoRasterWallpaperService : WallpaperService() {
         private var pref: SharedPreferences? = null
 
         private var frameCount = 0L
+
+        // 新架构：使用 RVEffectPreCtrl
+        private var effectCtrl: RVEffectPreCtrl? = null
 
         fun reload() {
             loadActiveGroup()
@@ -184,6 +166,7 @@ class VideoRasterWallpaperService : WallpaperService() {
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
+            Log.w(TAG, "onCreate: VideoRasterEngine created")
             surfaceHolder.setFormat(PixelFormat.RGBX_8888)
 
             pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE)
@@ -210,7 +193,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             super.onVisibilityChanged(visible)
             isVisible = visible
-            Log.d(TAG, "onVisibilityChanged: visible=$visible, isPlayerPrepared=$isPlayerPrepared")
+            Log.d(TAG, "onVisibilityChanged: visible=$visible")
 
             if (visible) {
                 angleSensor.registerSensor(applicationContext)
@@ -224,7 +207,20 @@ class VideoRasterWallpaperService : WallpaperService() {
             super.onDestroy()
             if (activeEngine == this) activeEngine = null
             angleSensor.unregisterSensor()
-            releasePlayer()
+            
+            // 在 EGL 线程上同步释放资源
+            val latch = java.util.concurrent.CountDownLatch(1)
+            eglThread?.post {
+                try {
+                    effectCtrl?.release()
+                } catch (e: Exception) {
+                    Log.e(TAG, "release error: ${e.message}")
+                } finally {
+                    latch.countDown()
+                }
+            }
+            latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            
             eglThread?.finish()
         }
 
@@ -237,7 +233,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         }
 
         private fun doSensorChangeEvent(sensorValue: Float) {
-            if (!isPlayerPrepared) return
+            if (effectCtrl?.isPrepared() != true) return
 
             val maxAngle = Math.toRadians(45.0).toFloat()
             val normalizedAngle = sensorValue / maxAngle
@@ -251,144 +247,105 @@ class VideoRasterWallpaperService : WallpaperService() {
         }
 
         private fun loadActiveGroup() {
-            val activeId = pref?.getString(PREF_RASTER_ACTIVE_GROUP_ID, null) ?: return
+            val activeId = pref?.getString(PREF_RASTER_ACTIVE_GROUP_ID, null)
+            Log.w(TAG, "loadActiveGroup: activeId=$activeId")
+            if (activeId == null) {
+                Log.w(TAG, "loadActiveGroup: no active group id")
+                return
+            }
             val groupsJson = pref?.getString(PREF_RASTER_GROUPS, "[]") ?: "[]"
             val groups = try {
                 JSON.parseArray(groupsJson, RasterGroupModel::class.java) ?: emptyList()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.e(TAG, "loadActiveGroup: parse error: ${e.message}")
                 emptyList()
             }
             group = groups.firstOrNull { it.id == activeId } ?: groups.firstOrNull()
+            Log.w(TAG, "loadActiveGroup: loaded group=$group")
         }
 
         private fun loadContent() {
+            Log.w(TAG, "loadContent: group=$group, type=${group?.type}")
             val g = group ?: return
-            if (g.type != RasterGroupModel.TYPE_DYNAMIC) return
+            if (g.type != RasterGroupModel.TYPE_DYNAMIC) {
+                Log.w(TAG, "loadContent: not dynamic type, skipping")
+                return
+            }
 
-            releasePlayer()
-            prepareVideo(g)
-        }
+            // 初始化效果控制器
+            initEffectCtrl()
 
-        private fun prepareVideo(g: RasterGroupModel) {
+            // 加载视频
             val videoUri = g.videoUri
             if (videoUri.isNullOrEmpty()) {
                 Log.e(TAG, "Video URI is empty")
                 return
             }
 
-            val st = eglThread?.videoST
-            Log.d(TAG, "SurfaceTexture status: ${if (st == null) "NULL" else "READY"}")
+            // 创建渲染参数
+            val params = RasterVideoPreRenderParamBean(
+                videoPath = videoUri,
+                videoFrameRate = 30
+            )
 
-            if (st == null) {
-                Log.w(TAG, "SurfaceTexture not ready, deferring player initialization")
-                isWaitingForSurface = true
-                return
-            }
+            Log.w(TAG, "loadContent: calling loadSourceFromParams, videoUri=$videoUri")
+            effectCtrl?.loadSourceFromParams(params)
 
-            isWaitingForSurface = false
+            Log.w(TAG, "loadContent: completed")
+        }
 
-            try {
-                val surface = Surface(st)
+        private fun initEffectCtrl() {
+            Log.w(TAG, "initEffectCtrl: starting...")
+            effectCtrl?.release()
+            
+            effectCtrl = RVEffectPreCtrl(applicationContext, object : RVEffectPreCtrl.Callback {
+                override fun onPrepared(frameCount: Int, duration: Long) {
+                    Log.w(TAG, "EffectCtrl onPrepared: frames=$frameCount, duration=$duration")
+                    lastUpdateTime = System.currentTimeMillis()
+                    currentPlaybackPosition = 0f
+                    startPlaybackLoop()
+                }
 
-                exoPlayer = ExoPlayer.Builder(applicationContext)
-                    .build().apply {
-                        setVideoSurface(surface)
-                        volume = 0f
-                        setSeekParameters(SeekParameters.EXACT)
+                override fun onFrameReady() {
+                    updateSurface.set(true)
+                    eglThread?.requestRender()
+                }
 
-                        repeatMode = Player.REPEAT_MODE_ONE
-                        playWhenReady = false
-
-                        val mediaItem = MediaItem.fromUri(Uri.parse(videoUri))
-                        setMediaItem(mediaItem)
-
-                        addListener(object : Player.Listener {
-                            override fun onPlaybackStateChanged(playbackState: Int) {
-                                Log.d(TAG, "onPlaybackStateChanged: state=$playbackState")
-
-                                if (playbackState == Player.STATE_READY) {
-                                    val dur = duration
-                                    if (dur != C.TIME_UNSET && dur > 0) {
-                                        videoDuration = dur
-                                        videoDurationUs = dur * 1000
-                                        videoFrameCount = (dur * videoFrameRate / 1000).toInt()
-                                        Log.d(TAG, "ExoPlayer READY: duration=${dur}ms, frames=$videoFrameCount")
-                                    } else {
-                                        videoDuration = 10_000L
-                                        videoDurationUs = 10_000_000L
-                                        videoFrameCount = 300
-                                        Log.w(TAG, "Invalid duration, using defaults")
-                                    }
-
-                                    isPlayerPrepared = true
-                                    videoFrameIndex = 0
-                                    lastFrameIndex = -1
-                                    videoTime = 0L
-                                    currentPlaybackPosition = 0f
-                                    lastUpdateTime = System.currentTimeMillis()
-
-                                    val vw = videoSize.width
-                                    val vh = videoSize.height
-                                    if (vw > 0 && vh > 0) {
-                                        eglThread?.setContentSize(vw, vh)
-                                        Log.d(TAG, "Video size: ${vw}x${vh}")
-                                    }
-
-                                    seekTo(0)
-                                    eglThread?.requestRender()
-
-                                    startPlaybackLoop()
-
-                                    Log.d(TAG, "Video initialization complete!")
-                                }
-                            }
-
-                            override fun onPlayerError(error: PlaybackException) {
-                                Log.e(TAG, "ExoPlayer error: ${error.message}")
-                                isPlayerPrepared = false
-                            }
-                        })
-
-                        prepare()
-                    }
-
-                Log.d(TAG, "ExoPlayer preparing...")
-                eglThread?.resetVideoMatrix()
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to prepare video", e)
-                releasePlayer()
-            }
+                override fun onError(message: String) {
+                    Log.e(TAG, "EffectCtrl onError: $message")
+                }
+            })
+            
+            Log.w(TAG, "initEffectCtrl: calling init()")
+            effectCtrl?.init()
+            Log.w(TAG, "initEffectCtrl: init() completed, textureId=${effectCtrl?.getTextureId()}")
         }
 
         fun onSurfaceTextureAvailable() {
             if (isWaitingForSurface && group?.type == RasterGroupModel.TYPE_DYNAMIC) {
                 Log.d(TAG, "SurfaceTexture available, retrying...")
-                val g = group ?: return
-                if (g.type == RasterGroupModel.TYPE_DYNAMIC) {
-                    prepareVideo(g)
-                }
+                loadContent()
             }
-        }
-
-        private fun releasePlayer() {
-            stopPlaybackLoop()
-            exoPlayer?.release()
-            exoPlayer = null
-            isPlayerPrepared = false
         }
 
         private var playbackRunnable: Runnable? = null
         private val PLAYBACK_INTERVAL_MS = 16L
+        private var lastSeekPosition = -1f  // 记录上次seek的位置
 
         private fun startPlaybackLoop() {
-            Log.d(TAG, "startPlaybackLoop")
+            Log.w(TAG, "startPlaybackLoop")
             stopPlaybackLoop()
             lastUpdateTime = System.currentTimeMillis()
+            lastSeekPosition = -1f  // 重置
 
             playbackRunnable = object : Runnable {
                 override fun run() {
-                    if (!isPlayerPrepared) return
+                    val prepared = effectCtrl?.isPrepared() ?: false
+                    if (!prepared) {
+                        Log.w(TAG, "playbackLoop: not prepared yet, retrying...")
+                        eglHandler?.postDelayed(this, PLAYBACK_INTERVAL_MS)
+                        return
+                    }
 
                     val now = System.currentTimeMillis()
                     val dt = (now - lastUpdateTime) / 1000f
@@ -396,16 +353,14 @@ class VideoRasterWallpaperService : WallpaperService() {
 
                     updatePlayback(dt)
 
-                    val targetTimeMs = (currentPlaybackPosition * videoDuration).toLong()
-                    val newFrameIndex = (targetTimeMs * videoFrameRate / 1000).toInt()
-                        .coerceIn(0, videoFrameCount - 1)
-
-                    if (newFrameIndex != lastFrameIndex) {
-                        videoFrameIndex = newFrameIndex
-                        videoTime = targetTimeMs
-                        seekTo(targetTimeMs)
-                        lastFrameIndex = newFrameIndex
+                    // 只有当位置有明显变化时才seek（避免频繁seek导致状态循环）
+                    if (kotlin.math.abs(currentPlaybackPosition - lastSeekPosition) > 0.001f) {
+                        effectCtrl?.seekToPosition(currentPlaybackPosition)
+                        lastSeekPosition = currentPlaybackPosition
                     }
+                    
+                    // 请求渲染
+                    eglThread?.requestRender()
 
                     eglHandler?.postDelayed(this, PLAYBACK_INTERVAL_MS)
                 }
@@ -423,6 +378,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         }
 
         private fun updatePlayback(dt: Float) {
+            val videoDuration = effectCtrl?.getVideoDuration() ?: 0L
             if (videoDuration <= 0) return
 
             val maxSpeedMultiplier = 2.0f
@@ -449,83 +405,40 @@ class VideoRasterWallpaperService : WallpaperService() {
             }
         }
 
-        private fun seekTo(timeMs: Long) {
-            try {
-                exoPlayer?.let { player ->
-                    player.seekTo(timeMs)
-
-                    if (frameCount % 30 == 0L) {
-                        val isReverse = isReverseOrBreakOperation()
-                        Log.d(TAG, "Seek: time=${timeMs}ms, reverse=$isReverse")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "seekTo failed: ${e.message}")
-            }
-        }
-
-        override fun onFrameAvailable(surfaceTexture: SurfaceTexture) {
-            updateSurface.set(true)
-            eglThread?.requestRender()
-        }
-
         private inner class EglThread(private val holder: SurfaceHolder) : HandlerThread("VideoRasterEGL") {
             private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
             private var context: EGLContext = EGL14.EGL_NO_CONTEXT
             private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
             private var handler: Handler? = null
 
-            var videoST: SurfaceTexture? = null
-                private set
-
-            private var vTexId = 0
-            private var vProg = 0
-            private var vBuf: FloatBuffer
-            private var tBuf: FloatBuffer
-
             private var sW = 0
             private var sH = 0
-            private var cW = 1
-            private var cH = 1
-
-            private val videoSTMatrix = FloatArray(16)
-
-            init {
-                val vData = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
-                vBuf = ByteBuffer.allocateDirect(vData.size * 4)
-                    .order(ByteOrder.nativeOrder())
-                    .asFloatBuffer().put(vData)
-                vBuf.position(0)
-
-                val tData = floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
-                tBuf = ByteBuffer.allocateDirect(tData.size * 4)
-                    .order(ByteOrder.nativeOrder())
-                    .asFloatBuffer().put(tData)
-                tBuf.position(0)
-            }
+            private var isEglReady = false
 
             fun onSizeChanged(w: Int, h: Int) {
                 sW = w
                 sH = h
+                effectCtrl?.setDesignSize(w, h)
                 requestRender()
-            }
-
-            fun setContentSize(w: Int, h: Int) {
-                cW = if (w > 0) w else 1
-                cH = if (h > 0) h else 1
             }
 
             fun post(r: () -> Unit) { handler?.post(r) }
 
-            fun resetVideoMatrix() {
-                post { Matrix.setIdentityM(videoSTMatrix, 0) }
-            }
-
             override fun onLooperPrepared() {
-                if (!initEGL()) return
-                initGL()
+                Log.w(TAG, "EglThread.onLooperPrepared: starting...")
+                if (!initEGL()) {
+                    Log.e(TAG, "EglThread.onLooperPrepared: initEGL failed!")
+                    return
+                }
                 handler = Handler(looper)
                 eglHandler = handler
+                isEglReady = true
+                Log.w(TAG, "EglThread.onLooperPrepared: EGL initialized, posting loadContent...")
+                
+                handler?.post {
+                    this@VideoRasterEngine.onSurfaceTextureAvailable()
+                }
+                
                 post { loadContent() }
             }
 
@@ -560,51 +473,6 @@ class VideoRasterWallpaperService : WallpaperService() {
                 return EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
             }
 
-            private fun initGL() {
-                val vs = """
-                    attribute vec4 aPos;
-                    attribute vec2 aTex;
-                    varying vec2 vTex;
-                    uniform mat4 uMVP;
-                    uniform mat4 uST;
-                    void main() {
-                        gl_Position = uMVP * aPos;
-                        vTex = (uST * vec4(aTex, 0, 1)).xy;
-                    }
-                """.trimIndent()
-
-                val fsV = """
-                    #extension GL_OES_EGL_image_external : require
-                    precision mediump float;
-                    varying vec2 vTex;
-                    uniform samplerExternalOES sTex;
-                    void main() {
-                        gl_FragColor = texture2D(sTex, vTex);
-                    }
-                """.trimIndent()
-
-                vProg = createProgram(vs, fsV)
-
-                val tex = IntArray(1)
-                GLES20.glGenTextures(1, tex, 0)
-                vTexId = tex[0]
-
-                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTexId)
-                GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-                GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-                GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-                GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-
-                videoST = SurfaceTexture(vTexId)
-                videoST?.setOnFrameAvailableListener(this@VideoRasterEngine)
-
-                Matrix.setIdentityM(videoSTMatrix, 0)
-
-                handler?.post {
-                    this@VideoRasterEngine.onSurfaceTextureAvailable()
-                }
-            }
-
             fun requestRender() {
                 handler?.removeCallbacks(drawRunnable)
                 handler?.post(drawRunnable)
@@ -613,84 +481,57 @@ class VideoRasterWallpaperService : WallpaperService() {
             private val drawRunnable = Runnable { draw() }
 
             private fun draw() {
-                if (eglSurface == EGL14.EGL_NO_SURFACE) return
+                if (!isEglReady || eglSurface == EGL14.EGL_NO_SURFACE) {
+                    Log.w(TAG, "draw: skipped, isEglReady=$isEglReady, surface valid=${eglSurface != EGL14.EGL_NO_SURFACE}")
+                    return
+                }
+                
+                if (sW <= 0 || sH <= 0) {
+                    Log.w(TAG, "draw: skipped, invalid size: ${sW}x$sH")
+                    return
+                }
+                
+                val prepared = effectCtrl?.isPrepared() ?: false
+                if (!prepared) {
+                    // 还没准备好，绘制黑色背景
+                    EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
+                    GLES20.glViewport(0, 0, sW, sH)
+                    GLES20.glClearColor(0f, 0f, 0f, 1f)
+                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+                    EGL14.eglSwapBuffers(display, eglSurface)
+                    return
+                }
+                
                 EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
 
-                GLES20.glViewport(0, 0, sW, sH)
-                GLES20.glClearColor(0f, 0f, 0f, 1f)
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-
-                val stMat = FloatArray(16)
-
-                if (updateSurface.getAndSet(false)) {
-                    try {
-                        videoST?.updateTexImage()
-                        videoST?.getTransformMatrix(videoSTMatrix)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "updateTexImage failed", e)
-                    }
-                }
-                System.arraycopy(videoSTMatrix, 0, stMat, 0, 16)
-
-                GLES20.glUseProgram(vProg)
-
-                val mvp = FloatArray(16)
-                Matrix.setIdentityM(mvp, 0)
-
-                val cAsp = cW.toFloat() / cH
-                val sAsp = if (sH > 0) sW.toFloat() / sH else 1f
-
-                if (cAsp > sAsp) {
-                    Matrix.scaleM(mvp, 0, cAsp / sAsp, 1f, 1f)
-                } else {
-                    Matrix.scaleM(mvp, 0, 1f, sAsp / cAsp, 1f)
-                }
-
-                val aPos = GLES20.glGetAttribLocation(vProg, "aPos")
-                val aTex = GLES20.glGetAttribLocation(vProg, "aTex")
-
-                GLES20.glEnableVertexAttribArray(aPos)
-                GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, vBuf)
-                GLES20.glEnableVertexAttribArray(aTex)
-                GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tBuf)
-
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(vProg, "uMVP"), 1, false, mvp, 0)
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(vProg, "uST"), 1, false, stMat, 0)
-
-                GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, vTexId)
-                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+                // 使用 RVEffectPreCtrl 进行渲染
+                effectCtrl?.onDrawFrame(sW, sH)
 
                 if (!EGL14.eglSwapBuffers(display, eglSurface)) {
                     Log.e(TAG, "SwapBuffers failed")
                 }
             }
 
-            private fun createProgram(vShader: String, fShader: String): Int {
-                val vs = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER)
-                GLES20.glShaderSource(vs, vShader)
-                GLES20.glCompileShader(vs)
-
-                val fs = GLES20.glCreateShader(GLES20.GL_FRAGMENT_SHADER)
-                GLES20.glShaderSource(fs, fShader)
-                GLES20.glCompileShader(fs)
-
-                val program = GLES20.glCreateProgram()
-                GLES20.glAttachShader(program, vs)
-                GLES20.glAttachShader(program, fs)
-                GLES20.glLinkProgram(program)
-
-                return program
-            }
-
             fun finish() {
-                quitSafely()
-                if (display != EGL14.EGL_NO_DISPLAY) {
-                    EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
-                    EGL14.eglDestroySurface(display, eglSurface)
-                    EGL14.eglDestroyContext(display, context)
-                    EGL14.eglTerminate(display)
+                // 在 EGL 线程上销毁 EGL 资源
+                val destroyLatch = java.util.concurrent.CountDownLatch(1)
+                handler?.post {
+                    try {
+                        if (display != EGL14.EGL_NO_DISPLAY) {
+                            EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+                            EGL14.eglDestroySurface(display, eglSurface)
+                            EGL14.eglDestroyContext(display, context)
+                            EGL14.eglTerminate(display)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "EGL destroy error: ${e.message}")
+                    } finally {
+                        isEglReady = false
+                        destroyLatch.countDown()
+                    }
                 }
+                destroyLatch.await(1, java.util.concurrent.TimeUnit.SECONDS)
+                quitSafely()
             }
         }
     }
