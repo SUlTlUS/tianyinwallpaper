@@ -143,7 +143,7 @@ class RVRes(
             exoPlayer = ExoPlayer.Builder(context).build().apply {
                 setVideoSurface(surface)
                 volume = 0f
-                setSeekParameters(SeekParameters.EXACT)
+                setSeekParameters(SeekParameters.CLOSEST_SYNC)
                 repeatMode = Player.REPEAT_MODE_OFF
                 playWhenReady = false
                 

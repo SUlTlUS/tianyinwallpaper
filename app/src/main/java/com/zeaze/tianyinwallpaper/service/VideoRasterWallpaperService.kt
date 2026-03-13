@@ -138,6 +138,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         private val angleSensor = AngleSensor()
 
         private val reverseBean = ReverseBean()
+        @Volatile
         private var playbackSpeed = 0f
         private var currentPlaybackPosition = 0f
         private var lastUpdateTime = System.currentTimeMillis()
