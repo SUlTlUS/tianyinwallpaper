@@ -97,6 +97,11 @@ class RVEffectPreCtrl(
                 
                 isPrepared = true
                 callback?.onPrepared(frameCount, duration)
+                
+                // 设置帧可用回调
+                rvRes?.setOnFrameAvailableCallback {
+                    callback?.onFrameReady()
+                }
             }
             
             override fun onVideoError(message: String) {
@@ -247,6 +252,7 @@ class RVEffectPreCtrl(
     }
     
     private var frameCounter = 0L
+    private var lastTextureUpdate = false
     
     fun onDrawFrame(surfaceWidth: Int, surfaceHeight: Int) {
         if (!isPrepared) {
@@ -262,6 +268,7 @@ class RVEffectPreCtrl(
         
         // 更新视频纹理帧
         val textureUpdated = rvRes?.updateTexImage() ?: false
+        lastTextureUpdate = textureUpdated
         
         // 清除缓冲区
         GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -269,19 +276,24 @@ class RVEffectPreCtrl(
         
         val texId = rvRes?.getTextureId() ?: 0
         val transformMatrix = rvRes?.getTransformMatrix() ?: FloatArray(16)
+        val currentFrame = rvRes?.getCurrentFrame() ?: -1
         
         frameCounter++
-        if (frameCounter % 60 == 0L) {
-            Log.w(TAG, "onDrawFrame: texId=$texId, size=${surfaceWidth}x$surfaceHeight, textureUpdated=$textureUpdated")
+        if (frameCounter % 30 == 0L) {
+            Log.w(TAG, "onDrawFrame: frame=$frameCounter, texId=$texId, size=${surfaceWidth}x$surfaceHeight, textureUpdated=$textureUpdated, currentFrame=$currentFrame")
         }
         
         renderNode?.onDrawFrame(surfaceWidth, surfaceHeight, texId, transformMatrix)
     }
     
-    fun seekToPosition(position: Float) {
+    fun seekToPosition(position: Float, shouldPauseAfter: Boolean = true) {
         if (!isPrepared) return
-        rvRes?.seekToPosition(position)
+        rvRes?.seekToPosition(position, shouldPauseAfter)
         process = position
+    }
+    
+    fun getCurrentPosition(): Float {
+        return rvRes?.getCurrentPosition() ?: 0f
     }
     
     fun seekToFrame(frameIndex: Int) {
@@ -350,4 +362,12 @@ class RVEffectPreCtrl(
     fun isPrepared(): Boolean = isPrepared
     
     fun getTextureId(): Int = rvRes?.getTextureId() ?: 0
+    
+    /**
+     * 设置目标帧率
+     * @param fps 帧率（30/60/90 等）
+     */
+    fun setTargetFrameRate(fps: Int) {
+        rvRes?.setTargetFrameRate(fps)
+    }
 }

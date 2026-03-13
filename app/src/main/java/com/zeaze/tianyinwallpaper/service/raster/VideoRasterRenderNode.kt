@@ -121,8 +121,9 @@ class VideoRasterRenderNode(
         videoTextureId: Int,
         transformMatrix: FloatArray
     ) {
+        drawFrameCounter++
+        
         if (!visible || alpha <= 0f) {
-            drawFrameCounter++
             if (drawFrameCounter % 60 == 0L) {
                 Log.w(TAG, "onDrawFrame: skipped, visible=$visible, alpha=$alpha")
             }
@@ -132,6 +133,15 @@ class VideoRasterRenderNode(
         if (videoTextureId <= 0) {
             Log.e(TAG, "onDrawFrame: invalid textureId=$videoTextureId")
             return
+        }
+        
+        if (shaderProgram <= 0) {
+            Log.e(TAG, "onDrawFrame: invalid shaderProgram=$shaderProgram")
+            return
+        }
+        
+        if (drawFrameCounter % 30 == 0L) {
+            Log.w(TAG, "onDrawFrame: drawing frame $drawFrameCounter, texId=$videoTextureId, shader=$shaderProgram, visible=$visible, alpha=$alpha")
         }
         
         // 计算MVP矩阵
@@ -180,6 +190,12 @@ class VideoRasterRenderNode(
         
         // 绘制
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        
+        // 检查 OpenGL 错误
+        val glError = GLES20.glGetError()
+        if (glError != GLES20.GL_NO_ERROR && drawFrameCounter % 30 == 0L) {
+            Log.e(TAG, "onDrawFrame: GL error after draw: $glError")
+        }
         
         // 清理
         GLES20.glDisableVertexAttribArray(aPosition)

@@ -301,13 +301,15 @@ class VideoRasterWallpaperService : WallpaperService() {
             
             effectCtrl = RVEffectPreCtrl(applicationContext, object : RVEffectPreCtrl.Callback {
                 override fun onPrepared(frameCount: Int, duration: Long) {
-                    Log.w(TAG, "EffectCtrl onPrepared: frames=$frameCount, duration=$duration")
+                    Log.w(TAG, "EffectCtrl onPrepared: frames=$frameCount, duration=$duration, thread=${Thread.currentThread().name}")
                     lastUpdateTime = System.currentTimeMillis()
                     currentPlaybackPosition = 0f
+                    lastSeekPosition = -1f
                     startPlaybackLoop()
                 }
 
                 override fun onFrameReady() {
+                    Log.d(TAG, "EffectCtrl onFrameReady: frame ready callback")
                     updateSurface.set(true)
                     eglThread?.requestRender()
                 }
@@ -332,6 +334,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         private var playbackRunnable: Runnable? = null
         private val PLAYBACK_INTERVAL_MS = 16L
         private var lastSeekPosition = -1f  // 记录上次seek的位置
+        private val MIN_SEEK_DELTA = 0.002f  // 最小 seek 阈值，避免频繁 seek
 
         private fun startPlaybackLoop() {
             Log.w(TAG, "startPlaybackLoop")
@@ -354,12 +357,6 @@ class VideoRasterWallpaperService : WallpaperService() {
 
                     updatePlayback(dt)
 
-                    // 只有当位置有明显变化时才seek（避免频繁seek导致状态循环）
-                    if (kotlin.math.abs(currentPlaybackPosition - lastSeekPosition) > 0.001f) {
-                        effectCtrl?.seekToPosition(currentPlaybackPosition)
-                        lastSeekPosition = currentPlaybackPosition
-                    }
-                    
                     // 请求渲染
                     eglThread?.requestRender()
 
@@ -378,31 +375,43 @@ class VideoRasterWallpaperService : WallpaperService() {
             playbackRunnable = null
         }
 
+        /**
+         * 方案二：TextureView 轮询 + 跳转
+         * 播放器保持暂停状态，只通过 seekTo 触发帧渲染
+         */
         private fun updatePlayback(dt: Float) {
             val videoDuration = effectCtrl?.getVideoDuration() ?: 0L
             if (videoDuration <= 0) return
 
-            val maxSpeedMultiplier = 2.0f
+            // playbackSpeed: -1 到 1，表示移动速度和方向
+            // 乘以速度倍数，计算实际位置变化
+            val maxSpeedMultiplier = 1.5f
             val speed = playbackSpeed * maxSpeedMultiplier
 
+            // 计算位置变化
             val positionChange = speed * dt
             currentPlaybackPosition += positionChange
 
+            // 边界处理：到达边界时反弹
             if (currentPlaybackPosition < 0f) {
                 currentPlaybackPosition = -currentPlaybackPosition
-                playbackSpeed = -playbackSpeed
             } else if (currentPlaybackPosition > 1f) {
                 currentPlaybackPosition = 2f - currentPlaybackPosition
-                playbackSpeed = -playbackSpeed
             }
-
             currentPlaybackPosition = currentPlaybackPosition.coerceIn(0f, 1f)
+
+            // 只有当位置有明显变化时才 seek，避免频繁 seek
+            if (kotlin.math.abs(currentPlaybackPosition - lastSeekPosition) >= MIN_SEEK_DELTA) {
+                // 如果速度接近0（静止），使用单帧渲染模式，否则保持播放
+                val shouldPauseAfter = kotlin.math.abs(speed) < 0.1f
+                effectCtrl?.seekToPosition(currentPlaybackPosition, shouldPauseAfter)
+                lastSeekPosition = currentPlaybackPosition
+            }
 
             frameCount++
             if (frameCount % 60 == 0L) {
-                val isReverse = isReverseOrBreakOperation()
                 Log.d(TAG, "Playback: pos=${String.format("%.3f", currentPlaybackPosition)}, " +
-                        "speed=${String.format("%.3f", playbackSpeed)}, reverse=$isReverse")
+                        "speed=${String.format("%.3f", speed)}")
             }
         }
 
@@ -480,10 +489,16 @@ class VideoRasterWallpaperService : WallpaperService() {
             }
 
             private val drawRunnable = Runnable { draw() }
+            
+            private var drawCounter = 0L
 
             private fun draw() {
+                drawCounter++
+                
                 if (!isEglReady || eglSurface == EGL14.EGL_NO_SURFACE) {
-                    Log.w(TAG, "draw: skipped, isEglReady=$isEglReady, surface valid=${eglSurface != EGL14.EGL_NO_SURFACE}")
+                    if (drawCounter % 60 == 0L) {
+                        Log.w(TAG, "draw: skipped, isEglReady=$isEglReady, surface valid=${eglSurface != EGL14.EGL_NO_SURFACE}")
+                    }
                     return
                 }
                 
@@ -500,6 +515,9 @@ class VideoRasterWallpaperService : WallpaperService() {
                     GLES20.glClearColor(0f, 0f, 0f, 1f)
                     GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
                     EGL14.eglSwapBuffers(display, eglSurface)
+                    if (drawCounter % 60 == 0L) {
+                        Log.w(TAG, "draw: not prepared, drew black background")
+                    }
                     return
                 }
                 
@@ -509,7 +527,11 @@ class VideoRasterWallpaperService : WallpaperService() {
                 effectCtrl?.onDrawFrame(sW, sH)
 
                 if (!EGL14.eglSwapBuffers(display, eglSurface)) {
-                    Log.e(TAG, "SwapBuffers failed")
+                    Log.e(TAG, "SwapBuffers failed, error: ${EGL14.eglGetError()}")
+                }
+                
+                if (drawCounter % 60 == 0L) {
+                    Log.d(TAG, "draw: completed frame $drawCounter")
                 }
             }
 
