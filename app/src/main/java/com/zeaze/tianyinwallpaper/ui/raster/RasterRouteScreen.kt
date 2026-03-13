@@ -112,7 +112,8 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
-import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
+import com.zeaze.tianyinwallpaper.service.VideoRasterWallpaperService
+import com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService
 import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import com.kyant.shapes.Capsule
@@ -124,8 +125,6 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import androidx.compose.animation.core.tween
-import androidx.activity.compose.rememberLauncherForActivityResult
-import com.zeaze.tianyinwallpaper.service.RasterWallpaperService
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 private const val PREF_RASTER_GROUPS = "rasterGroups"
@@ -298,11 +297,18 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     } catch (e: IOException) {
                         Log.w("RasterRouteScreen", "Clear wallpaper failed", e)
                     }
+                    
+                    val serviceClass = when (group.type) {
+                        RasterGroupModel.TYPE_DYNAMIC -> VideoRasterWallpaperService::class.java
+                        RasterGroupModel.TYPE_STATIC -> StaticRasterWallpaperService::class.java
+                        else -> throw IllegalStateException("Unknown group type: ${group.type}")
+                    }
+                    
                     val intent = Intent().apply {
                         action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
                         putExtra(
                             WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                            ComponentName(hostActivity, TianYinWallpaperService::class.java)
+                            ComponentName(hostActivity, serviceClass)
                         )
                     }
                     wallpaperLaunch.launch(intent)
@@ -331,11 +337,18 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
         } catch (e: java.io.IOException) {
             e.printStackTrace()
         }
+        
+        val serviceClass: Class<*> = when (target.type) {
+            RasterGroupModel.TYPE_DYNAMIC -> VideoRasterWallpaperService::class.java
+            RasterGroupModel.TYPE_STATIC -> StaticRasterWallpaperService::class.java
+            else -> throw IllegalStateException("Unknown group type: ${target.type}")
+        }
+        
         val intent = Intent().apply {
             action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
             putExtra(
                 WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                ComponentName(hostActivity, RasterWallpaperService::class.java)
+                ComponentName(hostActivity, serviceClass)
             )
         }
         wallpaperLaunch.launch(intent)
