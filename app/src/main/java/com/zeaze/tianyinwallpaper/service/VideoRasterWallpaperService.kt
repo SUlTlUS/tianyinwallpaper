@@ -233,29 +233,36 @@ class VideoRasterWallpaperService : WallpaperService() {
             if (effectCtrl?.isPrepared() != true) return
 
             val maxAngle = Math.toRadians(45.0).toFloat()
-            val notResponseAngle = Math.toRadians(1.5).toFloat()
             val deadZone = Math.toRadians(1.0).toFloat()
 
-            // 检测当前倾斜方向
             val isTilting = abs(sensorValue) > deadZone
 
-            // 每次回到初始位置（水平位置）时重置初始方向
             if (!isTilting) {
+                // 回到初始位置：重置方向判断，进度归零（自动倒回第一帧）
                 initialTiltDirection = null
+                currentPlaybackPosition = 0f
+                Log.d(TAG, "Sensor: at center, reset direction, progress=0")
+                return
             }
 
-            // 如果正在倾斜且初始方向未确定，记录初始方向和基准帧
-            if (isTilting && initialTiltDirection == null) {
-                initialTiltDirection = sensorValue > 0  // true=右倾, false=左倾
-                // 从 RVRes 获取真实的当前帧作为基准
-                baseFrameOnDirection = effectCtrl?.getCurrentFrame() ?: 0
-                Log.w(TAG, "Initial tilt direction set: ${if (sensorValue > 0) "RIGHT" else "LEFT"}, baseFrame=$baseFrameOnDirection")
+            // 第一次偏离中心：确定初始方向
+            if (initialTiltDirection == null) {
+                initialTiltDirection = sensorValue > 0 // true=右倾先行, false=左倾先行
+                Log.w(TAG, "Initial direction: ${if (initialTiltDirection == true) "RIGHT" else "LEFT"}")
             }
 
-            // 使用带符号的进度值（右倾为正，左倾为负）
-            currentPlaybackPosition = (sensorValue / (maxAngle - notResponseAngle)).coerceIn(-1f, 1f)
+            // 根据初始方向将传感器值映射为 0~1 的正向进度
+            // 初始右倾：右(正值)=进度增加，左(负值)=进度为0（不倒退超过起点）
+            // 初始左倾：左(负值)=进度增加，右(正值)=进度为0
+            val rawProgress = sensorValue / maxAngle
+            currentPlaybackPosition = if (initialTiltDirection == true) {
+                rawProgress.coerceIn(0f, 1f)   // 右倾为正方向
+            } else {
+                (-rawProgress).coerceIn(0f, 1f) // 左倾为正方向
+            }
 
-            Log.d(TAG, "Sensor: angle=${String.format("%.3f", Math.toDegrees(sensorValue.toDouble()))}°, progress=${String.format("%.3f", currentPlaybackPosition)}, initialDir=${initialTiltDirection}")
+            Log.d(TAG, "Sensor: angle=${String.format("%.1f", Math.toDegrees(sensorValue.toDouble()))}°, " +
+                    "dir=${if (initialTiltDirection == true) "R" else "L"}, progress=${"%.3f".format(currentPlaybackPosition)}")
         }
 
         private fun loadActiveGroup() {
@@ -284,6 +291,8 @@ class VideoRasterWallpaperService : WallpaperService() {
                 return
             }
 
+            isWaitingForSurface = false
+
             // 初始化效果控制器
             initEffectCtrl()
 
@@ -294,12 +303,18 @@ class VideoRasterWallpaperService : WallpaperService() {
                 return
             }
 
-            // 创建渲染参数
+            // ✅ 检查 EGL/SurfaceTexture 是否已就绪
+            val texId = effectCtrl?.getTextureId() ?: 0
+            if (texId == 0) {
+                Log.w(TAG, "loadContent: SurfaceTexture not ready, will retry on available")
+                isWaitingForSurface = true  // ✅ 标记等待，等回调触发重试
+                return
+            }
+
             val params = RasterVideoPreRenderParamBean(
                 videoPath = videoUri,
                 videoFrameRate = 30
             )
-
             Log.w(TAG, "loadContent: calling loadSourceFromParams, videoUri=$videoUri")
             effectCtrl?.loadSourceFromParams(params)
 
@@ -345,7 +360,8 @@ class VideoRasterWallpaperService : WallpaperService() {
 
         fun onSurfaceTextureAvailable() {
             if (isWaitingForSurface && group?.type == RasterGroupModel.TYPE_DYNAMIC) {
-                Log.d(TAG, "SurfaceTexture available, retrying...")
+                Log.w(TAG, "SurfaceTexture available, retrying loadContent...")
+                isWaitingForSurface = false  // ✅ 防止重复触发
                 loadContent()
             }
         }

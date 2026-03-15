@@ -17,6 +17,7 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 视频资源管理器
@@ -50,6 +51,7 @@ class RVRes(
     private var hasNotifiedPrepared = false
 
     // 视频信息
+    private var videoPath: String = ""
     private var videoDuration: Long = 0
     private var videoFrameCount: Int = 0
     private var videoFrameRate: Float = 30f
@@ -60,7 +62,8 @@ class RVRes(
 
     // 纹理矩阵
     private val transformMatrix = FloatArray(16)
-    private var frameAvailable = false
+
+    private val frameAvailable = AtomicBoolean(false)
 
     // 主线程 Handler
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -125,7 +128,7 @@ class RVRes(
         // 设置帧可用监听器 - 不指定 Handler，只设置标志
         // updateTexImage() 必须在 EGL 线程调用，不能在这里调用
         surfaceTexture?.setOnFrameAvailableListener({ 
-            frameAvailable = true
+            frameAvailable.set(true)
             Log.d(TAG, "onFrameAvailable: textureId=$textureId, targetFrame=$targetFrameIndex")
             onFrameAvailableCallback?.invoke()
         })
@@ -138,8 +141,9 @@ class RVRes(
         return textureId
     }
 
-    fun loadVideo(videoPath: String) {
-        Log.w(TAG, "loadVideo: $videoPath")
+    fun loadVideo(path: String) {
+        Log.w(TAG, "loadVideo: $path")
+        videoPath = path
         releasePlayer()
         hasNotifiedPrepared = false
 
@@ -184,19 +188,20 @@ class RVRes(
         mediaPlayer?.setOnSeekCompleteListener {
             // seek 完成后更新当前帧索引
             currentFrameIndex = targetFrameIndex
-            frameAvailable = true
+            frameAvailable.set(true)
+            mediaPlayer?.pause()
             Log.d(TAG, "MediaPlayer onSeekComplete, frame=$currentFrameIndex")
         }
 
         try {
             // 设置数据源
-            val mediaSource: MediaSource = if (videoPath.startsWith("content://")) {
+            val mediaSource: MediaSource = if (path.startsWith("content://")) {
                 Log.w(TAG, "loadVideo: using UriSource for content URI")
-                val uri = android.net.Uri.parse(videoPath)
+                val uri = android.net.Uri.parse(path)
                 UriSource(context, uri)
             } else {
                 Log.w(TAG, "loadVideo: using FileSource")
-                FileSource(File(videoPath))
+                FileSource(File(path))
             }
             
             mediaPlayer?.setDataSource(mediaSource)
@@ -224,8 +229,18 @@ class RVRes(
             // 使用 MediaExtractor 获取真实帧率
             try {
                 val extractor = android.media.MediaExtractor()
-                // 暂时使用默认值，后续可通过其他方式获取
-                videoFrameRate = 30f
+                extractor.setDataSource(videoPath)
+                for (i in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                    if (mime.startsWith("video/")) {
+                        if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                            videoFrameRate = format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
+                        }
+                        break
+                    }
+                }
+                extractor.release()
             } catch (e: Exception) {
                 videoFrameRate = 30f
             }
@@ -262,8 +277,8 @@ class RVRes(
     }
 
     fun updateTexImage(): Boolean {
-        if (frameAvailable) {
-            frameAvailable = false
+        if (frameAvailable.get()) {
+            frameAvailable.set(false)
             
             // 在 EGL 线程中更新纹理
             try {
@@ -306,8 +321,6 @@ class RVRes(
         }
 
         targetFrameIndex = targetFrame
-        // 直接更新当前帧索引（seek 是帧精确的）
-        currentFrameIndex = targetFrame
         
         // 计算目标时间（毫秒）
         val targetTimeMs = if (videoFrameRate > 0) {
@@ -326,8 +339,7 @@ class RVRes(
         try {
             mediaPlayer?.start()
             mediaPlayer?.seekTo(targetTimeMs)
-            // seek 后立即暂停，防止自动播放
-            mediaPlayer?.pause()
+
         } catch (e: Exception) {
             Log.e(TAG, "seekToFrame error: ${e.message}")
         }
