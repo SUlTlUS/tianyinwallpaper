@@ -2012,9 +2012,14 @@ private fun WallpaperThumbnail(
                         }
 
                         override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                            (tag as? VideoPlayerHolder)?.player?.let {
-                                it.pause()
-                                it.stop()
+                            val holder = tag as? VideoPlayerHolder
+                            if (holder != null) {
+                                try {
+                                    holder.player.stop()
+                                } catch (_: Exception) {}
+                                try {
+                                    holder.player.setSurface(null)
+                                } catch (_: Exception) {}
                             }
                             return true
                         }

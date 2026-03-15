@@ -80,9 +80,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -291,19 +296,25 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     return@save
                 }
                 hostActivity.runOnUiThread {
+                    // 视频光栅壁纸正在开发中
+                    if (group.type == RasterGroupModel.TYPE_DYNAMIC) {
+                        toast("视频光栅壁纸正在开发中，敬请期待")
+                        return@runOnUiThread
+                    }
+
                     val wallpaperManager = WallpaperManager.getInstance(hostActivity)
                     try {
                         wallpaperManager.clear()
                     } catch (e: IOException) {
                         Log.w("RasterRouteScreen", "Clear wallpaper failed", e)
                     }
-                    
+
                     val serviceClass = when (group.type) {
                         RasterGroupModel.TYPE_DYNAMIC -> VideoRasterWallpaperService::class.java
                         RasterGroupModel.TYPE_STATIC -> StaticRasterWallpaperService::class.java
                         else -> throw IllegalStateException("Unknown group type: ${group.type}")
                     }
-                    
+
                     val intent = Intent().apply {
                         action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
                         putExtra(
@@ -330,6 +341,12 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
 
         pref.edit().putString(PREF_RASTER_ACTIVE_GROUP_ID, target.id).apply()
 
+        // 视频光栅壁纸正在开发中
+        if (target.type == RasterGroupModel.TYPE_DYNAMIC) {
+            toast("视频光栅壁纸正在开发中，敬请期待")
+            return
+        }
+
         val hostActivity = activity ?: return
         val wallpaperManager = WallpaperManager.getInstance(hostActivity)
         try {
@@ -337,13 +354,13 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
         } catch (e: java.io.IOException) {
             e.printStackTrace()
         }
-        
+
         val serviceClass: Class<*> = when (target.type) {
             RasterGroupModel.TYPE_DYNAMIC -> VideoRasterWallpaperService::class.java
             RasterGroupModel.TYPE_STATIC -> StaticRasterWallpaperService::class.java
             else -> throw IllegalStateException("Unknown group type: ${target.type}")
         }
-        
+
         val intent = Intent().apply {
             action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
             putExtra(
@@ -841,7 +858,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                                         .background(accentColor)
                                         .clickable {
                                             showTypeDialog = false
-                                            pickDynamicLauncher.launch(arrayOf("video/*"))
+                                            toast("视频光栅壁纸正在开发中，敬请期待")
                                         }
                                         .height(48.dp)
                                         .fillMaxWidth(),
@@ -1031,13 +1048,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     }
                 },
                 onVideoAction = {
-                    if (group.type == RasterGroupModel.TYPE_STATIC) {
-                        dynamicPickTargetId = null
-                        pickDynamicLauncher.launch(arrayOf("video/*"))
-                    } else {
-                        dynamicPickTargetId = group.id
-                        pickDynamicLauncher.launch(arrayOf("video/*"))
-                    }
+                    toast("视频光栅壁纸正在开发中，敬请期待")
                 }
             )
         }
@@ -1234,7 +1245,7 @@ private fun RasterDetailScreen(
                         .background(frameBackground)
                 ) {
                     if (group.type == RasterGroupModel.TYPE_STATIC) {
-                        GyroStaticRasterPreview(
+                        RasterPreviewView(
                             group = group,
                             sensorWidth = group.sensorWidth,
                             modifier = Modifier
@@ -1704,70 +1715,6 @@ private fun RasterDetailScreen(
     }
 }
 
-@Composable
-private fun GyroStaticRasterPreview(
-    group: RasterGroupModel,
-    sensorWidth: Float = 4.5f,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val (tilt, direction) = rememberTiltState(sensorWidth)
-
-    val targetIndex = remember(tilt, group.imageUris.size) {
-        if (group.imageUris.isEmpty()) 0
-        else {
-            val shaped = tilt * tilt  // 平方映射，平放区域更宽
-            (shaped * (group.imageUris.size - 1))
-                .roundToInt()
-                .coerceIn(0, group.imageUris.size - 1)
-        }
-    }
-
-    var lastIndex by remember { mutableStateOf(targetIndex) }
-    // ✅ 扫描方向由传感器左右倾决定
-    val slideDirection = if (direction >= 0) 1 else -1
-    LaunchedEffect(targetIndex) { lastIndex = targetIndex }
-
-    AnimatedContent(
-        targetState = targetIndex,
-        transitionSpec = {
-            if (slideDirection > 0) {
-                // 右倾 → 从右到左扫入
-                (slideInHorizontally { it } + fadeIn(tween(200)))
-                    .togetherWith(slideOutHorizontally { -it } + fadeOut(tween(150)))
-            } else {
-                // 左倾 → 从左到右扫入
-                (slideInHorizontally { -it } + fadeIn(tween(200)))
-                    .togetherWith(slideOutHorizontally { it } + fadeOut(tween(150)))
-            }
-        },
-        label = "static-raster-transition",
-        modifier = modifier
-    ) { index ->
-        val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, group.id, index) {
-            val imageUri = group.imageUris.getOrNull(index)
-            value = if (imageUri == null) null
-            else runCatching {
-                context.contentResolver.openInputStream(Uri.parse(imageUri))?.use {
-                    android.graphics.BitmapFactory.decodeStream(it)
-                }
-            }.getOrNull()
-        }
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color.DarkGray),
-                contentAlignment = Alignment.Center
-            ) { Text("图片加载失败", color = Color.White) }
-        }
-    }
-}
 @Composable
 private fun GyroDynamicRasterPreview(
     group: RasterGroupModel,

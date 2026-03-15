@@ -116,6 +116,13 @@ class StaticRasterWallpaperService : WallpaperService() {
             eglThread?.onSizeChanged(width, height)
         }
 
+        override fun onSurfaceDestroyed(holder: SurfaceHolder) {
+            super.onSurfaceDestroyed(holder)
+            // 表面销毁时立即停止渲染，防止 Use-after-free
+            eglThread?.finish()
+            eglThread = null
+        }
+
         override fun onVisibilityChanged(visible: Boolean) {
             super.onVisibilityChanged(visible)
             isVisible = visible
@@ -139,6 +146,7 @@ class StaticRasterWallpaperService : WallpaperService() {
             unregisterSensor()
             releaseStaticBitmaps()
             eglThread?.finish()
+            eglThread = null
         }
 
         // ────────────────────────────────────────────
@@ -354,6 +362,12 @@ class StaticRasterWallpaperService : WallpaperService() {
             private var cW = 1
             private var cH = 1
 
+            // texA 和 texB 各自的尺寸
+            private var texAW = 1
+            private var texAH = 1
+            private var texBW = 1
+            private var texBH = 1
+
             private val imageMatrix = FloatArray(16)
 
             init {
@@ -402,11 +416,15 @@ class StaticRasterWallpaperService : WallpaperService() {
             }
 
             fun uploadToTexA(b: Bitmap) {
+                texAW = b.width
+                texAH = b.height
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texAId)
                 GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
             }
 
             fun uploadToTexB(b: Bitmap) {
+                texBW = b.width
+                texBH = b.height
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texBId)
                 GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
             }
@@ -450,32 +468,36 @@ class StaticRasterWallpaperService : WallpaperService() {
                 val transVs = """
                     attribute vec4 aPos;
                     attribute vec2 aTex;
-                    varying vec2 vTex;
+                    varying vec2 vTexA;
+                    varying vec2 vTexB;
                     uniform mat4 uMVP;
-                    uniform mat4 uST;
+                    uniform mat4 uSTA;
+                    uniform mat4 uSTB;
                     void main() {
                         gl_Position = uMVP * aPos;
-                        vTex = (uST * vec4(aTex, 0.0, 1.0)).xy;
+                        vTexA = (uSTA * vec4(aTex, 0.0, 1.0)).xy;
+                        vTexB = (uSTB * vec4(aTex, 0.0, 1.0)).xy;
                     }
                 """.trimIndent()
 
                 val transFs = """
                     precision mediump float;
-                    varying vec2 vTex;
+                    varying vec2 vTexA;
+                    varying vec2 vTexB;
                     uniform sampler2D sTexA;
                     uniform sampler2D sTexB;
                     uniform float uProgress;
                     uniform float uDirection;
                     uniform float uEdgeSoftness;
                     uniform float uScreenWidth;
-                    
+
                     void main() {
-                        vec4 colorA = texture2D(sTexA, vTex);
-                        vec4 colorB = texture2D(sTexB, vTex);
-                        
+                        vec4 colorA = texture2D(sTexA, vTexA);
+                        vec4 colorB = texture2D(sTexB, vTexB);
+
                         float coord = gl_FragCoord.x / uScreenWidth;
                         float blend;
-                        
+
                         if (uDirection > 0.0) {
                             float edge = 1.0 - uProgress;
                             blend = smoothstep(edge - uEdgeSoftness, edge + uEdgeSoftness, coord);
@@ -513,8 +535,23 @@ class StaticRasterWallpaperService : WallpaperService() {
             private val drawRunnable = Runnable { draw() }
 
             private fun draw() {
-                if (eglSurface == EGL14.EGL_NO_SURFACE) return
-                EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
+                // 多重检查防止 Surface 已销毁
+                if (display == EGL14.EGL_NO_DISPLAY || eglSurface == EGL14.EGL_NO_SURFACE) {
+                    Log.w(TAG, "draw: EGL not ready, skipping")
+                    return
+                }
+                
+                // 检查 EGL 上下文是否仍然有效
+                val currentContext = EGL14.eglGetCurrentContext()
+                if (currentContext == EGL14.EGL_NO_CONTEXT) {
+                    Log.w(TAG, "draw: EGL context lost, skipping")
+                    return
+                }
+                
+                if (!EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) {
+                    Log.e(TAG, "draw: eglMakeCurrent failed: ${EGL14.eglGetError()}")
+                    return
+                }
 
                 GLES20.glViewport(0, 0, sW, sH)
                 GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -569,21 +606,64 @@ class StaticRasterWallpaperService : WallpaperService() {
             private fun drawTransition() {
                 GLES20.glUseProgram(transitionProg)
 
-                val stMat = FloatArray(16)
-                System.arraycopy(imageMatrix, 0, stMat, 0, 16)
+                // 计算屏幕宽高比
+                val sAsp = if (sH > 0) sW.toFloat() / sH else 9f / 16f
 
-                val mvp = FloatArray(16)
-                Matrix.setIdentityM(mvp, 0)
-                val cAsp = cW.toFloat() / cH
-                val sAsp = sW.toFloat() / sH
-                if (cAsp > sAsp) {
-                    Matrix.scaleM(mvp, 0, cAsp / sAsp, 1f, 1f)
+                // 从 staticBitmaps 获取实际尺寸
+                val bmpA = staticBitmaps.getOrNull(scanFromIndex)
+                val bmpB = staticBitmaps.getOrNull(scanToIndex)
+
+                // 计算两张图片各自的变换矩阵（居中 crop）
+                val stMatA = FloatArray(16)
+                val stMatB = FloatArray(16)
+
+                // texA 的纹理坐标变换（居中 crop）
+                val aW = bmpA?.width ?: 1
+                val aH = bmpA?.height ?: 1
+                val aAsp = aW.toFloat() / aH
+                Matrix.setIdentityM(stMatA, 0)
+                Matrix.translateM(stMatA, 0, 0f, 1f, 0f)  // Y 翻转准备
+                Matrix.scaleM(stMatA, 0, 1f, -1f, 1f)     // Y 翻转
+                if (aAsp > sAsp) {
+                    // 图片更宽，裁剪左右，缩放 X
+                    val scale = aAsp / sAsp
+                    Matrix.translateM(stMatA, 0, 0.5f, 0.5f, 0f)
+                    Matrix.scaleM(stMatA, 0, 1f / scale, 1f, 1f)
+                    Matrix.translateM(stMatA, 0, -0.5f, -0.5f, 0f)
                 } else {
-                    Matrix.scaleM(mvp, 0, 1f, sAsp / cAsp, 1f)
+                    // 图片更高，裁剪上下，缩放 Y
+                    val scale = sAsp / aAsp
+                    Matrix.translateM(stMatA, 0, 0.5f, 0.5f, 0f)
+                    Matrix.scaleM(stMatA, 0, 1f, 1f / scale, 1f)
+                    Matrix.translateM(stMatA, 0, -0.5f, -0.5f, 0f)
                 }
 
+                // texB 的纹理坐标变换（居中 crop）
+                val bW = bmpB?.width ?: 1
+                val bH = bmpB?.height ?: 1
+                val bAsp = bW.toFloat() / bH
+                Matrix.setIdentityM(stMatB, 0)
+                Matrix.translateM(stMatB, 0, 0f, 1f, 0f)  // Y 翻转准备
+                Matrix.scaleM(stMatB, 0, 1f, -1f, 1f)     // Y 翻转
+                if (bAsp > sAsp) {
+                    val scale = bAsp / sAsp
+                    Matrix.translateM(stMatB, 0, 0.5f, 0.5f, 0f)
+                    Matrix.scaleM(stMatB, 0, 1f / scale, 1f, 1f)
+                    Matrix.translateM(stMatB, 0, -0.5f, -0.5f, 0f)
+                } else {
+                    val scale = sAsp / bAsp
+                    Matrix.translateM(stMatB, 0, 0.5f, 0.5f, 0f)
+                    Matrix.scaleM(stMatB, 0, 1f, 1f / scale, 1f)
+                    Matrix.translateM(stMatB, 0, -0.5f, -0.5f, 0f)
+                }
+
+                // MVP 矩阵（单位矩阵）
+                val mvp = FloatArray(16)
+                Matrix.setIdentityM(mvp, 0)
+
                 GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(transitionProg, "uMVP"), 1, false, mvp, 0)
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(transitionProg, "uST"), 1, false, stMat, 0)
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(transitionProg, "uSTA"), 1, false, stMatA, 0)
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(transitionProg, "uSTB"), 1, false, stMatB, 0)
 
                 val aPos = GLES20.glGetAttribLocation(transitionProg, "aPos")
                 val aTex = GLES20.glGetAttribLocation(transitionProg, "aTex")
@@ -603,7 +683,7 @@ class StaticRasterWallpaperService : WallpaperService() {
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uScreenWidth"), sW.toFloat())
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uProgress"), scanProgress)
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uDirection"), scanDirection.toFloat())
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uEdgeSoftness"), 0.15f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uEdgeSoftness"), 0.25f)
 
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             }
@@ -623,13 +703,47 @@ class StaticRasterWallpaperService : WallpaperService() {
             }
 
             fun finish() {
-                quitSafely()
-                if (display != EGL14.EGL_NO_DISPLAY) {
-                    EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
-                    EGL14.eglDestroySurface(display, eglSurface)
-                    EGL14.eglDestroyContext(display, context)
-                    EGL14.eglTerminate(display)
+                // 在线程退出前先清理 EGL 资源，避免竞态条件
+                val destroyLatch = java.util.concurrent.CountDownLatch(1)
+                handler?.post {
+                    try {
+                        // 先停止所有待处理的绘制任务
+                        handler?.removeCallbacks(drawRunnable)
+                        
+                        // 解除 EGL 上下文绑定
+                        if (display != EGL14.EGL_NO_DISPLAY) {
+                            EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+                            
+                            // 销毁表面
+                            if (eglSurface != EGL14.EGL_NO_SURFACE) {
+                                EGL14.eglDestroySurface(display, eglSurface)
+                                eglSurface = EGL14.EGL_NO_SURFACE
+                            }
+                            
+                            // 销毁上下文
+                            if (context != EGL14.EGL_NO_CONTEXT) {
+                                EGL14.eglDestroyContext(display, context)
+                            }
+                            
+                            // 终止显示连接
+                            EGL14.eglTerminate(display)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "EGL destroy error: ${e.message}")
+                    } finally {
+                        destroyLatch.countDown()
+                    }
                 }
+                
+                // 等待 EGL 资源销毁完成（最多 1 秒）
+                try {
+                    destroyLatch.await(1000, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (e: InterruptedException) {
+                    Log.e(TAG, "Interrupted while waiting for EGL destroy")
+                }
+                
+                // 然后安全退出线程
+                quitSafely()
             }
         }
     }
