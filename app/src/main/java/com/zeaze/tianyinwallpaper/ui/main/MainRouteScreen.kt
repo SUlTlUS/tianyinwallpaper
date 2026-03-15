@@ -110,17 +110,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntOffset
-private data class ThumbnailCacheKey(
-    val type: Int,
-    val uuid: String,
-    val imgUri: String,
-    val videoUri: String,
-    val imgPath: String
-)
 
-private const val THUMBNAIL_CACHE_MEMORY_DIVISOR = 8L
-private const val THUMBNAIL_VIDEO_WIDTH = 360
-private const val THUMBNAIL_VIDEO_HEIGHT = 640
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
 
@@ -158,86 +148,6 @@ private sealed class DialogState {
     object Overwrite : DialogState()
     data class Time(val index: Int) : DialogState()
     object Save : DialogState()
-}
-
-private val THUMBNAIL_CACHE = object : LruCache<ThumbnailCacheKey, Bitmap>(
-    (Runtime.getRuntime().maxMemory() / THUMBNAIL_CACHE_MEMORY_DIVISOR / 1024L).toInt()
-) {
-    override fun sizeOf(key: ThumbnailCacheKey, value: Bitmap): Int {
-        return value.byteCount / 1024
-    }
-}
-
-private fun buildThumbnailCacheKey(model: TianYinWallpaperModel): ThumbnailCacheKey {
-    return ThumbnailCacheKey(
-        type = model.type,
-        uuid = model.uuid.orEmpty(),
-        imgUri = model.imgUri.orEmpty(),
-        videoUri = model.videoUri.orEmpty(),
-        imgPath = model.imgPath.orEmpty()
-    )
-}
-
-private fun loadThumbnailBitmap(context: Context, model: TianYinWallpaperModel): Bitmap? {
-    val options = BitmapFactory.Options().apply {
-        inPreferredConfig = Bitmap.Config.RGB_565
-    }
-    return runCatching {
-        when {
-            model.type == 0 && !model.imgUri.isNullOrEmpty() -> {
-                context.contentResolver.openInputStream(Uri.parse(model.imgUri))?.use {
-                    BitmapFactory.decodeStream(it, null, options)
-                }
-            }
-            model.type == 1 && !model.videoUri.isNullOrEmpty() -> {
-                val thumbnailFile = getVideoThumbnailFile(context, model)
-                if (thumbnailFile != null && thumbnailFile.exists()) {
-                    return@runCatching BitmapFactory.decodeFile(thumbnailFile.absolutePath, options)
-                }
-                val retriever = MediaMetadataRetriever()
-                try {
-                    retriever.setDataSource(context, Uri.parse(model.videoUri))
-                    val frame = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
-                        retriever.getScaledFrameAtTime(
-                            0,
-                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                            THUMBNAIL_VIDEO_WIDTH,
-                            THUMBNAIL_VIDEO_HEIGHT
-                        )
-                    } else {
-                        retriever.getFrameAtTime(0)
-                    }
-                    if (frame != null && thumbnailFile != null) {
-                        runCatching {
-                            FileOutputStream(thumbnailFile).use {
-                                val saved = frame.compress(Bitmap.CompressFormat.JPEG, 85, it)
-                                if (!saved) {
-                                    Log.w("MainRouteScreen", "Failed to persist video thumbnail: ${thumbnailFile.absolutePath}")
-                                }
-                            }
-                        }.onFailure {
-                            Log.e("MainRouteScreen", "Failed to save video thumbnail: ${thumbnailFile.absolutePath}", it)
-                        }
-                    }
-                    frame
-                } finally {
-                    retriever.release()
-                }
-            }
-            !model.imgPath.isNullOrEmpty() -> BitmapFactory.decodeFile(model.imgPath, options)
-            else -> null
-        }
-    }.getOrNull()
-}
-
-private fun getVideoThumbnailFile(context: Context, model: TianYinWallpaperModel): File? {
-    val uuid = model.uuid ?: return null
-    val root = context.getExternalFilesDir(null) ?: return null
-    val thumbnailDir = File(root, "thumbnail_cache")
-    if (!thumbnailDir.mkdirs() && !thumbnailDir.exists()) {
-        return null
-    }
-    return File(thumbnailDir, "$uuid.jpg")
 }
 
 
@@ -1942,16 +1852,21 @@ private fun LiveSyncPreview(
 @Composable
 private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWallpaperModel) {
     val context = LocalContext.current
-    val cacheKey = buildThumbnailCacheKey(model)
+    val request = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.Request(
+        uuid = model.uuid.orEmpty(),
+        type = model.type,
+        imgUri = model.imgUri,
+        videoUri = model.videoUri,
+        imgPath = model.imgPath
+    )
     val bitmapState = produceState<Bitmap?>(
-        initialValue = THUMBNAIL_CACHE.get(cacheKey),
-        cacheKey
+        initialValue = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.getFromCache(request),
+        request
     ) {
         val loaded = withContext(Dispatchers.IO) {
-            THUMBNAIL_CACHE.get(cacheKey) ?: loadThumbnailBitmap(context, model)
+            com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.loadThumbnail(context, request)
         }
         value = loaded
-        loaded?.let { THUMBNAIL_CACHE.put(cacheKey, it) }
     }
     bitmapState.value?.let { bitmap ->
         Image(
@@ -1994,8 +1909,10 @@ private fun WallpaperThumbnail(
                             val holder = tag as? VideoPlayerHolder ?: return
                             val uri = holder.uri ?: return
                             try {
-                                holder.player.setSurface(Surface(surface))
                                 holder.player.reset()
+                                holder.player.isLooping = true
+                                holder.player.setVolume(0f, 0f)
+                                holder.player.setSurface(Surface(surface))
                                 holder.player.setDataSource(ctx, Uri.parse(uri))
                                 holder.player.setOnPreparedListener { mp ->
                                     updateMatrix(mp, this@apply)
@@ -2037,6 +1954,7 @@ private fun WallpaperThumbnail(
                 if (textureView.isAvailable) {
                     try {
                         holder.player.reset()
+                        holder.player.isLooping = true
                         holder.player.setDataSource(context, Uri.parse(newUri))
                         holder.player.setSurface(Surface(textureView.surfaceTexture))
                         holder.player.setOnPreparedListener { mp ->
@@ -2056,16 +1974,21 @@ private fun WallpaperThumbnail(
             modifier = if (useClip) modifier.clip(dialogShape) else modifier
         )
     } else {
-        val cacheKey = buildThumbnailCacheKey(model)
+        val request = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.Request(
+            uuid = model.uuid.orEmpty(),
+            type = model.type,
+            imgUri = model.imgUri,
+            videoUri = model.videoUri,
+            imgPath = model.imgPath
+        )
         val bitmapState = produceState<Bitmap?>(
-            initialValue = THUMBNAIL_CACHE.get(cacheKey),
-            cacheKey
+            initialValue = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.getFromCache(request),
+            request
         ) {
             val loaded = withContext(Dispatchers.IO) {
-                THUMBNAIL_CACHE.get(cacheKey) ?: loadThumbnailBitmap(context, model)
+                com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.loadThumbnail(context, request)
             }
             value = loaded
-            loaded?.let { THUMBNAIL_CACHE.put(cacheKey, it) }
         }
         bitmapState.value?.let { bitmap ->
             Image(

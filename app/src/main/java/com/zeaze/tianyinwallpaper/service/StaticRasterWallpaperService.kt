@@ -6,37 +6,23 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
-import android.graphics.SurfaceTexture
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
-import android.opengl.EGL14
-import android.opengl.EGLConfig
-import android.opengl.EGLContext
-import android.opengl.EGLDisplay
-import android.opengl.EGLSurface
-import android.opengl.GLES11Ext
-import android.opengl.GLES20
-import android.opengl.GLUtils
-import android.opengl.Matrix
-import android.os.Handler
-import android.os.HandlerThread
 import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.SurfaceHolder
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.FloatBuffer
-import java.util.concurrent.atomic.AtomicBoolean
+import com.zeaze.tianyinwallpaper.renderer.RasterGLRenderer
+import kotlin.math.abs
 
 /**
  * 图集光栅壁纸服务 - 专门处理静态图片光栅
- * 基于陀螺仪控制图片切换和扫描线过渡效果
+ * 使用共享的 RasterGLRenderer 渲染器
  */
 class StaticRasterWallpaperService : WallpaperService() {
     private var activeEngine: StaticRasterEngine? = null
@@ -51,42 +37,22 @@ class StaticRasterWallpaperService : WallpaperService() {
 
         // ── 数据 ──
         private var group: RasterGroupModel? = null
-        private var sensorWidth = 0.6f
-        private val transitionBand = 0.55f
         private var isVisible = false
+
+        // ── 共享渲染器 ──
+        private var renderer: RasterGLRenderer? = null
 
         // ── 传感器 ──
         private var sensorManager: SensorManager? = null
         private var gyroSensor: Sensor? = null
         private var lastGyroNs = 0L
         private var accumulatedAngle = 0f
-        private var stationaryDuration = 0f
-        private var tiltNormalized = 0f
-        private var tiltDirection = 0
-        
-        private var filteredAngle = 0f
-        private val FILTER_ALPHA = 0.15f
-
-        // ── 静态光栅 ──
-        private var staticBitmaps = mutableListOf<Bitmap?>()
-        private var imageCount = 0
-
-        // ── 扫描线状态 ──
-        private var currentFloatIndex = 0f
-        private var displayedIntIndex = -1
-        private var scanFromIndex = -1
-        private var scanToIndex = -1
-        private var scanProgress = 0f
-        private var scanDirection = 0
-
-        // ── EGL ──
-        private var eglThread: EglThread? = null
         private var _pref: SharedPreferences? = null
         private val pref: SharedPreferences? get() = _pref
 
         fun reload() {
             loadActiveGroup()
-            eglThread?.post { loadContent() }
+            loadContent()
         }
 
         // ────────────────────────────────────────────
@@ -101,39 +67,38 @@ class StaticRasterWallpaperService : WallpaperService() {
             sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
             gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
+            renderer = RasterGLRenderer()
             loadActiveGroup()
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
-            eglThread?.finish()
-            eglThread = EglThread(holder)
-            eglThread?.start()
+            // 渲染器会在 onSurfaceChanged 中启动
         }
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
             super.onSurfaceChanged(holder, format, width, height)
-            eglThread?.onSizeChanged(width, height)
+            renderer?.start(holder.surface)
+            renderer?.resize(width, height)
+            loadContent()
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
             super.onSurfaceDestroyed(holder)
-            // 表面销毁时立即停止渲染，防止 Use-after-free
-            eglThread?.finish()
-            eglThread = null
+            renderer?.stopAndWait(500)
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
             super.onVisibilityChanged(visible)
             isVisible = visible
-            
+
             if (visible) {
                 registerSensor()
 
                 val newGroupId = _pref?.getString(PREF_RASTER_ACTIVE_GROUP_ID, null)
                 if (newGroupId != group?.id) {
                     loadActiveGroup()
-                    eglThread?.post { loadContent() }
+                    loadContent()
                 }
             } else {
                 unregisterSensor()
@@ -144,9 +109,8 @@ class StaticRasterWallpaperService : WallpaperService() {
             super.onDestroy()
             if (activeEngine == this) activeEngine = null
             unregisterSensor()
-            releaseStaticBitmaps()
-            eglThread?.finish()
-            eglThread = null
+            renderer?.stop()
+            renderer = null
         }
 
         // ────────────────────────────────────────────
@@ -159,10 +123,6 @@ class StaticRasterWallpaperService : WallpaperService() {
             }
             lastGyroNs = 0L
             accumulatedAngle = 0f
-            filteredAngle = 0f
-            stationaryDuration = 0f
-            tiltNormalized = 0f
-            tiltDirection = 0
         }
 
         private fun unregisterSensor() {
@@ -183,99 +143,23 @@ class StaticRasterWallpaperService : WallpaperService() {
             lastGyroNs = e.timestamp
 
             val angularVelocity = e.values[1]
-            val absOmega = Math.abs(angularVelocity)
+            val absOmega = abs(angularVelocity)
             if (absOmega >= 0.01f) {
-                val rawDelta = angularVelocity * dt
-                accumulatedAngle += rawDelta
-                filteredAngle = FILTER_ALPHA * rawDelta + (1 - FILTER_ALPHA) * filteredAngle
+                accumulatedAngle += angularVelocity * dt
             }
 
-            val currentAngle = accumulatedAngle
-            val newTilt = (Math.abs(currentAngle) / sensorWidth).coerceIn(0f, 1f)
-            
-            val newDirection = when {
+            val sensorWidth = group?.sensorWidth ?: 0.6f
+            val tiltNormalized = (abs(accumulatedAngle) / sensorWidth).coerceIn(0f, 1f)
+            val direction = when {
                 accumulatedAngle < -0.05f -> 1
                 accumulatedAngle > 0.05f -> -1
-                else -> tiltDirection
+                else -> 0
             }
 
-            if (newTilt != tiltNormalized || newDirection != tiltDirection) {
-                tiltNormalized = newTilt
-                tiltDirection = newDirection
-                onTiltChanged()
-            }
+            renderer?.updateTilt(tiltNormalized, direction)
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-
-        private fun onTiltChanged() {
-            val g = group ?: return
-            if (g.type != RasterGroupModel.TYPE_STATIC) return
-            
-            if (imageCount == 0) return
-
-            val newFloatIndex = tiltNormalized * (imageCount - 1)
-            currentFloatIndex = newFloatIndex.coerceIn(0f, (imageCount - 1).toFloat())
-
-            if (imageCount == 1) {
-                if (displayedIntIndex != 0) {
-                    displayedIntIndex = 0
-                    eglThread?.uploadStaticFrame(0)
-                }
-                scanProgress = 0f
-                scanFromIndex = -1
-                scanToIndex = -1
-                eglThread?.requestRender()
-                return
-            }
-
-            val intIndex = currentFloatIndex.toInt().coerceIn(0, imageCount - 2)
-            val fraction = currentFloatIndex - intIndex
-
-            val fromIdx = intIndex
-            val toIdx = intIndex + 1
-
-            val bandStart = (1f - transitionBand) / 2f
-            val bandEnd = (1f + transitionBand) / 2f
-
-            if (fraction < bandStart) {
-                scanFromIndex = -1
-                scanToIndex = -1
-                scanProgress = 0f
-                val bitmap = staticBitmaps.getOrNull(fromIdx)
-                if (bitmap != null && displayedIntIndex != fromIdx) {
-                    displayedIntIndex = fromIdx
-                    eglThread?.setContentSize(bitmap.width, bitmap.height)
-                    eglThread?.uploadBitmapSync(bitmap)
-                }
-            } else if (fraction > bandEnd) {
-                scanFromIndex = -1
-                scanToIndex = -1
-                scanProgress = 0f
-                val bitmap = staticBitmaps.getOrNull(toIdx)
-                if (bitmap != null && displayedIntIndex != toIdx) {
-                    displayedIntIndex = toIdx
-                    eglThread?.setContentSize(bitmap.width, bitmap.height)
-                    eglThread?.uploadBitmapSync(bitmap)
-                }
-            } else {
-                val mappedProgress = ((fraction - bandStart) / transitionBand).coerceIn(0f, 1f)
-                if (scanFromIndex != fromIdx || scanToIndex != toIdx) {
-                    scanFromIndex = fromIdx
-                    scanToIndex = toIdx
-                    scanDirection = if (tiltDirection >= 0) 1 else -1
-                    eglThread?.post {
-                        val bmpA = staticBitmaps.getOrNull(fromIdx)
-                        val bmpB = staticBitmaps.getOrNull(toIdx)
-                        if (bmpA != null) eglThread?.uploadToTexA(bmpA)
-                        if (bmpB != null) eglThread?.uploadToTexB(bmpB)
-                    }
-                }
-                scanDirection = if (tiltDirection >= 0) 1 else -1
-                scanProgress = mappedProgress
-            }
-            eglThread?.requestRender()
-        }
 
         // ────────────────────────────────────────────
         // 数据加载
@@ -296,455 +180,23 @@ class StaticRasterWallpaperService : WallpaperService() {
             val g = group ?: return
             if (g.type != RasterGroupModel.TYPE_STATIC) return
 
-            prepareStaticImages(g)
-        }
+            // 设置渲染参数
+            renderer?.sensorWidth = g.sensorWidth
 
-        private fun prepareStaticImages(g: RasterGroupModel) {
-            releaseStaticBitmaps()
-            staticBitmaps.clear()
-
-            g.imageUris.forEach { uriStr ->
-                val bitmap = try {
+            // 加载图片
+            val bitmaps = g.imageUris.mapNotNull { uriStr ->
+                try {
                     applicationContext.contentResolver.openInputStream(Uri.parse(uriStr))?.use {
                         BitmapFactory.decodeStream(it)
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to decode static image: $uriStr", e)
+                    Log.e(TAG, "Failed to decode image: $uriStr", e)
                     null
                 }
-                staticBitmaps.add(bitmap)
             }
 
-            imageCount = staticBitmaps.size
-            displayedIntIndex = -1
-            scanFromIndex = -1
-            scanToIndex = -1
-            scanProgress = 0f
-
-            currentFloatIndex = 0f
-            if (staticBitmaps.isNotEmpty()) {
-                displayedIntIndex = 0
-                uploadStaticFrame(0)
-            }
-        }
-
-        private fun uploadStaticFrame(index: Int) {
-            val bitmap = staticBitmaps.getOrNull(index) ?: return
-            eglThread?.setContentSize(bitmap.width, bitmap.height)
-            eglThread?.uploadBitmap(bitmap, recycle = false)
-        }
-
-        private fun releaseStaticBitmaps() {
-            staticBitmaps.forEach { it?.recycle() }
-            staticBitmaps.clear()
-        }
-
-        // ────────────────────────────────────────────
-        // EGL 渲染线程
-        // ────────────────────────────────────────────
-
-        private inner class EglThread(private val holder: SurfaceHolder) : HandlerThread("StaticRasterEGL") {
-            private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
-            private var context: EGLContext = EGL14.EGL_NO_CONTEXT
-            private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
-            private var handler: Handler? = null
-
-            private var iTexId = 0
-            private var texAId = 0
-            private var texBId = 0
-            private var iProg = 0
-            private var transitionProg = 0
-            private var vBuf: FloatBuffer
-            private var tBuf: FloatBuffer
-
-            private var sW = 0
-            private var sH = 0
-            private var cW = 1
-            private var cH = 1
-
-            // texA 和 texB 各自的尺寸
-            private var texAW = 1
-            private var texAH = 1
-            private var texBW = 1
-            private var texBH = 1
-
-            private val imageMatrix = FloatArray(16)
-
-            init {
-                val vData = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
-                vBuf = ByteBuffer.allocateDirect(vData.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(vData)
-                vBuf.position(0)
-                val tData = floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
-                tBuf = ByteBuffer.allocateDirect(tData.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(tData)
-                tBuf.position(0)
-
-                Matrix.setIdentityM(imageMatrix, 0)
-                Matrix.translateM(imageMatrix, 0, 0f, 1f, 0f)
-                Matrix.scaleM(imageMatrix, 0, 1f, -1f, 1f)
-            }
-
-            fun uploadBitmapSync(b: Bitmap) {
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId)
-                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
-            }
-
-            fun uploadStaticFrame(index: Int) {
-                val bitmap = this@StaticRasterEngine.staticBitmaps.getOrNull(index) ?: return
-                setContentSize(bitmap.width, bitmap.height)
-                uploadBitmapSync(bitmap)
-            }
-
-            fun onSizeChanged(w: Int, h: Int) {
-                sW = w; sH = h
-                requestRender()
-            }
-
-            fun setContentSize(w: Int, h: Int) {
-                cW = if (w > 0) w else 1
-                cH = if (h > 0) h else 1
-            }
-
-            fun post(r: () -> Unit) { handler?.post(r) }
-
-            fun uploadBitmap(b: Bitmap, recycle: Boolean = true) {
-                post {
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId)
-                    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
-                    if (recycle) b.recycle()
-                    requestRender()
-                }
-            }
-
-            fun uploadToTexA(b: Bitmap) {
-                texAW = b.width
-                texAH = b.height
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texAId)
-                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
-            }
-
-            fun uploadToTexB(b: Bitmap) {
-                texBW = b.width
-                texBH = b.height
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texBId)
-                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, b, 0)
-            }
-
-            override fun onLooperPrepared() {
-                if (!initEGL()) return
-                initGL()
-                handler = Handler(looper)
-                post { loadContent() }
-            }
-
-            private fun initEGL(): Boolean {
-                display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
-                val version = IntArray(2)
-                EGL14.eglInitialize(display, version, 0, version, 1)
-                val attr = intArrayOf(
-                    EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8,
-                    EGL14.EGL_ALPHA_SIZE, 8,
-                    EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
-                    EGL14.EGL_NONE
-                )
-                val configs = arrayOfNulls<EGLConfig>(1)
-                val numConfigs = IntArray(1)
-                EGL14.eglChooseConfig(display, attr, 0, configs, 0, 1, numConfigs, 0)
-                context = EGL14.eglCreateContext(
-                    display, configs[0], EGL14.EGL_NO_CONTEXT,
-                    intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0
-                )
-                eglSurface = EGL14.eglCreateWindowSurface(
-                    display, configs[0], holder.surface,
-                    intArrayOf(EGL14.EGL_NONE), 0
-                )
-                return EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
-            }
-
-            private fun initGL() {
-                val vs = "attribute vec4 aPos; attribute vec2 aTex; varying vec2 vTex; uniform mat4 uMVP; uniform mat4 uST; void main(){ gl_Position = uMVP * aPos; vTex = (uST * vec4(aTex,0,1)).xy; }"
-                val fsI = "precision mediump float; varying vec2 vTex; uniform sampler2D sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }"
-                iProg = createProg(vs, fsI)
-
-                val transVs = """
-                    attribute vec4 aPos;
-                    attribute vec2 aTex;
-                    varying vec2 vTexA;
-                    varying vec2 vTexB;
-                    uniform mat4 uMVP;
-                    uniform mat4 uSTA;
-                    uniform mat4 uSTB;
-                    void main() {
-                        gl_Position = uMVP * aPos;
-                        vTexA = (uSTA * vec4(aTex, 0.0, 1.0)).xy;
-                        vTexB = (uSTB * vec4(aTex, 0.0, 1.0)).xy;
-                    }
-                """.trimIndent()
-
-                val transFs = """
-                    precision mediump float;
-                    varying vec2 vTexA;
-                    varying vec2 vTexB;
-                    uniform sampler2D sTexA;
-                    uniform sampler2D sTexB;
-                    uniform float uProgress;
-                    uniform float uDirection;
-                    uniform float uEdgeSoftness;
-                    uniform float uScreenWidth;
-
-                    void main() {
-                        vec4 colorA = texture2D(sTexA, vTexA);
-                        vec4 colorB = texture2D(sTexB, vTexB);
-
-                        float coord = gl_FragCoord.x / uScreenWidth;
-                        float blend;
-
-                        if (uDirection > 0.0) {
-                            float edge = 1.0 - uProgress;
-                            blend = smoothstep(edge - uEdgeSoftness, edge + uEdgeSoftness, coord);
-                            gl_FragColor = mix(colorA, colorB, blend);
-                        } else {
-                            float edge = uProgress;
-                            blend = smoothstep(edge - uEdgeSoftness, edge + uEdgeSoftness, coord);
-                            gl_FragColor = mix(colorB, colorA, blend);
-                        }
-                    }
-                """.trimIndent()
-
-                transitionProg = createProg(transVs, transFs)
-
-                val tex = IntArray(3)
-                GLES20.glGenTextures(3, tex, 0)
-                iTexId = tex[0]
-                texAId = tex[1]
-                texBId = tex[2]
-
-                for (texId in intArrayOf(iTexId, texAId, texBId)) {
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
-                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-                }
-            }
-
-            fun requestRender() {
-                handler?.removeCallbacks(drawRunnable)
-                handler?.post(drawRunnable)
-            }
-
-            private val drawRunnable = Runnable { draw() }
-
-            private fun draw() {
-                // 多重检查防止 Surface 已销毁
-                if (display == EGL14.EGL_NO_DISPLAY || eglSurface == EGL14.EGL_NO_SURFACE) {
-                    Log.w(TAG, "draw: EGL not ready, skipping")
-                    return
-                }
-                
-                // 检查 EGL 上下文是否仍然有效
-                val currentContext = EGL14.eglGetCurrentContext()
-                if (currentContext == EGL14.EGL_NO_CONTEXT) {
-                    Log.w(TAG, "draw: EGL context lost, skipping")
-                    return
-                }
-                
-                if (!EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) {
-                    Log.e(TAG, "draw: eglMakeCurrent failed: ${EGL14.eglGetError()}")
-                    return
-                }
-
-                GLES20.glViewport(0, 0, sW, sH)
-                GLES20.glClearColor(0f, 0f, 0f, 1f)
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-
-                val g = group
-
-                if (g?.type == RasterGroupModel.TYPE_STATIC && scanFromIndex >= 0 && scanToIndex >= 0 && scanProgress > 0f) {
-                    drawTransition()
-                } else if (g?.type == RasterGroupModel.TYPE_STATIC) {
-                    val targetIdx = displayedIntIndex
-                    val bitmap = staticBitmaps.getOrNull(targetIdx)
-                    if (bitmap != null) {
-                        uploadBitmapSync(bitmap)
-                    }
-
-                    GLES20.glUseProgram(iProg)
-
-                    val stMat = FloatArray(16)
-                    System.arraycopy(imageMatrix, 0, stMat, 0, 16)
-
-                    val mvp = FloatArray(16)
-                    Matrix.setIdentityM(mvp, 0)
-                    val cAsp = cW.toFloat() / cH
-                    val sAsp = sW.toFloat() / sH
-                    if (cAsp > sAsp) {
-                        Matrix.scaleM(mvp, 0, cAsp / sAsp, 1f, 1f)
-                    } else {
-                        Matrix.scaleM(mvp, 0, 1f, sAsp / cAsp, 1f)
-                    }
-
-                    val aPos = GLES20.glGetAttribLocation(iProg, "aPos")
-                    val aTex = GLES20.glGetAttribLocation(iProg, "aTex")
-                    GLES20.glEnableVertexAttribArray(aPos)
-                    GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, vBuf)
-                    GLES20.glEnableVertexAttribArray(aTex)
-                    GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tBuf)
-
-                    GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(iProg, "uMVP"), 1, false, mvp, 0)
-                    GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(iProg, "uST"), 1, false, stMat, 0)
-
-                    GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId)
-                    GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-                }
-
-                if (!EGL14.eglSwapBuffers(display, eglSurface)) {
-                    Log.e(TAG, "SwapBuffers failed")
-                }
-            }
-
-            private fun drawTransition() {
-                GLES20.glUseProgram(transitionProg)
-
-                // 计算屏幕宽高比
-                val sAsp = if (sH > 0) sW.toFloat() / sH else 9f / 16f
-
-                // 从 staticBitmaps 获取实际尺寸
-                val bmpA = staticBitmaps.getOrNull(scanFromIndex)
-                val bmpB = staticBitmaps.getOrNull(scanToIndex)
-
-                // 计算两张图片各自的变换矩阵（居中 crop）
-                val stMatA = FloatArray(16)
-                val stMatB = FloatArray(16)
-
-                // texA 的纹理坐标变换（居中 crop）
-                val aW = bmpA?.width ?: 1
-                val aH = bmpA?.height ?: 1
-                val aAsp = aW.toFloat() / aH
-                Matrix.setIdentityM(stMatA, 0)
-                Matrix.translateM(stMatA, 0, 0f, 1f, 0f)  // Y 翻转准备
-                Matrix.scaleM(stMatA, 0, 1f, -1f, 1f)     // Y 翻转
-                if (aAsp > sAsp) {
-                    // 图片更宽，裁剪左右，缩放 X
-                    val scale = aAsp / sAsp
-                    Matrix.translateM(stMatA, 0, 0.5f, 0.5f, 0f)
-                    Matrix.scaleM(stMatA, 0, 1f / scale, 1f, 1f)
-                    Matrix.translateM(stMatA, 0, -0.5f, -0.5f, 0f)
-                } else {
-                    // 图片更高，裁剪上下，缩放 Y
-                    val scale = sAsp / aAsp
-                    Matrix.translateM(stMatA, 0, 0.5f, 0.5f, 0f)
-                    Matrix.scaleM(stMatA, 0, 1f, 1f / scale, 1f)
-                    Matrix.translateM(stMatA, 0, -0.5f, -0.5f, 0f)
-                }
-
-                // texB 的纹理坐标变换（居中 crop）
-                val bW = bmpB?.width ?: 1
-                val bH = bmpB?.height ?: 1
-                val bAsp = bW.toFloat() / bH
-                Matrix.setIdentityM(stMatB, 0)
-                Matrix.translateM(stMatB, 0, 0f, 1f, 0f)  // Y 翻转准备
-                Matrix.scaleM(stMatB, 0, 1f, -1f, 1f)     // Y 翻转
-                if (bAsp > sAsp) {
-                    val scale = bAsp / sAsp
-                    Matrix.translateM(stMatB, 0, 0.5f, 0.5f, 0f)
-                    Matrix.scaleM(stMatB, 0, 1f / scale, 1f, 1f)
-                    Matrix.translateM(stMatB, 0, -0.5f, -0.5f, 0f)
-                } else {
-                    val scale = sAsp / bAsp
-                    Matrix.translateM(stMatB, 0, 0.5f, 0.5f, 0f)
-                    Matrix.scaleM(stMatB, 0, 1f, 1f / scale, 1f)
-                    Matrix.translateM(stMatB, 0, -0.5f, -0.5f, 0f)
-                }
-
-                // MVP 矩阵（单位矩阵）
-                val mvp = FloatArray(16)
-                Matrix.setIdentityM(mvp, 0)
-
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(transitionProg, "uMVP"), 1, false, mvp, 0)
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(transitionProg, "uSTA"), 1, false, stMatA, 0)
-                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(transitionProg, "uSTB"), 1, false, stMatB, 0)
-
-                val aPos = GLES20.glGetAttribLocation(transitionProg, "aPos")
-                val aTex = GLES20.glGetAttribLocation(transitionProg, "aTex")
-                GLES20.glEnableVertexAttribArray(aPos)
-                GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, vBuf)
-                GLES20.glEnableVertexAttribArray(aTex)
-                GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tBuf)
-
-                GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texAId)
-                GLES20.glUniform1i(GLES20.glGetUniformLocation(transitionProg, "sTexA"), 0)
-
-                GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texBId)
-                GLES20.glUniform1i(GLES20.glGetUniformLocation(transitionProg, "sTexB"), 1)
-
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uScreenWidth"), sW.toFloat())
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uProgress"), scanProgress)
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uDirection"), scanDirection.toFloat())
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(transitionProg, "uEdgeSoftness"), 0.25f)
-
-                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-            }
-
-            private fun createProg(v: String, f: String): Int {
-                val vs = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER)
-                GLES20.glShaderSource(vs, v)
-                GLES20.glCompileShader(vs)
-                val fs = GLES20.glCreateShader(GLES20.GL_FRAGMENT_SHADER)
-                GLES20.glShaderSource(fs, f)
-                GLES20.glCompileShader(fs)
-                val p = GLES20.glCreateProgram()
-                GLES20.glAttachShader(p, vs)
-                GLES20.glAttachShader(p, fs)
-                GLES20.glLinkProgram(p)
-                return p
-            }
-
-            fun finish() {
-                // 在线程退出前先清理 EGL 资源，避免竞态条件
-                val destroyLatch = java.util.concurrent.CountDownLatch(1)
-                handler?.post {
-                    try {
-                        // 先停止所有待处理的绘制任务
-                        handler?.removeCallbacks(drawRunnable)
-                        
-                        // 解除 EGL 上下文绑定
-                        if (display != EGL14.EGL_NO_DISPLAY) {
-                            EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
-                            
-                            // 销毁表面
-                            if (eglSurface != EGL14.EGL_NO_SURFACE) {
-                                EGL14.eglDestroySurface(display, eglSurface)
-                                eglSurface = EGL14.EGL_NO_SURFACE
-                            }
-                            
-                            // 销毁上下文
-                            if (context != EGL14.EGL_NO_CONTEXT) {
-                                EGL14.eglDestroyContext(display, context)
-                            }
-                            
-                            // 终止显示连接
-                            EGL14.eglTerminate(display)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "EGL destroy error: ${e.message}")
-                    } finally {
-                        destroyLatch.countDown()
-                    }
-                }
-                
-                // 等待 EGL 资源销毁完成（最多 1 秒）
-                try {
-                    destroyLatch.await(1000, java.util.concurrent.TimeUnit.MILLISECONDS)
-                } catch (e: InterruptedException) {
-                    Log.e(TAG, "Interrupted while waiting for EGL destroy")
-                }
-                
-                // 然后安全退出线程
-                quitSafely()
-            }
+            renderer?.loadBitmaps(bitmaps)
+            renderer?.requestRender()
         }
     }
 
@@ -759,6 +211,6 @@ class StaticRasterWallpaperService : WallpaperService() {
         const val ACTION_RELOAD = "com.zeaze.tianyinwallpaper.STATIC_RASTER_RELOAD"
         const val PREF_RASTER_GROUPS = "rasterGroups"
         const val PREF_RASTER_ACTIVE_GROUP_ID = "rasterActiveGroupId"
-        private const val TAG = "StaticRasterGL"
+        private const val TAG = "StaticRasterService"
     }
 }
