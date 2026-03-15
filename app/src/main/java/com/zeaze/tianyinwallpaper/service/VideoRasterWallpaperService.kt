@@ -26,7 +26,6 @@ import com.zeaze.tianyinwallpaper.service.raster.RVEffectPreCtrl
 import com.zeaze.tianyinwallpaper.service.raster.RasterVideoPreRenderParamBean
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 /**
  * 视频光栅壁纸服务
@@ -37,16 +36,6 @@ class VideoRasterWallpaperService : WallpaperService() {
 
     override fun onCreateEngine(): Engine = VideoRasterEngine()
 
-    data class ReverseBean(
-        var reverseSupport: Boolean = true,
-        var reverseStiffness: Float = 180f,
-        var reverseDampingRatio: Float = 0.85f,
-        var mStartVelocity: Float = 0f,
-        var mLastReverse: Boolean = false
-    ) {
-        fun damping(): Float = 2f * sqrt(reverseStiffness) * reverseDampingRatio
-    }
-
     inner class AngleSensor : SensorEventListener {
         private var sensorManager: SensorManager? = null
         private var gyroSensor: Sensor? = null
@@ -55,12 +44,15 @@ class VideoRasterWallpaperService : WallpaperService() {
             private set
 
         private var lastTimestamp: Long = 0L
-        private var accumulatedAngle: Float = 0f
+        private var accumulatedAngle: Float = 0f  // 累积角度（弧度）
         private var filteredAngle: Float = 0f
 
-        private val FILTER_ALPHA = 0.12f
-        private val MAX_ANGLE_RAD = Math.toRadians(45.0).toFloat()
-        private val DEAD_ZONE_RAD = Math.toRadians(1.5).toFloat()
+        // 参考 vivo 配置
+        private val FILTER_ALPHA = 0.15f
+        private val MAX_ANGLE_DEG = 45.0  // 最大角度（度）
+        private val MAX_ANGLE_RAD = Math.toRadians(MAX_ANGLE_DEG).toFloat()
+        private val DEAD_ZONE_DEG = 1.5   // 死区角度（度）
+        private val DEAD_ZONE_RAD = Math.toRadians(DEAD_ZONE_DEG).toFloat()
 
         var onAngleChanged: ((Float) -> Unit)? = null
 
@@ -108,11 +100,15 @@ class VideoRasterWallpaperService : WallpaperService() {
 
             if (dt <= 0 || dt > 0.5f) return
 
+            // 参考 vivo: 使用 values[1]（Y轴角速度）计算角度变化
             val angularVelocity = event.values[1]
             accumulatedAngle += angularVelocity * dt
             accumulatedAngle = accumulatedAngle.coerceIn(-MAX_ANGLE_RAD, MAX_ANGLE_RAD)
+
+            // 低通滤波平滑
             filteredAngle = FILTER_ALPHA * accumulatedAngle + (1 - FILTER_ALPHA) * filteredAngle
 
+            // 死区处理
             val angleWithDeadZone = if (abs(filteredAngle) < DEAD_ZONE_RAD) {
                 0f
             } else {
@@ -137,11 +133,13 @@ class VideoRasterWallpaperService : WallpaperService() {
 
         private val angleSensor = AngleSensor()
 
-        private val reverseBean = ReverseBean()
-        @Volatile
-        private var playbackSpeed = 0f
         private var currentPlaybackPosition = 0f
         private var lastUpdateTime = System.currentTimeMillis()
+
+        // 初始偏离方向：null=未确定, true=右倾初始, false=左倾初始
+        private var initialTiltDirection: Boolean? = null
+        private var currentFrameIndex = 0  // 当前播放帧索引
+        private var baseFrameOnDirection: Int = 0  // 确定初始方向时的基准帧
 
         private var eglHandler: Handler? = null
         private var isWaitingForSurface = false
@@ -159,10 +157,6 @@ class VideoRasterWallpaperService : WallpaperService() {
         fun reload() {
             loadActiveGroup()
             eglThread?.post { loadContent() }
-        }
-
-        private fun isReverseOrBreakOperation(): Boolean {
-            return playbackSpeed < 0
         }
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
@@ -200,6 +194,8 @@ class VideoRasterWallpaperService : WallpaperService() {
                 angleSensor.registerSensor(applicationContext)
                 checkGroupChange()
             } else {
+                // 离开桌面时（锁屏、打开应用）重置初始方向
+                initialTiltDirection = null
                 angleSensor.unregisterSensor()
             }
         }
@@ -237,14 +233,29 @@ class VideoRasterWallpaperService : WallpaperService() {
             if (effectCtrl?.isPrepared() != true) return
 
             val maxAngle = Math.toRadians(45.0).toFloat()
-            val normalizedAngle = sensorValue / maxAngle
+            val notResponseAngle = Math.toRadians(1.5).toFloat()
+            val deadZone = Math.toRadians(1.0).toFloat()
 
-            playbackSpeed = normalizedAngle.coerceIn(-1f, 1f)
+            // 检测当前倾斜方向
+            val isTilting = abs(sensorValue) > deadZone
 
-            val currentReverse = playbackSpeed < 0
-            reverseBean.mLastReverse = currentReverse
+            // 每次回到初始位置（水平位置）时重置初始方向
+            if (!isTilting) {
+                initialTiltDirection = null
+            }
 
-            Log.d(TAG, "Sensor: angle=${String.format("%.3f", sensorValue)}, speed=${String.format("%.3f", playbackSpeed)}")
+            // 如果正在倾斜且初始方向未确定，记录初始方向和基准帧
+            if (isTilting && initialTiltDirection == null) {
+                initialTiltDirection = sensorValue > 0  // true=右倾, false=左倾
+                // 从 RVRes 获取真实的当前帧作为基准
+                baseFrameOnDirection = effectCtrl?.getCurrentFrame() ?: 0
+                Log.w(TAG, "Initial tilt direction set: ${if (sensorValue > 0) "RIGHT" else "LEFT"}, baseFrame=$baseFrameOnDirection")
+            }
+
+            // 使用带符号的进度值（右倾为正，左倾为负）
+            currentPlaybackPosition = (sensorValue / (maxAngle - notResponseAngle)).coerceIn(-1f, 1f)
+
+            Log.d(TAG, "Sensor: angle=${String.format("%.3f", Math.toDegrees(sensorValue.toDouble()))}°, progress=${String.format("%.3f", currentPlaybackPosition)}, initialDir=${initialTiltDirection}")
         }
 
         private fun loadActiveGroup() {
@@ -304,7 +315,15 @@ class VideoRasterWallpaperService : WallpaperService() {
                     Log.w(TAG, "EffectCtrl onPrepared: frames=$frameCount, duration=$duration, thread=${Thread.currentThread().name}")
                     lastUpdateTime = System.currentTimeMillis()
                     currentPlaybackPosition = 0f
-                    lastSeekPosition = -1f
+                    lastFrameIndex = -1
+                    initialTiltDirection = null
+                    
+                    // 初始帧在中间位置，并实际 seek 到该帧
+                    val midFrame = frameCount / 2
+                    effectCtrl?.seekToFrame(midFrame)
+                    currentFrameIndex = midFrame
+                    baseFrameOnDirection = midFrame
+                    
                     startPlaybackLoop()
                 }
 
@@ -333,14 +352,16 @@ class VideoRasterWallpaperService : WallpaperService() {
 
         private var playbackRunnable: Runnable? = null
         private val PLAYBACK_INTERVAL_MS = 16L
-        private var lastSeekPosition = -1f  // 记录上次seek的位置
-        private val MIN_SEEK_DELTA = 0.002f  // 最小 seek 阈值，避免频繁 seek
+
+        private var lastFrameIndex = -1  // 记录上次播放的帧索引
 
         private fun startPlaybackLoop() {
             Log.w(TAG, "startPlaybackLoop")
             stopPlaybackLoop()
             lastUpdateTime = System.currentTimeMillis()
-            lastSeekPosition = -1f  // 重置
+            lastFrameIndex = -1
+            initialTiltDirection = null
+            // 基准帧在 doSensorChangeEvent 中动态设置
 
             playbackRunnable = object : Runnable {
                 override fun run() {
@@ -351,11 +372,8 @@ class VideoRasterWallpaperService : WallpaperService() {
                         return
                     }
 
-                    val now = System.currentTimeMillis()
-                    val dt = (now - lastUpdateTime) / 1000f
-                    lastUpdateTime = now
-
-                    updatePlayback(dt)
+                    // 【vivo 方案】角度直接映射到帧索引
+                    updatePlaybackVivoStyle()
 
                     // 请求渲染
                     eglThread?.requestRender()
@@ -376,42 +394,55 @@ class VideoRasterWallpaperService : WallpaperService() {
         }
 
         /**
-         * 方案二：TextureView 轮询 + 跳转
-         * 播放器保持暂停状态，只通过 seekTo 触发帧渲染
+         * 播放逻辑：
+         * - 初始右倾：右倾正放（帧增加），左倾倒放（帧减少）
+         * - 初始左倾：左倾正放（帧增加），右倾倒放（帧减少）
+         * - 静止时保持在当前帧
          */
-        private fun updatePlayback(dt: Float) {
-            val videoDuration = effectCtrl?.getVideoDuration() ?: 0L
-            if (videoDuration <= 0) return
-
-            // playbackSpeed: -1 到 1，表示移动速度和方向
-            // 乘以速度倍数，计算实际位置变化
-            val maxSpeedMultiplier = 1.5f
-            val speed = playbackSpeed * maxSpeedMultiplier
-
-            // 计算位置变化
-            val positionChange = speed * dt
-            currentPlaybackPosition += positionChange
-
-            // 边界处理：到达边界时反弹
-            if (currentPlaybackPosition < 0f) {
-                currentPlaybackPosition = -currentPlaybackPosition
-            } else if (currentPlaybackPosition > 1f) {
-                currentPlaybackPosition = 2f - currentPlaybackPosition
-            }
-            currentPlaybackPosition = currentPlaybackPosition.coerceIn(0f, 1f)
-
-            // 只有当位置有明显变化时才 seek，避免频繁 seek
-            if (kotlin.math.abs(currentPlaybackPosition - lastSeekPosition) >= MIN_SEEK_DELTA) {
-                // 如果速度接近0（静止），使用单帧渲染模式，否则保持播放
-                val shouldPauseAfter = kotlin.math.abs(speed) < 0.1f
-                effectCtrl?.seekToPosition(currentPlaybackPosition, shouldPauseAfter)
-                lastSeekPosition = currentPlaybackPosition
+        private fun updatePlaybackVivoStyle() {
+            val totalFrames = effectCtrl?.getFrameCount() ?: 0
+            if (totalFrames < 1) {
+                Log.w(TAG, "updatePlaybackVivoStyle: totalFrames=$totalFrames, skipping")
+                return
             }
 
-            frameCount++
-            if (frameCount % 60 == 0L) {
-                Log.d(TAG, "Playback: pos=${String.format("%.3f", currentPlaybackPosition)}, " +
-                        "speed=${String.format("%.3f", speed)}")
+            // 从 RVRes 获取真实的当前帧
+            val actualCurrentFrame = effectCtrl?.getCurrentFrame() ?: 0
+
+            // 根据初始方向和带符号的进度计算帧索引
+            val targetFrameIndex = if (initialTiltDirection == null) {
+                // 未确定初始方向（在水平位置），保持当前帧不变
+                actualCurrentFrame
+            } else {
+                // 使用确定方向时的基准帧
+                val frameOffset = (currentPlaybackPosition * totalFrames).toInt()
+                val initialDir = initialTiltDirection!!
+
+                // 核心逻辑：
+                // 初始右倾(true)：右倾(progress>0)正放，左倾(progress<0)倒放
+                // 初始左倾(false)：左倾(progress<0)正放，右倾(progress>0)倒放
+                if (initialDir) {
+                    // 初始右倾：直接使用带符号偏移
+                    baseFrameOnDirection + frameOffset
+                } else {
+                    // 初始左倾：反转偏移方向
+                    baseFrameOnDirection - frameOffset
+                }
+            }
+
+            // 限制帧范围
+            val finalFrameIndex = targetFrameIndex.coerceIn(0, totalFrames - 1)
+
+            // 只有帧变化时才 seek
+            if (finalFrameIndex != lastFrameIndex) {
+                Log.w(TAG, "updatePlayback: frame $lastFrameIndex → $finalFrameIndex, initialDir=${initialTiltDirection}, baseFrame=$baseFrameOnDirection, progress=${String.format("%.3f", currentPlaybackPosition)}")
+                effectCtrl?.seekToFrame(finalFrameIndex)
+                lastFrameIndex = finalFrameIndex
+
+                frameCount++
+                if (frameCount % 30 == 0L) {
+                    Log.d(TAG, "Playback: frame=$finalFrameIndex / $totalFrames")
+                }
             }
         }
 
@@ -522,6 +553,10 @@ class VideoRasterWallpaperService : WallpaperService() {
                 }
                 
                 EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
+
+                // 更新动画数据（进度、透明度等）
+                effectCtrl?.setProcess(currentPlaybackPosition)
+                effectCtrl?.onUpdateAnimationData()
 
                 // 使用 RVEffectPreCtrl 进行渲染
                 effectCtrl?.onDrawFrame(sW, sH)
