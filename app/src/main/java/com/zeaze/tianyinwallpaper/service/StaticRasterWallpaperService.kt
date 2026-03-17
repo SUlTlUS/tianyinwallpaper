@@ -3,33 +3,34 @@ package com.zeaze.tianyinwallpaper.service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.net.Uri
 import android.service.wallpaper.WallpaperService
-import android.util.Log
 import android.view.SurfaceHolder
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.renderer.RasterGLRenderer
-import kotlin.math.abs
 
 /**
  * 图集光栅壁纸服务 - 专门处理静态图片光栅
- * 使用共享的 RasterGLRenderer 渲染器
+ * 
+ * 特性：
+ * - 多种扫描线效果支持
+ * - 集成传感器数据处理
+ * - Bitmap缓存机制
+ * - 实时参数更新
+ * - 无限制图片数量支持
  */
 class StaticRasterWallpaperService : WallpaperService() {
     private var activeEngine: StaticRasterEngine? = null
 
     override fun onCreateEngine(): Engine = StaticRasterEngine()
 
-    inner class StaticRasterEngine : Engine(), SensorEventListener {
+    inner class StaticRasterEngine : Engine() {
 
         init {
             activeEngine = this
@@ -39,14 +40,14 @@ class StaticRasterWallpaperService : WallpaperService() {
         private var group: RasterGroupModel? = null
         private var isVisible = false
 
-        // ── 共享渲染器 ──
+        // ── 渲染器（集成传感器处理）
         private var renderer: RasterGLRenderer? = null
 
         // ── 传感器 ──
         private var sensorManager: SensorManager? = null
         private var gyroSensor: Sensor? = null
-        private var lastGyroNs = 0L
-        private var accumulatedAngle = 0f
+        
+        // ── SharedPreferences ──
         private var _pref: SharedPreferences? = null
         private val pref: SharedPreferences? get() = _pref
 
@@ -67,13 +68,14 @@ class StaticRasterWallpaperService : WallpaperService() {
             sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
             gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
+            // 初始化渲染器（集成传感器处理）
             renderer = RasterGLRenderer()
+            
             loadActiveGroup()
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
-            // 渲染器会在 onSurfaceChanged 中启动
         }
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -95,15 +97,29 @@ class StaticRasterWallpaperService : WallpaperService() {
             if (visible) {
                 registerSensor()
 
-                val newGroupId = _pref?.getString(PREF_RASTER_ACTIVE_GROUP_ID, null)
-                if (newGroupId != group?.id) {
-                    loadActiveGroup()
-                    loadContent()
+                // 重新从 SharedPreferences 读取最新参数
+                loadActiveGroup()
+                val g = group
+                if (g != null && g.type == RasterGroupModel.TYPE_STATIC) {
+                    // 检查图片列表是否相同
+                    val currentUris = g.imageUris.toSet()
+                    val loadedUris = loadedImageUris.toSet()
+                    
+                    if (currentUris == loadedUris) {
+                        // 图片相同，只更新参数
+                        renderer?.updateParamsFromModel(g)
+                    } else {
+                        // 图片不同，重新加载
+                        loadContent()
+                    }
                 }
             } else {
                 unregisterSensor()
             }
         }
+        
+        // 记录已加载的图片 URI
+        private var loadedImageUris: List<String> = emptyList()
 
         override fun onDestroy() {
             super.onDestroy()
@@ -118,48 +134,27 @@ class StaticRasterWallpaperService : WallpaperService() {
         // ────────────────────────────────────────────
 
         private fun registerSensor() {
-            gyroSensor?.let {
-                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+            gyroSensor?.let { sensor ->
+                renderer?.resetSensor()
+                sensorManager?.registerListener(
+                    sensorListener, 
+                    sensor, 
+                    SensorManager.SENSOR_DELAY_GAME
+                )
             }
-            lastGyroNs = 0L
-            accumulatedAngle = 0f
         }
 
         private fun unregisterSensor() {
-            sensorManager?.unregisterListener(this)
-            lastGyroNs = 0L
+            sensorManager?.unregisterListener(sensorListener)
         }
-
-        override fun onSensorChanged(event: SensorEvent?) {
-            val e = event ?: return
-            if (e.sensor.type != Sensor.TYPE_GYROSCOPE) return
-
-            if (lastGyroNs == 0L) {
-                lastGyroNs = e.timestamp
-                return
+        
+        // 传感器监听器 - 使用渲染器内置处理
+        private val sensorListener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                renderer?.onSensorEvent(event)
             }
-
-            val dt = (e.timestamp - lastGyroNs) / 1_000_000_000f
-            lastGyroNs = e.timestamp
-
-            val angularVelocity = e.values[1]
-            val absOmega = abs(angularVelocity)
-            if (absOmega >= 0.01f) {
-                accumulatedAngle += angularVelocity * dt
-            }
-
-            val sensorWidth = group?.sensorWidth ?: 0.6f
-            val tiltNormalized = (abs(accumulatedAngle) / sensorWidth).coerceIn(0f, 1f)
-            val direction = when {
-                accumulatedAngle < -0.05f -> 1
-                accumulatedAngle > 0.05f -> -1
-                else -> 0
-            }
-
-            renderer?.updateTilt(tiltNormalized, direction)
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
-
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
         // ────────────────────────────────────────────
         // 数据加载
@@ -180,23 +175,9 @@ class StaticRasterWallpaperService : WallpaperService() {
             val g = group ?: return
             if (g.type != RasterGroupModel.TYPE_STATIC) return
 
-            // 设置渲染参数
-            renderer?.sensorWidth = g.sensorWidth
-
-            // 加载图片
-            val bitmaps = g.imageUris.mapNotNull { uriStr ->
-                try {
-                    applicationContext.contentResolver.openInputStream(Uri.parse(uriStr))?.use {
-                        BitmapFactory.decodeStream(it)
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to decode image: $uriStr", e)
-                    null
-                }
-            }
-
-            renderer?.loadBitmaps(bitmaps)
-            renderer?.requestRender()
+            // 使用集成的加载方法
+            renderer?.loadFromModel(applicationContext, g)
+            loadedImageUris = g.imageUris
         }
     }
 

@@ -1047,6 +1047,27 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                         persistGroups()
                     }
                 },
+                onEffectTypeChanged = { editorGroup, newType ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(effectType = newType)
+                        persistGroups()
+                    }
+                },
+                onTransitionBandChanged = { editorGroup, newBand ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(transitionBand = newBand)
+                        persistGroups()
+                    }
+                },
+                onEdgeSoftnessChanged = { editorGroup, newSoftness ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(edgeSoftness = newSoftness)
+                        persistGroups()
+                    }
+                },
                 onVideoAction = {
                     toast("视频光栅壁纸正在开发中，敬请期待")
                 }
@@ -1176,7 +1197,6 @@ private fun RasterDetailScreen(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
     backdrop: Backdrop?,
-    // ✅ 新增参数
     staticEditorGroupId: String?,
     onStaticEditorDismiss: () -> Unit,
     onStaticEditorReplaceAll: (RasterGroupModel) -> Unit,
@@ -1186,6 +1206,10 @@ private fun RasterDetailScreen(
     onStaticEditorCommitReorder: () -> Unit,
     onStaticEditorDeleteSingle: (RasterGroupModel, Int) -> Unit,
     onSensorWidthChanged: (RasterGroupModel, Float) -> Unit,
+    // 新增参数回调
+    onEffectTypeChanged: (RasterGroupModel, Int) -> Unit,
+    onTransitionBandChanged: (RasterGroupModel, Float) -> Unit,
+    onEdgeSoftnessChanged: (RasterGroupModel, Float) -> Unit,
     groups: List<RasterGroupModel>,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
@@ -1247,7 +1271,6 @@ private fun RasterDetailScreen(
                     if (group.type == RasterGroupModel.TYPE_STATIC) {
                         RasterPreviewView(
                             group = group,
-                            sensorWidth = group.sensorWidth,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .clip(RoundedCornerShape(30.dp))
@@ -1385,6 +1408,7 @@ private fun RasterDetailScreen(
         // 编辑面板
         AnimatedContent(
             targetState = editorGroup,
+            contentKey = { it?.id },  // 只根据 ID 判断，避免滑块变化触发动画
             transitionSpec = {
                 (fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
                         scaleIn(
@@ -1683,6 +1707,189 @@ private fun RasterDetailScreen(
                         style = TextStyle(contentColor.copy(0.5f), 12.sp),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    
+                    // ── 效果类型选择 ──
+                    Spacer(Modifier.height(16.dp))
+                    
+                    var selectedEffectType by remember(currentEditorGroup.id) {
+                        mutableStateOf(currentEditorGroup.effectType)
+                    }
+                    
+                    BasicText(
+                        "扫描线效果",
+                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            RasterGroupModel.EFFECT_STANDARD to "标准",
+                            RasterGroupModel.EFFECT_MOSAIC to "马赛克",
+                            RasterGroupModel.EFFECT_LENTICULAR to "光栅透镜"
+                        ).forEach { (type, name) ->
+                            val isSelected = selectedEffectType == type
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(
+                                        if (isSelected) accentColor else contentColor.copy(0.1f)
+                                    )
+                                    .clickable {
+                                        selectedEffectType = type
+                                        onEffectTypeChanged(currentEditorGroup, type)
+                                    },
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                BasicText(
+                                    name,
+                                    style = TextStyle(
+                                        if (isSelected) Color.White else contentColor,
+                                        13.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    
+                    // ── 过渡带宽调节 ──
+                    Spacer(Modifier.height(16.dp))
+                    
+                    var transitionBand by remember(currentEditorGroup.id) {
+                        mutableStateOf(currentEditorGroup.transitionBand)
+                    }
+                    
+                    BasicText(
+                        "过渡带宽",
+                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        BasicText(
+                            "窄",
+                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
+                        )
+                        
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(contentColor.copy(0.15f))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .fillMaxWidth(transitionBand)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(Color(0xFF2A83FF))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        detectHorizontalDragGestures(
+                                            onHorizontalDrag = { change, _ ->
+                                                change.consume()
+                                                transitionBand = (change.position.x / size.width).coerceIn(0.1f, 1f)
+                                                onTransitionBandChanged(currentEditorGroup, transitionBand)
+                                            }
+                                        )
+                                    }
+                            )
+                        }
+                        
+                        BasicText(
+                            "宽",
+                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
+                        )
+                    }
+                    
+                    // ── 边缘柔化调节 ──
+                    Spacer(Modifier.height(12.dp))
+                    
+                    var edgeSoftness by remember(currentEditorGroup.id) {
+                        mutableStateOf(currentEditorGroup.edgeSoftness)
+                    }
+                    
+                    BasicText(
+                        "边缘柔化",
+                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
+                    )
+                    
+                    Spacer(Modifier.height(4.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        BasicText(
+                            "锐利",
+                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
+                        )
+                        
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(contentColor.copy(0.15f))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterStart)
+                                    .fillMaxWidth(edgeSoftness * 2f)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(Color(0xFF2A83FF))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(Unit) {
+                                        detectHorizontalDragGestures(
+                                            onHorizontalDrag = { change, _ ->
+                                                change.consume()
+                                                edgeSoftness = ((change.position.x / size.width) / 2f).coerceIn(0.01f, 0.5f)
+                                                onEdgeSoftnessChanged(currentEditorGroup, edgeSoftness)
+                                            }
+                                        )
+                                    }
+                            )
+                        }
+                        
+                        BasicText(
+                            "柔和",
+                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
+                        )
+                    }
+                    
                     Spacer(Modifier.height(12.dp))
                     Row(
                         Modifier
