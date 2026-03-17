@@ -8,7 +8,11 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.view.Surface
 import android.view.TextureView
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -16,8 +20,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.renderer.RasterGLRenderer
@@ -97,33 +105,52 @@ fun RasterPreviewView(
         }
     }
 
-    AndroidView(
-        factory = { ctx ->
-            TextureView(ctx).apply {
-                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                    override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                        renderer.start(Surface(surface))
-                        renderer.resize(width, height)
-                        // 使用集成的加载方法
-                        renderer.loadFromModel(context, group)
-                        isRendererStarted = true
-                    }
+    Box(modifier = modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { ctx ->
+                TextureView(ctx).apply {
+                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                            renderer.start(Surface(surface))
+                            renderer.resize(width, height)
+                            // 使用集成的加载方法
+                            renderer.loadFromModel(context, group)
+                            isRendererStarted = true
+                        }
 
-                    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                        renderer.resize(width, height)
-                        renderer.requestRender()
-                    }
+                        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                            renderer.resize(width, height)
+                            renderer.requestRender()
+                        }
 
-                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                        isRendererStarted = false
-                        renderer.stopAndWait(500)
-                        return true
-                    }
+                        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                            isRendererStarted = false
+                            renderer.stopAndWait(500)
+                            return true
+                        }
 
-                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-                }
-            }.also { textureView = it }
-        },
-        modifier = modifier.fillMaxSize()
-    )
+                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
+                    }
+                }.also { textureView = it }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // 加载动画覆盖层
+        if (!isRendererStarted) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colors.background),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "正在加载",
+                    color = MaterialTheme.colors.onBackground.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
 }

@@ -1044,6 +1044,9 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
                     if (idx >= 0) {
                         groups[idx] = groups[idx].copy(sensorWidth = newWidth)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
                         persistGroups()
                     }
                 },
@@ -1051,6 +1054,9 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
                     if (idx >= 0) {
                         groups[idx] = groups[idx].copy(effectType = newType)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
                         persistGroups()
                     }
                 },
@@ -1058,6 +1064,9 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
                     if (idx >= 0) {
                         groups[idx] = groups[idx].copy(transitionBand = newBand)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
                         persistGroups()
                     }
                 },
@@ -1065,6 +1074,9 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
                     if (idx >= 0) {
                         groups[idx] = groups[idx].copy(edgeSoftness = newSoftness)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
                         persistGroups()
                     }
                 },

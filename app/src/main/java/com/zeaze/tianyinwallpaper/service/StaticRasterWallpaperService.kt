@@ -51,6 +51,18 @@ class StaticRasterWallpaperService : WallpaperService() {
         private var _pref: SharedPreferences? = null
         private val pref: SharedPreferences? get() = _pref
 
+        // SharedPreferences 监听器 - 监听参数变化
+        private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == PREF_RASTER_GROUPS || key == PREF_RASTER_ACTIVE_GROUP_ID) {
+                // 参数变化，更新渲染器
+                loadActiveGroup()
+                val g = group
+                if (g != null && g.type == RasterGroupModel.TYPE_STATIC && isVisible) {
+                    renderer?.updateParamsFromModel(g)
+                }
+            }
+        }
+
         fun reload() {
             loadActiveGroup()
             loadContent()
@@ -65,12 +77,14 @@ class StaticRasterWallpaperService : WallpaperService() {
             surfaceHolder.setFormat(PixelFormat.RGBX_8888)
 
             _pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE)
+            _pref?.registerOnSharedPreferenceChangeListener(prefChangeListener)
+
             sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
             gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
 
             // 初始化渲染器（集成传感器处理）
             renderer = RasterGLRenderer()
-            
+
             loadActiveGroup()
         }
 
@@ -124,6 +138,7 @@ class StaticRasterWallpaperService : WallpaperService() {
         override fun onDestroy() {
             super.onDestroy()
             if (activeEngine == this) activeEngine = null
+            _pref?.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
             unregisterSensor()
             renderer?.stop()
             renderer = null
