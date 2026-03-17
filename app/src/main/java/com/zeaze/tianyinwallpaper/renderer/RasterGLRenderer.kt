@@ -274,7 +274,11 @@ class RasterGLRenderer {
     fun updateTilt(tiltNormalized: Float, direction: Int) {
         if (imageCount == 0) return
 
-        currentFloatIndex = (tiltNormalized * (imageCount - 1)).coerceIn(0f, (imageCount - 1).toFloat())
+        // ✅ 修复：允许 currentFloatIndex 略微超过 imageCount - 1
+        // 这样当 tiltNormalized = 1.0 时，fraction 可以达到 1.0，确保最后一张图能完全显示
+        // 乘以 1.02 是为了提供 2% 的余量，让用户可以"扫到底"
+        val maxIndex = (imageCount - 1).toFloat()
+        currentFloatIndex = (tiltNormalized * maxIndex * 1.02f).coerceIn(0f, maxIndex * 1.02f)
 
         if (imageCount == 1) {
             if (displayedIntIndex != 0) {
@@ -288,7 +292,14 @@ class RasterGLRenderer {
             return
         }
 
-        val intIndex = currentFloatIndex.toInt().coerceIn(0, imageCount - 2)
+        // ✅ 修复：允许 intIndex 达到 imageCount - 1，确保能显示最后一张图
+        // 当 currentFloatIndex > imageCount - 1 时，intIndex 应该保持在 imageCount - 2
+        // 这样 toIdx = imageCount - 1（最后一张图的索引）
+        val intIndex = if (currentFloatIndex >= imageCount - 1) {
+            imageCount - 2  // 锁定在倒数第二段过渡
+        } else {
+            currentFloatIndex.toInt().coerceIn(0, imageCount - 2)
+        }
         val fraction = currentFloatIndex - intIndex
 
         val fromIdx = intIndex
@@ -374,8 +385,9 @@ class RasterGLRenderer {
         }
 
         // 计算归一化倾斜值（与 onSensorEvent 保持一致）
+        // 灵敏度范围 0.5~9.0 对应角度阈值 20°~40°（约 0.349~0.698 弧度）
         val normalizedSensitivity = sensitivity.coerceIn(MIN_SENSITIVITY, MAX_SENSITIVITY)
-        val angleThreshold = (normalizedSensitivity / 9.8f).coerceIn(0.1f, 1.0f)
+        val angleThreshold = (0.3285f + 0.041f * normalizedSensitivity).coerceIn(0.349f, 0.698f)
         val newTiltNormalized = (abs(angleWithDeadZone) / angleThreshold).coerceIn(0f, 1f)
 
         // 检查是否有变化
@@ -453,11 +465,11 @@ class RasterGLRenderer {
 
         // 计算归一化倾斜值
         // 灵敏度语义：值越大，需要的倾斜角度越大（越不灵敏）
-        // sensorWidth 范围 1~9，对应倾斜角度约 6°~53°
+        // sensorWidth 范围 0.5~9.0，对应倾斜角度约 20°~40°
         // angleThreshold = sensitivity 对应的角度，达到此角度时 tiltNormalized = 1.0
         val normalizedSensitivity = sensitivity.coerceIn(MIN_SENSITIVITY, MAX_SENSITIVITY)
-        // 将灵敏度转换为角度阈值（弧度），范围约 0.1 ~ 0.9 弧度
-        val angleThreshold = (normalizedSensitivity / 9.8f).coerceIn(0.1f, 1.0f)
+        // 将灵敏度转换为角度阈值（弧度），范围 20°~40°（约 0.349~0.698 弧度）
+        val angleThreshold = (0.3285f + 0.041f * normalizedSensitivity).coerceIn(0.349f, 0.698f)
         val newTiltNormalized = (abs(angleWithDeadZone) / angleThreshold).coerceIn(0f, 1f)
 
         // 计算方向
@@ -972,8 +984,8 @@ class RasterGLRenderer {
                     // 有活动的过渡状态，显示过渡效果
                     drawTransitionAt(scanFromIndex, scanToIndex, scanProgress, scanDirection)
                 } else {
-                    // 静止状态：显示单张图片
-                    val targetIdx = displayedIntIndex.coerceIn(0, imageCount - 1)
+                    // ✅ 静止状态：显示单张图片，限制索引范围
+                    val targetIdx = displayedIntIndex.coerceIn(0, maxOf(0, imageCount - 1))
                     drawSingleAt(targetIdx)
                 }
             } else {
@@ -1129,7 +1141,8 @@ class RasterGLRenderer {
         }
 
         private fun drawSingle() {
-            drawSingleAt(displayedIntIndex.coerceIn(0, imageCount - 1))
+            // ✅ 限制索引范围，确保不越界
+            drawSingleAt(displayedIntIndex.coerceIn(0, maxOf(0, imageCount - 1)))
         }
         
         /**

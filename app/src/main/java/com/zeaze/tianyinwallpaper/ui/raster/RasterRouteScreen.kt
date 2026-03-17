@@ -1630,8 +1630,59 @@ private fun RasterDetailScreen(
                             }
                         }
                     }
-                    // ✅ 传感器宽度滑块
-                    Spacer(Modifier.height(12.dp))
+                    
+                    // ── 效果类型选择 ──
+                    Spacer(Modifier.height(16.dp))
+                    
+                    var selectedEffectType by remember(currentEditorGroup.id) {
+                        mutableStateOf(currentEditorGroup.effectType)
+                    }
+                    
+                    BasicText(
+                        "扫描线效果",
+                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            RasterGroupModel.EFFECT_STANDARD to "标准",
+                            RasterGroupModel.EFFECT_MOSAIC to "马赛克",
+                            RasterGroupModel.EFFECT_LENTICULAR to "光栅透镜"
+                        ).forEach { (type, name) ->
+                            val isSelected = selectedEffectType == type
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(
+                                        if (isSelected) accentColor else contentColor.copy(0.1f)
+                                    )
+                                    .clickable {
+                                        selectedEffectType = type
+                                        onEffectTypeChanged(currentEditorGroup, type)
+                                    },
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                BasicText(
+                                    name,
+                                    style = TextStyle(
+                                        if (isSelected) Color.White else contentColor,
+                                        13.sp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    
+                    // ── 传感器灵敏度滑块 ──
+                    Spacer(Modifier.height(16.dp))
 
                     var sensorWidth by remember(currentEditorGroup.id) {
                         mutableStateOf(currentEditorGroup.sensorWidth)
@@ -1702,61 +1753,13 @@ private fun RasterDetailScreen(
                     }
 
                     // 数值显示
+                    // 灵敏度范围 0.5~9.0 对应角度 20°~40°
+                    val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
                     BasicText(
-                        "倾斜 ${String.format("%.0f", Math.toDegrees((sensorWidth / 9.8).toDouble()))}° 到达边缘",
+                        "倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘",
                         style = TextStyle(contentColor.copy(0.5f), 12.sp),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    
-                    // ── 效果类型选择 ──
-                    Spacer(Modifier.height(16.dp))
-                    
-                    var selectedEffectType by remember(currentEditorGroup.id) {
-                        mutableStateOf(currentEditorGroup.effectType)
-                    }
-                    
-                    BasicText(
-                        "扫描线效果",
-                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            RasterGroupModel.EFFECT_STANDARD to "标准",
-                            RasterGroupModel.EFFECT_MOSAIC to "马赛克",
-                            RasterGroupModel.EFFECT_LENTICULAR to "光栅透镜"
-                        ).forEach { (type, name) ->
-                            val isSelected = selectedEffectType == type
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(36.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(
-                                        if (isSelected) accentColor else contentColor.copy(0.1f)
-                                    )
-                                    .clickable {
-                                        selectedEffectType = type
-                                        onEffectTypeChanged(currentEditorGroup, type)
-                                    },
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                BasicText(
-                                    name,
-                                    style = TextStyle(
-                                        if (isSelected) Color.White else contentColor,
-                                        13.sp
-                                    )
-                                )
-                            }
-                        }
-                    }
                     
                     // ── 过渡带宽调节 ──
                     Spacer(Modifier.height(16.dp))
