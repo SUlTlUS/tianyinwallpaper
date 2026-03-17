@@ -63,8 +63,6 @@ fun RasterPreviewView(
         group.transitionBand,
         group.edgeSoftness,
         group.effectType,
-        group.mosaicSize,
-        group.mosaicSoftness,
         group.lenticularPitch,
         group.lenticularAngle
     ) {

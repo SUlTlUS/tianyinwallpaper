@@ -21,10 +21,6 @@ data class RasterGroupModel(
     // ── 效果类型 ──
     var effectType: Int = EFFECT_STANDARD,   // 扫描线效果类型
     
-    // ── 马赛克效果参数 ──
-    var mosaicSize: Float = 0.05f,           // 马赛克格子大小 (0.01 ~ 0.2)
-    var mosaicSoftness: Float = 0.02f,       // 马赛克过渡软边 (0.0 ~ 0.1)
-    
     // ── 光栅透镜效果参数 ──
     var lenticularPitch: Float = 0.03f,      // 光栅条纹间距 (0.01 ~ 0.1)
     var lenticularAngle: Float = 0f          // 光栅倾斜角度 (弧度)
@@ -35,7 +31,6 @@ data class RasterGroupModel(
         
         // 效果类型常量
         const val EFFECT_STANDARD = 0     // 标准扫描线
-        const val EFFECT_MOSAIC = 1       // 马赛克
         const val EFFECT_LENTICULAR = 2   // 光栅透镜
     }
 }

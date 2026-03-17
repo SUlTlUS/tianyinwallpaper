@@ -51,10 +51,6 @@ class RasterGLRenderer {
             }
         }
     
-    // 马赛克效果参数
-    var mosaicSize: Float = 0.05f
-    var mosaicSoftness: Float = 0.02f
-    
     // 光栅透镜效果参数
     var lenticularPitch: Float = 0.03f
     var lenticularAngle: Float = 0f
@@ -133,8 +129,6 @@ class RasterGLRenderer {
             val transitionBand: Float,
             val edgeSoftness: Float,
             val effectType: ScanlineEffectType,
-            val mosaicSize: Float,
-            val mosaicSoftness: Float,
             val lenticularPitch: Float,
             val lenticularAngle: Float
         ) : RenderMessage()
@@ -227,8 +221,6 @@ class RasterGLRenderer {
             transitionBand = group.transitionBand,
             edgeSoftness = group.edgeSoftness,
             effectType = ScanlineEffectType.fromId(group.effectType),
-            mosaicSize = group.mosaicSize,
-            mosaicSoftness = group.mosaicSoftness,
             lenticularPitch = group.lenticularPitch,
             lenticularAngle = group.lenticularAngle
         )
@@ -256,8 +248,6 @@ class RasterGLRenderer {
             transitionBand = group.transitionBand,
             edgeSoftness = group.edgeSoftness,
             effectType = ScanlineEffectType.fromId(group.effectType),
-            mosaicSize = group.mosaicSize,
-            mosaicSoftness = group.mosaicSoftness,
             lenticularPitch = group.lenticularPitch,
             lenticularAngle = group.lenticularAngle
         )
@@ -344,22 +334,18 @@ class RasterGLRenderer {
         transitionBand: Float = this.transitionBand,
         edgeSoftness: Float = this.edgeSoftness,
         effectType: ScanlineEffectType = this.effectType,
-        mosaicSize: Float = this.mosaicSize,
-        mosaicSoftness: Float = this.mosaicSoftness,
         lenticularPitch: Float = this.lenticularPitch,
         lenticularAngle: Float = this.lenticularAngle
     ) {
         this.transitionBand = transitionBand
         this.edgeSoftness = edgeSoftness
         this.effectType = effectType
-        this.mosaicSize = mosaicSize
-        this.mosaicSoftness = mosaicSoftness
         this.lenticularPitch = lenticularPitch
         this.lenticularAngle = lenticularAngle
         
         messageQueue.offer(RenderMessage.UpdateParams(
             transitionBand, edgeSoftness, effectType,
-            mosaicSize, mosaicSoftness, lenticularPitch, lenticularAngle
+            lenticularPitch, lenticularAngle
         ))
         requestRender()
     }
@@ -641,7 +627,6 @@ class RasterGLRenderer {
         // 多个着色器程序
         private var singleProg: Int = 0
         private var standardProg: Int = 0
-        private var mosaicProg: Int = 0
         private var lenticularProg: Int = 0
         
         // 当前活动的效果类型
@@ -650,8 +635,6 @@ class RasterGLRenderer {
         // 参数缓存
         private var paramTransitionBand: Float = 0.55f
         private var paramEdgeSoftness: Float = 0.25f
-        private var paramMosaicSize: Float = 0.05f
-        private var paramMosaicSoftness: Float = 0.02f
         private var paramLenticularPitch: Float = 0.03f
         private var paramLenticularAngle: Float = 0f
 
@@ -720,8 +703,6 @@ class RasterGLRenderer {
                             paramTransitionBand = msg.transitionBand
                             paramEdgeSoftness = msg.edgeSoftness
                             activeEffectType = msg.effectType
-                            paramMosaicSize = msg.mosaicSize
-                            paramMosaicSoftness = msg.mosaicSoftness
                             paramLenticularPitch = msg.lenticularPitch
                             paramLenticularAngle = msg.lenticularAngle
                         }
@@ -790,9 +771,6 @@ class RasterGLRenderer {
             val transVs = createTransitionVertexShader()
             standardProg = createProg(transVs, createStandardFragmentShader())
             
-            // 马赛克着色器
-            mosaicProg = createProg(transVs, createMosaicFragmentShader())
-            
             // 光栅透镜着色器
             lenticularProg = createProg(transVs, createLenticularFragmentShader())
 
@@ -859,55 +837,6 @@ class RasterGLRenderer {
             }
         """.trimIndent()
 
-        private fun createMosaicFragmentShader(): String = """
-            precision mediump float;
-            varying vec2 vTexA;
-            varying vec2 vTexB;
-            uniform sampler2D sTexA;
-            uniform sampler2D sTexB;
-            uniform float uProgress;
-            uniform float uDirection;
-            uniform float uScreenWidth;
-            uniform float uScreenHeight;
-            uniform float uMosaicSize;
-            uniform float uMosaicSoftness;
-            uniform float uTime;
-
-            float random(vec2 st) {
-                return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
-            }
-
-            void main() {
-                vec2 screenPos = vec2(gl_FragCoord.x, gl_FragCoord.y);
-                
-                // 马赛克格子坐标
-                vec2 mosaicPos = floor(screenPos / uMosaicSize) * uMosaicSize;
-                
-                // 为每个格子生成随机阈值
-                float threshold = random(mosaicPos / vec2(uScreenWidth, uScreenHeight));
-                
-                // 添加过渡软边
-                float softThreshold = threshold - uMosaicSoftness + uProgress * (1.0 + 2.0 * uMosaicSoftness);
-                
-                // 采样颜色
-                vec4 colorA = texture2D(sTexA, vTexA);
-                vec4 colorB = texture2D(sTexB, vTexB);
-                
-                // 根据方向决定混合
-                float blend;
-                if (uDirection > 0.0) {
-                    blend = step(threshold, uProgress);
-                } else {
-                    blend = step(1.0 - uProgress, threshold);
-                }
-                
-                // 平滑过渡
-                blend = smoothstep(softThreshold - uMosaicSoftness, softThreshold + uMosaicSoftness, uProgress);
-                
-                gl_FragColor = mix(colorA, colorB, blend);
-            }
-        """.trimIndent()
-
         private fun createLenticularFragmentShader(): String = """
             precision mediump float;
             varying vec2 vTexA;
@@ -919,48 +848,85 @@ class RasterGLRenderer {
             uniform float uScreenWidth;
             uniform float uPitch;
             uniform float uLensAngle;
+            uniform float uEdgeSoftness;
 
             void main() {
-                vec4 colorA = texture2D(sTexA, vTexA);
-                vec4 colorB = texture2D(sTexB, vTexB);
+                // 计算屏幕坐标（用于扫描过渡）
+                float screenX = gl_FragCoord.x / uScreenWidth;
                 
-                // 计算光栅条纹位置（支持倾斜角度）
-                float coord = gl_FragCoord.x / uScreenWidth;
-                
-                // 应用倾斜角度
-                float rotatedCoord = coord * cos(uLensAngle) + 
-                    (gl_FragCoord.y / 1920.0) * sin(uLensAngle);
-                
-                // 计算光栅透镜效果
-                // 条纹宽度由 uPitch 控制
-                float stripe = mod(rotatedCoord, uPitch) / uPitch;
-                
-                // 光栅透镜核心算法：
-                // 根据观察角度（uProgress）决定显示哪张图片
-                // 当 progress 变化时，每个条纹选择不同的图片
-                float lensAngle = uProgress * 2.0 - 1.0; // -1 到 1
-                
-                // 每个条纹根据 progress 选择显示 A 或 B
-                float stripeIndex = floor(rotatedCoord / uPitch);
-                float stripePhase = mod(stripeIndex, 2.0);
-                
-                // 动态条纹选择
-                float threshold = 0.5 + lensAngle * 0.5;
+                // 计算扫描边缘位置
+                float scanEdge;
                 float blend;
                 
                 if (uDirection > 0.0) {
-                    // 右倾：从左到右显示 B
-                    blend = step(threshold - stripePhase * 0.5, stripe);
+                    // 从左向右扫描
+                    scanEdge = 1.0 - uProgress;
+                    blend = smoothstep(scanEdge - uEdgeSoftness, scanEdge + uEdgeSoftness, screenX);
                 } else {
-                    // 左倾：从右到左显示 B
-                    blend = step(stripePhase * 0.5 + threshold, stripe);
+                    // 从右向左扫描
+                    scanEdge = uProgress;
+                    blend = smoothstep(scanEdge - uEdgeSoftness, scanEdge + uEdgeSoftness, screenX);
                 }
                 
-                // 添加抗锯齿平滑
-                float aaWidth = 0.02;
-                blend = smoothstep(blend - aaWidth, blend + aaWidth, 0.5);
+                // 过渡带范围（条纹效果只在这个范围内显示）
+                float bandWidth = uEdgeSoftness * 2.0;
+                float bandStart = scanEdge - uEdgeSoftness;
+                float bandEnd = scanEdge + uEdgeSoftness;
                 
-                gl_FragColor = mix(colorA, colorB, blend);
+                // 计算条纹在过渡带内的位置
+                // 条纹随着扫描边缘移动
+                float stripeWorldX = screenX - scanEdge + 0.5;  // 以扫描边缘为中心
+                float rotatedCoord = stripeWorldX * cos(uLensAngle) +
+                    (gl_FragCoord.y / 1920.0) * sin(uLensAngle);
+                
+                // 计算条纹索引和条纹内位置
+                float stripeIndex = floor(rotatedCoord / uPitch);
+                float stripePos = mod(rotatedCoord, uPitch) / uPitch;
+                
+                // RGB 颜色分离强度
+                float chromaticStrength = 0.008;
+                float rOffset = -chromaticStrength * (1.0 - abs(stripePos - 0.5) * 2.0);
+                float bOffset = chromaticStrength * (1.0 - abs(stripePos - 0.5) * 2.0);
+                
+                // 条纹边缘变暗
+                float edgeFactor = abs(stripePos - 0.5) * 2.0;
+                float edgeDark = 1.0 - edgeFactor * 0.15;
+                
+                // 基础颜色采样（无条纹效果）
+                vec4 colorABase = texture2D(sTexA, vTexA);
+                vec4 colorBBase = texture2D(sTexB, vTexB);
+                
+                // 带条纹效果的颜色采样
+                vec2 texCoordRA = vTexA;
+                texCoordRA.x += rOffset;
+                vec2 texCoordBA = vTexA;
+                texCoordBA.x += bOffset;
+                
+                float rA = texture2D(sTexA, texCoordRA).r;
+                float gA = texture2D(sTexA, vTexA).g;
+                float bA = texture2D(sTexA, texCoordBA).b;
+                vec4 colorA = vec4(rA * edgeDark, gA * edgeDark, bA * edgeDark, 1.0);
+                
+                vec2 texCoordRB = vTexB;
+                texCoordRB.x += rOffset;
+                vec2 texCoordBB = vTexB;
+                texCoordBB.x += bOffset;
+                
+                float rB = texture2D(sTexB, texCoordRB).r;
+                float gB = texture2D(sTexB, vTexB).g;
+                float bB = texture2D(sTexB, texCoordBB).b;
+                vec4 colorB = vec4(rB * edgeDark, gB * edgeDark, bB * edgeDark, 1.0);
+                
+                // 在过渡带内应用条纹效果，过渡带外使用基础颜色
+                float inBand = smoothstep(bandStart, bandStart + 0.02, screenX) * 
+                               smoothstep(bandEnd, bandEnd - 0.02, screenX);
+                
+                // 混合条纹效果和基础颜色
+                vec4 finalColorA = mix(colorABase, colorA, inBand);
+                vec4 finalColorB = mix(colorBBase, colorB, inBand);
+                
+                // 最终混合
+                gl_FragColor = mix(finalColorA, finalColorB, blend);
             }
         """.trimIndent()
 
@@ -1043,7 +1009,6 @@ class RasterGLRenderer {
             // 选择当前效果类型的着色器程序
             val prog = when (activeEffectType) {
                 ScanlineEffectType.STANDARD -> standardProg
-                ScanlineEffectType.MOSAIC -> mosaicProg
                 ScanlineEffectType.LENTICULAR -> lenticularProg
             }
             
@@ -1122,14 +1087,6 @@ class RasterGLRenderer {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uDirection"), direction.toFloat())
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uEdgeSoftness"), paramEdgeSoftness)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uScreenWidth"), sW.toFloat())
-
-            // 马赛克特有参数
-            if (activeEffectType == ScanlineEffectType.MOSAIC) {
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uScreenHeight"), sH.toFloat())
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uMosaicSize"), paramMosaicSize * sW)
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uMosaicSoftness"), paramMosaicSoftness)
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uTime"), System.currentTimeMillis() / 1000f)
-            }
 
             // 光栅透镜特有参数
             if (activeEffectType == ScanlineEffectType.LENTICULAR) {

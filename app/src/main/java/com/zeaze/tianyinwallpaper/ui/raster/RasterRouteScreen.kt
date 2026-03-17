@@ -1663,7 +1663,6 @@ private fun RasterDetailScreen(
                     ) {
                         listOf(
                             RasterGroupModel.EFFECT_STANDARD to "标准",
-                            RasterGroupModel.EFFECT_MOSAIC to "马赛克",
                             RasterGroupModel.EFFECT_LENTICULAR to "光栅透镜"
                         ).forEach { (type, name) ->
                             val isSelected = selectedEffectType == type
