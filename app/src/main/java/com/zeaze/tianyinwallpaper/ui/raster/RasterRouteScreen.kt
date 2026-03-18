@@ -140,7 +140,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
-private const val MAX_STATIC_GROUP_IMAGES = 5
 private const val MIN_STATIC_GROUP_IMAGES = 2
 
 private enum class StaticPickMode {
@@ -387,8 +386,7 @@ fun RasterRouteScreen(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        val limited = uris.take(MAX_STATIC_GROUP_IMAGES)
-        limited.forEach { uri ->
+        uris.forEach { uri ->
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
@@ -403,9 +401,9 @@ fun RasterRouteScreen(
             if (idx >= 0) {
                 val current = groups[idx]
                 val merged = when (staticPickMode) {
-                    StaticPickMode.REPLACE_ALL -> limited.map { it.toString() }
-                    StaticPickMode.APPEND -> (current.imageUris + limited.map { it.toString() }).take(MAX_STATIC_GROUP_IMAGES)
-                    StaticPickMode.CREATE_NEW -> limited.map { it.toString() }
+                    StaticPickMode.REPLACE_ALL -> uris.map { it.toString() }
+                    StaticPickMode.APPEND -> current.imageUris + uris.map { it.toString() }
+                    StaticPickMode.CREATE_NEW -> uris.map { it.toString() }
                 }
                 groups[idx] = current.copy(
                     type = RasterGroupModel.TYPE_STATIC,
@@ -423,14 +421,11 @@ fun RasterRouteScreen(
                 RasterGroupModel(
                     id = UUID.randomUUID().toString(),
                     type = RasterGroupModel.TYPE_STATIC,
-                    imageUris = limited.map { it.toString() },
+                    imageUris = uris.map { it.toString() },
                     createdAt = System.currentTimeMillis()
                 )
             )
             persistGroups()
-            if (uris.size > MAX_STATIC_GROUP_IMAGES) {
-                context.showToast("静态光栅最多选择${MAX_STATIC_GROUP_IMAGES}张，已自动截取前${MAX_STATIC_GROUP_IMAGES}张")
-            }
         }
 
         staticPickMode = StaticPickMode.CREATE_NEW
@@ -844,7 +839,7 @@ fun RasterRouteScreen(
                                 BasicText("选择光栅类型", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
                                 Spacer(Modifier.height(4.dp))
                                 BasicText(
-                                    "静态光栅：每个组合最多5张图片\n动态光栅：每个组合只能选择1个视频",
+                                    "静态光栅：每个组合支持多张图片\n动态光栅：每个组合只能选择1个视频",
                                     style = TextStyle(contentColor.copy(alpha = 0.7f), 14.sp)
                                 )
                                 Spacer(Modifier.height(8.dp))
@@ -1510,7 +1505,7 @@ private fun RasterDetailScreen(
                     }
                     Spacer(Modifier.height(4.dp))
                     BasicText(
-                        "支持添加2-5张图片，长按图片可拖拽排序",
+                        "支持添加多张图片，长按图片可拖拽排序",
                         style = TextStyle(contentColor.copy(alpha = 0.7f), 14.sp)
                     )
                     Spacer(Modifier.height(12.dp))

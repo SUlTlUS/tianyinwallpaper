@@ -458,11 +458,12 @@ class RasterGLRenderer {
         val angleThreshold = (0.3285f + 0.041f * normalizedSensitivity).coerceIn(0.349f, 0.698f)
         val newTiltNormalized = (abs(angleWithDeadZone) / angleThreshold).coerceIn(0f, 1f)
 
-        // 计算方向
+        // 计算方向（移除阈值限制，实现即时方向更新）
+        // 之前的问题：当 direction = 0 时进入过渡状态，scanDirection 会被错误设为 1
         val newDirection = when {
-            smoothAngle < -DIRECTION_THRESHOLD -> 1   // 右倾
-            smoothAngle > DIRECTION_THRESHOLD -> -1   // 左倾
-            else -> tiltDirection                      // 保持原方向
+            smoothAngle < 0 -> 1   // 右倾（角速度负值累积导致 smoothAngle 为负）
+            smoothAngle > 0 -> -1  // 左倾
+            else -> tiltDirection  // 平稳状态保持原方向
         }
 
         // 检查是否有变化
