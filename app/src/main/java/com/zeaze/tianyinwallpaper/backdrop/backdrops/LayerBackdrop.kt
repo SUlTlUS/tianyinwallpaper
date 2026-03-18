@@ -17,7 +17,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.unit.Density
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
-import com.kyant.backdrop.InverseLayerScope
+import com.zeaze.tianyinwallpaper.backdrop.InverseLayerScope
 
 private val DefaultOnDraw: ContentDrawScope.() -> Unit = { drawContent() }
 

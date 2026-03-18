@@ -10,7 +10,6 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -39,7 +38,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -76,6 +74,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,6 +101,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
@@ -128,12 +128,14 @@ import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
 import java.io.IOException
 import java.util.UUID
-import kotlin.concurrent.thread
+
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 
 private const val WALLPAPER_TYPE_STATIC = 0
@@ -155,10 +157,13 @@ private sealed class RasterDialogState {
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
+fun RasterRouteScreen(
+    useDarkTheme: Boolean,
+    onBottomBarVisibleChange: (Boolean) -> Unit = {}
+) {
     val context = LocalContext.current
     val activity = context as? Activity
-    val isLightTheme = !isSystemInDarkTheme()
+    val isLightTheme = !useDarkTheme
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
@@ -209,14 +214,25 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
         }
     }
 
+    // 协程作用域用于后台任务
+    val coroutineScope = rememberCoroutineScope()
+
     fun persistGroups() {
-        RasterPrefs.saveGroups(pref, groups)
+        coroutineScope.launch {
+            withContext(Dispatchers.IO) {
+                RasterPrefs.saveGroups(pref, groups)
+            }
+        }
     }
 
     fun loadGroups() {
-        val parsed = RasterPrefs.loadGroups(pref)
-        groups.clear()
-        groups.addAll(parsed)
+        coroutineScope.launch {
+            val parsed = withContext(Dispatchers.IO) {
+                RasterPrefs.loadGroups(pref)
+            }
+            groups.clear()
+            groups.addAll(parsed)
+        }
     }
 
     fun enterSelectionMode(initialId: String? = null) {
@@ -283,42 +299,43 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
             context.showToast("当前光栅组合内容为空")
             return
         }
-        thread {
-            FileUtil.save(context, JSON.toJSONString(models), FileUtil.wallpaperPath) {
-                val hostActivity = context as? Activity
-                if (hostActivity == null) {
-                    context.showToast("当前页面无法打开系统壁纸设置")
-                    return@save
-                }
-                hostActivity.runOnUiThread {
-                    // 视频光栅壁纸正在开发中
-                    if (group.type == RasterGroupModel.TYPE_DYNAMIC) {
-                        context.showToast("视频光栅壁纸正在开发中，敬请期待")
-                        return@runOnUiThread
+        // 视频光栅壁纸正在开发中
+        if (group.type == RasterGroupModel.TYPE_DYNAMIC) {
+            context.showToast("视频光栅壁纸正在开发中，敬请期待")
+            return
+        }
+        coroutineScope.launch {
+            withContext(Dispatchers.IO) {
+                FileUtil.save(context, JSON.toJSONString(models), FileUtil.wallpaperPath) {
+                    val hostActivity = context as? Activity
+                    if (hostActivity == null) {
+                        context.showToast("当前页面无法打开系统壁纸设置")
+                        return@save
                     }
+                    hostActivity.runOnUiThread {
+                        val wallpaperManager = WallpaperManager.getInstance(hostActivity)
+                        try {
+                            wallpaperManager.clear()
+                        } catch (e: IOException) {
+                            Log.w("RasterRouteScreen", "Clear wallpaper failed", e)
+                        }
 
-                    val wallpaperManager = WallpaperManager.getInstance(hostActivity)
-                    try {
-                        wallpaperManager.clear()
-                    } catch (e: IOException) {
-                        Log.w("RasterRouteScreen", "Clear wallpaper failed", e)
-                    }
+                        val serviceClass = when (group.type) {
+                            RasterGroupModel.TYPE_DYNAMIC -> VideoRasterWallpaperService::class.java
+                            RasterGroupModel.TYPE_STATIC -> StaticRasterWallpaperService::class.java
+                            else -> throw IllegalStateException("Unknown group type: ${group.type}")
+                        }
 
-                    val serviceClass = when (group.type) {
-                        RasterGroupModel.TYPE_DYNAMIC -> VideoRasterWallpaperService::class.java
-                        RasterGroupModel.TYPE_STATIC -> StaticRasterWallpaperService::class.java
-                        else -> throw IllegalStateException("Unknown group type: ${group.type}")
+                        val intent = Intent().apply {
+                            action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
+                            putExtra(
+                                WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+                                ComponentName(hostActivity, serviceClass)
+                            )
+                        }
+                        wallpaperLaunch.launch(intent)
+                        context.showToast("已应用光栅组合")
                     }
-
-                    val intent = Intent().apply {
-                        action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
-                        putExtra(
-                            WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                            ComponentName(hostActivity, serviceClass)
-                        )
-                    }
-                    wallpaperLaunch.launch(intent)
-                    context.showToast("已应用光栅组合")
                 }
             }
         }
@@ -538,7 +555,6 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
         val height = FileUtil.height.takeIf { it > 0 } ?: 16
         width.toFloat() / height.toFloat()
     }
-    val previewAspectRatio = cardAspectRatio
 
     var showSelectionBar by remember { mutableStateOf(false) }
     LaunchedEffect(selectionMode) {
@@ -585,7 +601,6 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { offset ->
                                 dragOffset = Offset.Zero
-                                val touchOffset = offset
                                 val layoutInfo = gridState.layoutInfo
                                 startViewportOffset = layoutInfo.viewportStartOffset
 
@@ -596,7 +611,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                                         val right = (item.offset.x + item.size.width).toFloat()
                                         val top = (item.offset.y - startViewportOffset).toFloat()
                                         val bottom = (item.offset.y - startViewportOffset + item.size.height).toFloat()
-                                        touchOffset.x in left..right && touchOffset.y in top..bottom
+                                        offset.x in left..right && offset.y in top..bottom
                                     }
 
                                 if (touchedItem != null) {
@@ -608,8 +623,8 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                                         .minByOrNull { item ->
                                             val screenCenterX = item.offset.x + item.size.width / 2f
                                             val screenCenterY = item.offset.y - startViewportOffset + item.size.height / 2f
-                                            (screenCenterX - touchOffset.x) * (screenCenterX - touchOffset.x) +
-                                                    (screenCenterY - touchOffset.y) * (screenCenterY - touchOffset.y)
+                                            (screenCenterX - offset.x) * (screenCenterX - offset.x) +
+                                                    (screenCenterY - offset.y) * (screenCenterY - offset.y)
                                         }?.let { item ->
                                             draggingItemIndex = item.index
                                             draggingItemKey = item.key
@@ -728,6 +743,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = liquidBackdrop,
                 isAllSelected = isAllSelected,
+                isLightTheme = isLightTheme,
                 onCancelSelect = { exitSelectionMode() },
                 onDelete = {
                     if (selectedIds.isEmpty()) {
@@ -962,7 +978,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
         ) {
             RasterDetailScreen(
                 group = group,
-                previewAspectRatio = previewAspectRatio,
+                previewAspectRatio = cardAspectRatio,
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = liquidBackdrop,
@@ -1036,14 +1052,18 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     }
                 },
                 onSensorWidthChanged = { editorGroup, newWidth ->
+                    // 实时更新预览，不持久化
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
                     if (idx >= 0) {
                         groups[idx] = groups[idx].copy(sensorWidth = newWidth)
                         if (detailGroup?.id == editorGroup.id) {
                             detailGroup = groups[idx].copy()
                         }
-                        persistGroups()
                     }
+                },
+                onSensorWidthChangeFinished = { editorGroup, _ ->
+                    // 拖动结束时持久化
+                    persistGroups()
                 },
                 onEffectTypeChanged = { editorGroup, newType ->
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
@@ -1056,24 +1076,32 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     }
                 },
                 onTransitionBandChanged = { editorGroup, newBand ->
+                    // 实时更新预览，不持久化
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
                     if (idx >= 0) {
                         groups[idx] = groups[idx].copy(transitionBand = newBand)
                         if (detailGroup?.id == editorGroup.id) {
                             detailGroup = groups[idx].copy()
                         }
-                        persistGroups()
                     }
                 },
+                onTransitionBandChangeFinished = { editorGroup, _ ->
+                    // 拖动结束时持久化
+                    persistGroups()
+                },
                 onEdgeSoftnessChanged = { editorGroup, newSoftness ->
+                    // 实时更新预览，不持久化
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
                     if (idx >= 0) {
                         groups[idx] = groups[idx].copy(edgeSoftness = newSoftness)
                         if (detailGroup?.id == editorGroup.id) {
                             detailGroup = groups[idx].copy()
                         }
-                        persistGroups()
                     }
+                },
+                onEdgeSoftnessChangeFinished = { editorGroup, _ ->
+                    // 拖动结束时持久化
+                    persistGroups()
                 },
                 onVideoAction = {
                     context.showToast("视频光栅壁纸正在开发中，敬请期待")
@@ -1165,17 +1193,24 @@ private fun RasterGroupCard(
 private fun RasterGroupThumbnail(group: RasterGroupModel) {
     val context = LocalContext.current
     val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, group.id) {
-        value = runCatching {
-            if (group.type == RasterGroupModel.TYPE_STATIC) {
-                val firstUri = group.imageUris.firstOrNull() ?: return@runCatching null
-                context.contentResolver.openInputStream(Uri.parse(firstUri))?.use {
-                    android.graphics.BitmapFactory.decodeStream(it)
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                if (group.type == RasterGroupModel.TYPE_STATIC) {
+                    val firstUri = group.imageUris.firstOrNull() ?: return@withContext null
+                    // 使用采样减少内存占用
+                    val options = android.graphics.BitmapFactory.Options().apply {
+                        inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                        inSampleSize = 4
+                    }
+                    context.contentResolver.openInputStream(Uri.parse(firstUri))?.use {
+                        android.graphics.BitmapFactory.decodeStream(it, null, options)
+                    }
+                } else {
+                    val videoUri = group.videoUri ?: return@withContext null
+                    ThumbnailUtils.getVideoFrame(context, Uri.parse(videoUri))
                 }
-            } else {
-                val videoUri = group.videoUri ?: return@runCatching null
-                ThumbnailUtils.getVideoFrame(context, Uri.parse(videoUri))
-            }
-        }.getOrNull()
+            }.getOrNull()
+        }
     }
 
     if (bitmap != null) {
@@ -1213,10 +1248,13 @@ private fun RasterDetailScreen(
     onStaticEditorCommitReorder: () -> Unit,
     onStaticEditorDeleteSingle: (RasterGroupModel, Int) -> Unit,
     onSensorWidthChanged: (RasterGroupModel, Float) -> Unit,
+    onSensorWidthChangeFinished: (RasterGroupModel, Float) -> Unit,
     // 新增参数回调
     onEffectTypeChanged: (RasterGroupModel, Int) -> Unit,
     onTransitionBandChanged: (RasterGroupModel, Float) -> Unit,
+    onTransitionBandChangeFinished: (RasterGroupModel, Float) -> Unit,
     onEdgeSoftnessChanged: (RasterGroupModel, Float) -> Unit,
+    onEdgeSoftnessChangeFinished: (RasterGroupModel, Float) -> Unit,
     groups: List<RasterGroupModel>,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
@@ -1433,6 +1471,7 @@ private fun RasterDetailScreen(
         ) { currentEditorGroup ->
             if (currentEditorGroup != null) {
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
+                val sheetBackdrop = rememberLayerBackdrop()  // 为 LiquidSlider 导出
                 val thumbnailListState = rememberLazyListState()
                 var draggingIndex by remember(currentEditorGroup.id, currentEditorGroup.imageUris) { mutableStateOf<Int?>(null) }
                 var dragOffsetX by remember(currentEditorGroup.id, currentEditorGroup.imageUris) { mutableStateOf(0f) }
@@ -1455,6 +1494,7 @@ private fun RasterDetailScreen(
                                 lens(16f.dp.toPx(), 32f.dp.toPx(), depthEffect = true)
                             },
                             highlight = { Highlight.Plain },
+                            exportedBackdrop = sheetBackdrop,  // 导出给 LiquidSlider 使用
                             onDrawSurface = { drawRect(containerColor) }
                         )
                         .pointerInput(Unit) { detectTapGestures { } }
@@ -1567,11 +1607,17 @@ private fun RasterDetailScreen(
                                     .clickable { onStaticEditorReplaceSingle(currentEditorGroup, index) }
                             ) {
                                 val bmp by produceState<android.graphics.Bitmap?>(initialValue = null, uri) {
-                                    value = runCatching {
-                                        context.contentResolver.openInputStream(Uri.parse(uri))?.use {
-                                            android.graphics.BitmapFactory.decodeStream(it)
-                                        }
-                                    }.getOrNull()
+                                    value = withContext(Dispatchers.IO) {
+                                        runCatching {
+                                            val options = android.graphics.BitmapFactory.Options().apply {
+                                                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                                                inSampleSize = 2
+                                            }
+                                            context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+                                                android.graphics.BitmapFactory.decodeStream(it, null, options)
+                                            }
+                                        }.getOrNull()
+                                    }
                                 }
                                 if (bmp != null) {
                                     Image(
@@ -1616,7 +1662,7 @@ private fun RasterDetailScreen(
                                         .align(Alignment.TopStart)
                                         .padding(4.dp)
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFFE53935),)
+                                        .background(Color(0xFFE53935))
                                         .clickable { onStaticEditorDeleteSingle(currentEditorGroup, index) }
                                         .padding(horizontal = 7.dp, vertical = 0.dp)
                                 )
@@ -1694,11 +1740,22 @@ private fun RasterDetailScreen(
                         mutableStateOf(currentEditorGroup.sensorWidth)
                     }
 
-                    BasicText(
-                        "灵敏度",
-                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
-                    )
-
+                    // 灵敏度范围 1~9 对应角度 20°~40°
+                    val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicText(
+                            "灵敏度",
+                            style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
+                        )
+                        BasicText(
+                            "倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘",
+                            style = TextStyle(contentColor.copy(0.5f), 12.sp)
+                        )
+                    }
                     Spacer(Modifier.height(4.dp))
 
                     Row(
@@ -1711,46 +1768,21 @@ private fun RasterDetailScreen(
                             style = TextStyle(contentColor.copy(0.6f), 12.sp)
                         )
 
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                        ) {
-                            // 轨道背景
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(contentColor.copy(0.15f))
-                            )
-                            // 已填充部分
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .fillMaxWidth((sensorWidth - 1f) / 8f) // 1~9 映射到 0~1
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(Color(0xFF2A83FF))
-                            )
-                            // 拖动区域
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .pointerInput(Unit) {
-                                        detectHorizontalDragGestures(
-                                            onHorizontalDrag = { change, _ ->
-                                                change.consume()
-                                                val fraction = (change.position.x / size.width).coerceIn(0f, 1f)
-                                                sensorWidth = (1f + fraction * 8f).coerceIn(1f, 9f)
-                                                // ✅ 通过回调通知外层
-                                                onSensorWidthChanged(currentEditorGroup, sensorWidth)
-                                            }
-                                        )
-                                    }
-                            )
-                        }
+                        LiquidSlider(
+                            value = { sensorWidth },
+                            onValueChange = {
+                                sensorWidth = it
+                                onSensorWidthChanged(currentEditorGroup, it)
+                            },
+                            onValueChangeFinished = {
+                                onSensorWidthChangeFinished(currentEditorGroup, sensorWidth)
+                            },
+                            valueRange = 1f..9f,
+                            visibilityThreshold = 0.1f,
+                            backdrop = sheetBackdrop,
+                            isLightTheme = isLightTheme,
+                            modifier = Modifier.weight(1f)
+                        )
 
                         BasicText(
                             "低",
@@ -1758,14 +1790,7 @@ private fun RasterDetailScreen(
                         )
                     }
 
-                    // 数值显示
-                    // 灵敏度范围 0.5~9.0 对应角度 20°~40°
-                    val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
-                    BasicText(
-                        "倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘",
-                        style = TextStyle(contentColor.copy(0.5f), 12.sp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+
                     
                     // ── 过渡带宽调节 ──
                     Spacer(Modifier.height(16.dp))
@@ -1791,41 +1816,21 @@ private fun RasterDetailScreen(
                             style = TextStyle(contentColor.copy(0.6f), 12.sp)
                         )
                         
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(contentColor.copy(0.15f))
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .fillMaxWidth(transitionBand)
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(Color(0xFF2A83FF))
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .pointerInput(Unit) {
-                                        detectHorizontalDragGestures(
-                                            onHorizontalDrag = { change, _ ->
-                                                change.consume()
-                                                transitionBand = (change.position.x / size.width).coerceIn(0.1f, 1f)
-                                                onTransitionBandChanged(currentEditorGroup, transitionBand)
-                                            }
-                                        )
-                                    }
-                            )
-                        }
+                        LiquidSlider(
+                            value = { transitionBand },
+                            onValueChange = {
+                                transitionBand = it
+                                onTransitionBandChanged(currentEditorGroup, it)
+                            },
+                            onValueChangeFinished = {
+                                onTransitionBandChangeFinished(currentEditorGroup, transitionBand)
+                            },
+                            valueRange = 0.1f..1f,
+                            visibilityThreshold = 0.001f,
+                            backdrop = sheetBackdrop,
+                            isLightTheme = isLightTheme,
+                            modifier = Modifier.weight(1f)
+                        )
                         
                         BasicText(
                             "宽",
@@ -1853,48 +1858,28 @@ private fun RasterDetailScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         BasicText(
-                            "锐利",
+                            "锐",
                             style = TextStyle(contentColor.copy(0.6f), 12.sp)
                         )
                         
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.Center)
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(contentColor.copy(0.15f))
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.CenterStart)
-                                    .fillMaxWidth(edgeSoftness * 2f)
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(Color(0xFF2A83FF))
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .pointerInput(Unit) {
-                                        detectHorizontalDragGestures(
-                                            onHorizontalDrag = { change, _ ->
-                                                change.consume()
-                                                edgeSoftness = ((change.position.x / size.width) / 2f).coerceIn(0.01f, 0.5f)
-                                                onEdgeSoftnessChanged(currentEditorGroup, edgeSoftness)
-                                            }
-                                        )
-                                    }
-                            )
-                        }
+                        LiquidSlider(
+                            value = { edgeSoftness },
+                            onValueChange = {
+                                edgeSoftness = it
+                                onEdgeSoftnessChanged(currentEditorGroup, it)
+                            },
+                            onValueChangeFinished = {
+                                onEdgeSoftnessChangeFinished(currentEditorGroup, edgeSoftness)
+                            },
+                            valueRange = 0.01f..0.5f,
+                            visibilityThreshold = 0.001f,
+                            backdrop = sheetBackdrop,
+                            isLightTheme = isLightTheme,
+                            modifier = Modifier.weight(1f)
+                        )
                         
                         BasicText(
-                            "柔和",
+                            "柔",
                             style = TextStyle(contentColor.copy(0.6f), 12.sp)
                         )
                     }
@@ -1941,127 +1926,67 @@ private fun GyroDynamicRasterPreview(
     val videoUri = group.videoUri
     val (tilt, direction) = rememberTiltState(sensorWidth)
     
-    // 视频播放器状态
-    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
-    var videoDuration by remember { mutableStateOf(0L) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPosition by remember { mutableStateOf(0L) }
-    var targetPosition by remember { mutableStateOf(0L) }
+    // 缓存的关键帧（预先提取 10 帧）
+    val cachedFrames = remember { mutableStateListOf<android.graphics.Bitmap?>() }
+    var framesLoaded by remember { mutableStateOf(false) }
     
-    // 初始化 MediaPlayer 并管理生命周期
-    DisposableEffect(videoUri) {
-        if (videoUri.isNullOrEmpty()) {
-            return@DisposableEffect onDispose {
-                mediaPlayer?.release()
-                mediaPlayer = null
-            }
-        }
+    // 预加载关键帧到缓存
+    LaunchedEffect(videoUri) {
+        if (videoUri.isNullOrEmpty()) return@LaunchedEffect
         
-        try {
-            val mp = MediaPlayer().apply {
-                setDataSource(context, Uri.parse(videoUri))
-                setOnPreparedListener { mp ->
-                    videoDuration = mp.duration.toLong()
-                    mp.isLooping = false
-                    mp.pause()
-                    // 初始位置设为第一帧
-                    mp.seekTo(0)
-                }
-                setOnCompletionListener { mp ->
-                    mp.seekTo(0)
-                    currentPosition = 0
-                    targetPosition = 0
-                }
-                prepareAsync()
-            }
-            mediaPlayer = mp
-        } catch (e: Exception) {
-            Log.w("RasterRouteScreen", "Failed to initialize MediaPlayer", e)
-        }
-        
-        onDispose {
-            mediaPlayer?.release()
-            mediaPlayer = null
-        }
-    }
-    
-    // 根据倾斜控制视频播放 - 连续变化
-    val targetTimeMs = remember(tilt, videoDuration) {
-        if (videoDuration > 0) {
-            (videoDuration.toFloat() * tilt).toLong().coerceAtLeast(0L)
-        } else 0L
-    }
-    
-    // 根据目标时间实时更新播放位置（无阈值限制）
-    LaunchedEffect(targetTimeMs, mediaPlayer) {
-        if (videoDuration <= 0 || mediaPlayer == null) return@LaunchedEffect
-        
-        // 判断是正向还是反向播放
-        if (targetTimeMs > currentPosition) {
-            // 正向播放：从左倾或右倾开始播放到目标位置
-            mediaPlayer?.apply {
-                if (!isPlaying) {
-                    seekTo(currentPosition.toInt())
-                    start()
-                    isPlaying = true
-                }
-            }
-        } else if (targetTimeMs < currentPosition) {
-            // 反向播放：倒回到目标位置
-            mediaPlayer?.apply {
-                if (isPlaying) {
-                    pause()
-                    isPlaying = false
-                }
-                seekTo(targetTimeMs.toInt())
-                currentPosition = targetTimeMs
-            }
-        }
-    }
-    
-    // 定期更新当前位置
-    LaunchedEffect(mediaPlayer) {
-        while (true) {
-            delay(100) // 每 100ms 更新一次
-            mediaPlayer?.let { mp ->
-                if (mp.isPlaying) {
-                    val pos = mp.currentPosition.toLong()
-                    if (pos >= targetPosition) {
-                        mp.pause()
-                        isPlaying = false
-                        currentPosition = targetPosition
-                    } else {
-                        currentPosition = pos
+        withContext(Dispatchers.IO) {
+            try {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(context, Uri.parse(videoUri))
+                
+                val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                val duration = durationStr?.toLongOrNull() ?: 0L
+                
+                if (duration > 0) {
+                    // 预提取 10 个关键帧
+                    val frameCount = 10
+                    val interval = duration / frameCount
+                    
+                    repeat(frameCount) { index ->
+                        val timeUs = (index * interval * 1000).coerceAtLeast(0L)
+                        val frame = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+                            retriever.getScaledFrameAtTime(
+                                timeUs,
+                                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                                360,
+                                640
+                            )
+                        } else {
+                            retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        }
+                        cachedFrames.add(frame)
                     }
                 }
+                retriever.release()
+                framesLoaded = true
+            } catch (e: Exception) {
+                Log.w("RasterRouteScreen", "Failed to preload video frames", e)
             }
         }
     }
     
-    // 显示当前帧的 Bitmap - 使用 snapshotFlow 实现连续更新
-    val currentFrame by produceState<android.graphics.Bitmap?>(initialValue = null, targetTimeMs) {
-        if (videoUri.isNullOrEmpty()) {
-            value = null
-            return@produceState
-        }
-        
-        // 每次 targetTimeMs 变化时都重新提取帧
-        value = ThumbnailUtils.getVideoFrame(
-            context = context,
-            videoUriString = videoUri,
-            timeUs = (targetTimeMs * 1000).coerceAtLeast(0L),
-            option = MediaMetadataRetriever.OPTION_CLOSEST
-        )
-    }
+    // 根据 tilt 选择对应的帧
+    val frameIndex = (tilt * (cachedFrames.size - 1)).roundToInt().coerceIn(0, cachedFrames.lastIndex)
+    val currentFrame = cachedFrames.getOrNull(frameIndex)
 
     Box(modifier = modifier) {
         if (currentFrame != null) {
             Image(
-                bitmap = currentFrame!!.asImageBitmap(),
+                bitmap = currentFrame.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
+        } else if (!framesLoaded) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.DarkGray),
+                contentAlignment = Alignment.Center
+            ) { Text("加载中...", color = Color.White) }
         } else {
             Box(
                 modifier = Modifier.fillMaxSize().background(Color.DarkGray),
@@ -2108,7 +2033,7 @@ private fun rememberTiltState(sensorWidth: Float = 4.5f, maxAngle: Float = 30f):
                     val clampedAccumulated = accumulated.coerceIn(-maxAngleRadians, maxAngleRadians)
                     
                     // 计算倾斜幅度 (0-1)，基于 30 度范围
-                    tilt = (Math.abs(clampedAccumulated) / maxAngleRadians).coerceIn(0f, 1f)
+                    tilt = (abs(clampedAccumulated) / maxAngleRadians).coerceIn(0f, 1f)
                     
                     direction = when {
                         accumulated < -0.05f -> 1  // 右倾

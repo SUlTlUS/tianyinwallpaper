@@ -1,4 +1,4 @@
-package com.kyant.backdrop
+package com.zeaze.tianyinwallpaper.backdrop
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size

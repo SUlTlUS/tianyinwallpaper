@@ -18,7 +18,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,6 +79,7 @@ private sealed class SettingsDialogState {
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun SettingRouteScreen(
+    useDarkTheme: Boolean,
     onThemeModeChange: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -133,7 +133,7 @@ fun SettingRouteScreen(
         else -> null
     }
 
-    val isLightTheme = !isSystemInDarkTheme()
+    val isLightTheme = !useDarkTheme
     val backgroundColor =
         if (isLightTheme) Color(0xFFFFFFFF)
         else Color(0xFF121212)
@@ -184,11 +184,11 @@ fun SettingRouteScreen(
                         .padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    SettingCheckItem("随机切换壁纸", rand, contentColor, backgroundColor) {
+                    SettingCheckItem("随机切换壁纸", rand, contentColor, backgroundColor, isLightTheme) {
                         rand = it
                         editor.putBoolean("rand", it).apply()
                     }
-                    SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, backgroundColor) {
+                    SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, backgroundColor, isLightTheme) {
                         pageChange = it
                         editor.putBoolean("pageChange", it).apply()
                         if (it && wallpaperScroll) {
@@ -196,7 +196,7 @@ fun SettingRouteScreen(
                             editor.putBoolean("wallpaperScroll", false).apply()
                         }
                     }
-                    SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, backgroundColor) {
+                    SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, backgroundColor, isLightTheme) {
                         wallpaperScroll = it
                         editor.putBoolean("wallpaperScroll", it).apply()
                         if (it && pageChange) {
@@ -781,6 +781,7 @@ private fun SettingCheckItem(
     checked: Boolean,
     contentColor: Color,
     backgroundColor: Color,
+    isLightTheme: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
@@ -804,6 +805,7 @@ private fun SettingCheckItem(
             selected = { checked },
             onSelect = onCheckedChange,
             backdrop = rememberCanvasBackdrop { drawRect(backgroundColor) },
+            isLightTheme = isLightTheme
         )
     }
 }

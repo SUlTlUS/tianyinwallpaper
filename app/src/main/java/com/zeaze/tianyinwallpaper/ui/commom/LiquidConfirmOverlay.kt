@@ -2,7 +2,6 @@ package com.zeaze.tianyinwallpaper.ui.commom
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,6 +34,7 @@ import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 fun LiquidConfirmOverlay(
     visible: Boolean,
     backdrop: Backdrop,
+    isLightTheme: Boolean,
     message: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
@@ -44,7 +44,6 @@ fun LiquidConfirmOverlay(
 ) {
     if (!visible) return
 
-    val isLightTheme = !isSystemInDarkTheme()
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor =

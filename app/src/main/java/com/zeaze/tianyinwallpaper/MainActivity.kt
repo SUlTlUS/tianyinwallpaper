@@ -9,7 +9,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.view.View
 import android.view.WindowManager
+import android.view.WindowInsetsController
 import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
@@ -34,6 +36,7 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,10 +46,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
@@ -153,6 +158,33 @@ class MainActivity : BaseActivity() {
             THEME_MODE_LIGHT -> false
             else -> isSystemInDarkTheme()
         }
+
+        // 更新状态栏外观
+        val view = LocalView.current
+        SideEffect {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val controller = view.windowInsetsController
+                val appearance = if (!useDarkTheme) {
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                } else {
+                    0
+                }
+                controller?.setSystemBarsAppearance(
+                    appearance,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                view.systemUiVisibility = if (useDarkTheme) {
+                    view.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                } else {
+                    view.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                }
+            }
+        }
+
         MaterialTheme(colors = if (useDarkTheme) darkColors() else lightColors()) {
             val themeBackgroundColor = MaterialTheme.colors.background
             val enableLiquidGlass =
@@ -203,6 +235,7 @@ class MainActivity : BaseActivity() {
                     composable(ROUTE_MAIN) {
                         MainPagerScreen(
                             pagerState = pagerState,
+                            useDarkTheme = useDarkTheme,
                             onOpenSettingPage = { openSettingPage() },
                             onBottomBarVisibleChange = { setBottomBarVisible(it) }
                         )
@@ -222,7 +255,10 @@ class MainActivity : BaseActivity() {
                             )
                         }
                     ) {
-                        AboutRouteScreen(onBack = { navController.popBackStack() })
+                        AboutRouteScreen(
+                            useDarkTheme = useDarkTheme,
+                            onBack = { navController.popBackStack() }
+                        )
                     }
                     composable(
                         route = ROUTE_SETTING,
@@ -240,6 +276,7 @@ class MainActivity : BaseActivity() {
                         }
                     ) {
                         SettingRouteScreen(
+                            useDarkTheme = useDarkTheme,
                             onThemeModeChange = { mode ->
                                 themeMode = mode
                             }
@@ -268,6 +305,7 @@ class MainActivity : BaseActivity() {
                         statusBarTopPaddingDp = statusBarTopPaddingDp,
                         enableLiquidGlass = enableLiquidGlass,
                         backdrop = liquidBackdrop,
+                        isLightTheme = !useDarkTheme,
                         onAdd = {
                             if (isRasterPage) {
                                 RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_RASTER, Unit)
@@ -416,6 +454,7 @@ class MainActivity : BaseActivity() {
                             },
                             backdrop = liquidBackdrop,
                             tabsCount = tabItems.size,
+                            isLightTheme = !useDarkTheme,
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .padding(horizontal = 36.dp)
@@ -486,6 +525,7 @@ class MainActivity : BaseActivity() {
     @Composable
     private fun MainPagerScreen(
         pagerState: androidx.compose.foundation.pager.PagerState,
+        useDarkTheme: Boolean,
         onOpenSettingPage: () -> Unit,
         onBottomBarVisibleChange: (Boolean) -> Unit
     ) {
@@ -497,11 +537,15 @@ class MainActivity : BaseActivity() {
         ) { page ->
             when (tabItems[page].first) {
                 ROUTE_MAIN -> MainRouteScreen(
+                    useDarkTheme = useDarkTheme,
                     onOpenSettingPage = onOpenSettingPage,
                     onBottomBarVisibleChange = onBottomBarVisibleChange
                 )
 
-                ROUTE_RASTER -> RasterRouteScreen(onBottomBarVisibleChange = onBottomBarVisibleChange)
+                ROUTE_RASTER -> RasterRouteScreen(
+                    useDarkTheme = useDarkTheme,
+                    onBottomBarVisibleChange = onBottomBarVisibleChange
+                )
             }
         }
     }
@@ -543,10 +587,6 @@ class MainActivity : BaseActivity() {
                 Toast.makeText(this, "取消设置动态壁纸", Toast.LENGTH_SHORT).show()
             }
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
     }
 
     private fun clearNoUseFile() {

@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -79,7 +80,7 @@ fun WheelPicker(
             }
 
             override suspend fun onPreFling(available: Velocity): Velocity {
-                if (Math.abs(overscrollOffset.value) > 0.1f) {
+                if (abs(overscrollOffset.value) > 0.1f) {
                     return available
                 }
                 return Velocity.Zero

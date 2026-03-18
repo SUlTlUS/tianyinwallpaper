@@ -37,7 +37,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -106,9 +105,10 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Collections
 import java.util.UUID
-import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntOffset
 
@@ -154,12 +154,14 @@ private sealed class DialogState {
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
+@Suppress("UNUSED_PARAMETER")
 fun MainRouteScreen(
+    useDarkTheme: Boolean,
     onOpenSettingPage: () -> Unit,
     onBottomBarVisibleChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    val isLightTheme = !isSystemInDarkTheme()
+    val isLightTheme = !useDarkTheme
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
@@ -169,6 +171,7 @@ fun MainRouteScreen(
     val activity = context as? Activity
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
+    val coroutineScope = rememberCoroutineScope()
 
     val wallpapers = remember { mutableStateListOf<TianYinWallpaperModel>() }
     val selectedPositions = remember { mutableStateListOf<Int>() }
@@ -237,41 +240,53 @@ fun MainRouteScreen(
     fun checkAndSaveGroup() {
         if (groupName.isBlank() || wallpapers.isEmpty()) return
 
-        val currentContent = JSON.toJSONString(wallpapers)
-        val data = FileUtil.loadData(context, FileUtil.dataPath)
-        val list = JSON.parseArray(data, SaveData::class.java)?.toMutableList() ?: mutableListOf()
-
-        val existing = list.find { it.name == groupName }
-        if (existing != null) {
-            if (existing.s != currentContent) {
-                showOverwriteDialog = true
+        coroutineScope.launch {
+            val currentContent = withContext(Dispatchers.IO) { JSON.toJSONString(wallpapers) }
+            val data = withContext(Dispatchers.IO) { FileUtil.loadData(context, FileUtil.dataPath) }
+            val list = withContext(Dispatchers.IO) { 
+                JSON.parseArray(data, SaveData::class.java)?.toMutableList() ?: mutableListOf() 
             }
-        } else {
-            list.add(0, SaveData(currentContent, groupName))
-            FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
-                context.showToast("壁纸组已保存到列表")
-                RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
+
+            val existing = list.find { it.name == groupName }
+            if (existing != null) {
+                if (existing.s != currentContent) {
+                    showOverwriteDialog = true
+                }
+            } else {
+                list.add(0, SaveData(currentContent, groupName))
+                withContext(Dispatchers.IO) {
+                    FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
+                        context.showToast("壁纸组已保存到列表")
+                        RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
+                    }
+                }
             }
         }
     }
 
     fun performOverwriteSave() {
         if (groupName.isBlank()) return
-        val currentContent = JSON.toJSONString(wallpapers)
-        val data = FileUtil.loadData(context, FileUtil.dataPath)
-        val list = JSON.parseArray(data, SaveData::class.java)?.toMutableList() ?: mutableListOf()
-
-        val index = list.indexOfFirst { it.name == groupName }
-        if (index != -1) {
-            list[index].s = currentContent
-            val item = list.removeAt(index)
-            list.add(0, item)
-            FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
-                context.showToast("壁纸组已覆盖保存")
-                RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
+        coroutineScope.launch {
+            val currentContent = withContext(Dispatchers.IO) { JSON.toJSONString(wallpapers) }
+            val data = withContext(Dispatchers.IO) { FileUtil.loadData(context, FileUtil.dataPath) }
+            val list = withContext(Dispatchers.IO) {
+                JSON.parseArray(data, SaveData::class.java)?.toMutableList() ?: mutableListOf()
             }
+
+            val index = list.indexOfFirst { it.name == groupName }
+            if (index != -1) {
+                list[index].s = currentContent
+                val item = list.removeAt(index)
+                list.add(0, item)
+                withContext(Dispatchers.IO) {
+                    FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
+                        context.showToast("壁纸组已覆盖保存")
+                        RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
+                    }
+                }
+            }
+            showOverwriteDialog = false
         }
-        showOverwriteDialog = false
     }
 
     fun saveCache() {
@@ -300,27 +315,30 @@ fun MainRouteScreen(
     }
 
     fun performApply(list: List<TianYinWallpaperModel>) {
-        thread {
-            FileUtil.save(context, JSON.toJSONString(list), FileUtil.wallpaperPath) {
-                val hostActivity = activity ?: run {
-                    Log.w("MainRouteScreen", "onSave skipped: activity is null")
-                    return@save
-                }
-                hostActivity.runOnUiThread {
-                    val wallpaperManager = WallpaperManager.getInstance(hostActivity)
-                    try {
-                        wallpaperManager.clear()
-                    } catch (e: IOException) {
-                        e.printStackTrace()
+        coroutineScope.launch {
+            withContext(Dispatchers.IO) {
+                FileUtil.save(context, JSON.toJSONString(list), FileUtil.wallpaperPath) {
+                    val hostActivity = activity
+                    if (hostActivity == null) {
+                        Log.w("MainRouteScreen", "onSave skipped: activity is null")
+                        return@save
                     }
-                    val intent = Intent().apply {
-                        action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
-                        putExtra(
-                            WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                            ComponentName(hostActivity, TianYinWallpaperService::class.java)
-                        )
+                    hostActivity.runOnUiThread {
+                        val wallpaperManager = WallpaperManager.getInstance(hostActivity)
+                        try {
+                            wallpaperManager.clear()
+                        } catch (e: IOException) {
+                            e.printStackTrace()
+                        }
+                        val intent = Intent().apply {
+                            action = WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
+                            putExtra(
+                                WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+                                ComponentName(hostActivity, TianYinWallpaperService::class.java)
+                            )
+                        }
+                        wallpaperLaunch.launch(intent)
                     }
-                    wallpaperLaunch.launch(intent)
                 }
             }
         }
@@ -382,10 +400,10 @@ fun MainRouteScreen(
     }
 
     val imageLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { results ->
-        if (!results.isNullOrEmpty()) appendModels(results, dynamic = false)
+        if (results.isNotEmpty()) appendModels(results, dynamic = false)
     }
     val videoLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { results ->
-        if (!results.isNullOrEmpty()) appendModels(results, dynamic = true)
+        if (results.isNotEmpty()) appendModels(results, dynamic = true)
     }
     val directoryLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
         if (treeUri == null) return@rememberLauncherForActivityResult
@@ -562,7 +580,7 @@ fun MainRouteScreen(
             when {
                 index == from -> selectedPositions.add(to)
                 from < to && index in (from + 1)..to -> selectedPositions.add(index - 1)
-                from > to && index in to..(from - 1) -> selectedPositions.add(index + 1)
+                from > to && index in to..<from -> selectedPositions.add(index + 1)
                 else -> selectedPositions.add(index)
             }
         }
@@ -592,7 +610,6 @@ fun MainRouteScreen(
                         detectDragGesturesAfterLongPress(
                             onDragStart = { offset ->
                                 dragOffset = Offset.Zero
-                                val touchOffset = offset
 
                                 val layoutInfo = gridState.layoutInfo
                                 startViewportOffset = layoutInfo.viewportStartOffset
@@ -605,7 +622,7 @@ fun MainRouteScreen(
                                         val right = (item.offset.x + item.size.width).toFloat()
                                         val top = (item.offset.y - startViewportOffset).toFloat()
                                         val bottom = (item.offset.y - startViewportOffset + item.size.height).toFloat()
-                                        touchOffset.x in left..right && touchOffset.y in top..bottom
+                                        offset.x in left..right && offset.y in top..bottom
                                     }
 
                                 if (touchedItem != null) {
@@ -618,8 +635,8 @@ fun MainRouteScreen(
                                         .minByOrNull { item ->
                                             val screenCenterX = item.offset.x + item.size.width / 2f
                                             val screenCenterY = item.offset.y - startViewportOffset + item.size.height / 2f
-                                            (screenCenterX - touchOffset.x) * (screenCenterX - touchOffset.x) +
-                                                    (screenCenterY - touchOffset.y) * (screenCenterY - touchOffset.y)
+                                            (screenCenterX - offset.x) * (screenCenterX - offset.x) +
+                                                    (screenCenterY - offset.y) * (screenCenterY - offset.y)
                                         }?.let { item ->
                                             draggingItemIndex = item.index
                                             draggingItemKey = item.key
@@ -803,6 +820,7 @@ fun MainRouteScreen(
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = liquidBackdrop,
                 isAllSelected = isAllSelected,
+                isLightTheme = isLightTheme,
                 onCancelSelect = { exitSelectionMode() },
                 onDelete = {
                     if (selectedPositions.isEmpty()) {
@@ -867,6 +885,7 @@ fun MainRouteScreen(
         ) { state ->
             if (state != null) {
                 val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
+                val sheetBackdrop = rememberLayerBackdrop()  // 为 LiquidToggle 导出
                 Column(
                     Modifier
                         .padding(50f.dp)
@@ -883,6 +902,7 @@ fun MainRouteScreen(
                                 lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
                             },
                             highlight = { Highlight.Plain },
+                            exportedBackdrop = sheetBackdrop,  // 导出给 LiquidToggle 使用
                             onDrawSurface = { drawRect(containerColor) }
                         )
                         .pointerInput(Unit) { detectTapGestures { /* consume */ } }
@@ -955,7 +975,8 @@ fun MainRouteScreen(
                                                 model.loop = it
                                                 saveCache()
                                             },
-                                            backdrop = dialogBackdrop
+                                            backdrop = sheetBackdrop,
+                                            isLightTheme = isLightTheme
                                         )
                                     }
 
@@ -1447,7 +1468,7 @@ fun MainRouteScreen(
                             .align(Alignment.BottomCenter)
                             .padding(bottom = 24.dp)
                     ) {
-                        val isDark = isSystemInDarkTheme()
+                        val isDark = !isLightTheme
                         val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
                         val textColor = if (isDark) Color.White else Color.Black
 
@@ -1496,9 +1517,17 @@ fun MainRouteScreen(
             enter = fadeIn() + scaleIn(initialScale = 0.8f),
             exit = fadeOut() + scaleOut(targetScale = 0.8f)
         ) {
-            val wallpaperList = remember(showLivePreview) {
-                val listData = FileUtil.loadData(context, FileUtil.wallpaperPath)
-                JSON.parseArray(listData, TianYinWallpaperModel::class.java) ?: emptyList()
+            // 异步加载壁纸列表
+            val wallpaperList by produceState<List<TianYinWallpaperModel>>(
+                initialValue = emptyList(),
+                showLivePreview
+            ) {
+                if (showLivePreview) {
+                    value = withContext(Dispatchers.IO) {
+                        val listData = FileUtil.loadData(context, FileUtil.wallpaperPath)
+                        JSON.parseArray(listData, TianYinWallpaperModel::class.java) ?: emptyList()
+                    }
+                }
             }
             LiveSyncPreview(
                 wallpaperList = wallpaperList,
@@ -1516,6 +1545,7 @@ fun MainTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
     backdrop: LayerBackdrop?,
+    isLightTheme: Boolean,
     onAdd: () -> Unit,
     onApply: () -> Unit,
     onMoreClick: () -> Unit,
@@ -1611,7 +1641,7 @@ fun MainTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        val isDark = isSystemInDarkTheme()
+        val isDark = !isLightTheme
         val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
         val textColor = if (isDark) Color.White else Color.Black
 
@@ -1631,12 +1661,13 @@ fun SelectionTopBar(
     enableLiquidGlass: Boolean,
     backdrop: LayerBackdrop?,
     isAllSelected: Boolean,
+    isLightTheme: Boolean,
     onCancelSelect: () -> Unit,
     onDelete: () -> Unit,
     onToggleSelectAll: () -> Unit
 ) {
     val context = LocalContext.current
-    val isDark = isSystemInDarkTheme()
+    val isDark = !isLightTheme
     val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
     val textColor = if (isDark) Color.White else Color.Black
 

@@ -2,7 +2,6 @@ package com.zeaze.tianyinwallpaper.ui.setting
 
     import androidx.compose.foundation.background
     import androidx.compose.foundation.clickable
-    import androidx.compose.foundation.isSystemInDarkTheme
     import androidx.compose.foundation.layout.*
     import androidx.compose.foundation.text.BasicText
     import androidx.compose.runtime.Composable
@@ -30,6 +29,7 @@ package com.zeaze.tianyinwallpaper.ui.setting
     @Composable
     fun LiquidDialog(
         backdrop: Backdrop,
+        isLightTheme: Boolean,
         onDismissRequest: () -> Unit,
         onConfirm: () -> Unit,
         title: String = "提示",
@@ -37,7 +37,6 @@ package com.zeaze.tianyinwallpaper.ui.setting
         confirmText: String = "确定",
         dismissText: String = "取消"
     ) {
-        val isLightTheme = !isSystemInDarkTheme()
         val contentColor = if (isLightTheme) Color.Black else Color.White
         val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
         val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)

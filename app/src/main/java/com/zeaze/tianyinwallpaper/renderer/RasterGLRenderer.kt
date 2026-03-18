@@ -504,7 +504,7 @@ class RasterGLRenderer {
         // 计算加权平均
         var sum = 0f
         var weightSum = 0f
-        for (i in 0 until historyCount) {
+        for (i in 0..<historyCount) {
             val idx = (historyIndex - 1 - i + HISTORY_SIZE) % HISTORY_SIZE
             val weight = if (i == 0) adaptiveAlpha else (1 - adaptiveAlpha) / (historyCount - 1)
             sum += angleHistory[idx] * weight
@@ -567,7 +567,8 @@ class RasterGLRenderer {
                         inPreferredConfig = Bitmap.Config.ARGB_8888
                     }
                     BitmapFactory.decodeStream(inputStream, null, options)?.let { bitmap ->
-                        if (bitmap.config == Bitmap.Config.HARDWARE) {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+                            bitmap.config == Bitmap.Config.HARDWARE) {
                             val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
                             bitmap.recycle()
                             RenderBitmapCache.put(key, softwareBitmap)
@@ -597,7 +598,8 @@ class RasterGLRenderer {
                         inPreferredConfig = Bitmap.Config.ARGB_8888
                     }
                     BitmapFactory.decodeStream(inputStream, null, options)?.let { bitmap ->
-                        if (bitmap.config == Bitmap.Config.HARDWARE) {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+                            bitmap.config == Bitmap.Config.HARDWARE) {
                             val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
                             bitmap.recycle()
                             softwareBitmap

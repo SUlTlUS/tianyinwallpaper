@@ -57,11 +57,8 @@ object RenderBitmapCache {
             }
             
             override fun entryRemoved(evicted: Boolean, key: String, oldValue: Bitmap, newValue: Bitmap?) {
-                // 只在真正被移除时 recycle，避免影响正在使用的 Bitmap
-                if (evicted && newValue == null) {
-                    // 注意：不要在这里 recycle，因为可能还在被 OpenGL 使用
-                    // Bitmap 的回收由调用者负责
-                }
+                // 注意：不在这里 recycle，因为 Bitmap 可能还在被 OpenGL 使用
+                // Bitmap 的回收由调用者负责
             }
         }
     }
@@ -269,8 +266,9 @@ object RenderBitmapCache {
      */
     private fun ensureSoftwareBitmap(bitmap: Bitmap): Bitmap? {
         return try {
-            // Android 11+ 检查配置
-            if (bitmap.config == Bitmap.Config.HARDWARE) {
+            // Android O (API 26)+ 检查配置
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
+                bitmap.config == Bitmap.Config.HARDWARE) {
                 // 转换为软件位图
                 bitmap.copy(Bitmap.Config.ARGB_8888, false).also {
                     bitmap.recycle()

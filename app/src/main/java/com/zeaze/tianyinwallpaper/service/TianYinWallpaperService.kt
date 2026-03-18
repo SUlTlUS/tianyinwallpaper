@@ -195,7 +195,7 @@ class TianYinWallpaperService : WallpaperService() {
                                             shouldSwitch = true
                                             break
                                         }
-                                    } else if (currentMinutes >= pointMinutes && lastSwitchMinutes < pointMinutes) {
+                                    } else if (currentMinutes >= pointMinutes && pointMinutes > lastSwitchMinutes) {
                                         shouldSwitch = true
                                         break
                                     }

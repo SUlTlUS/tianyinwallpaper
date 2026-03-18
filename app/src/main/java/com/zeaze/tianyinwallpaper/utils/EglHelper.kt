@@ -62,8 +62,12 @@ class EglHelper(private val tag: String = "EglHelper") {
         config = configs[0]
 
         // 创建上下文
+        val safeConfig = config ?: run {
+            if (withErrorLogging) Log.e(tag, "eglConfig is null")
+            return false
+        }
         context = EGL14.eglCreateContext(
-            display, config!!, EGL14.EGL_NO_CONTEXT,
+            display, safeConfig, EGL14.EGL_NO_CONTEXT,
             intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0
         )
         if (context == EGL14.EGL_NO_CONTEXT) {
@@ -73,7 +77,7 @@ class EglHelper(private val tag: String = "EglHelper") {
 
         // 创建 Surface
         eglSurface = EGL14.eglCreateWindowSurface(
-            display, config!!, surface,
+            display, safeConfig, surface,
             intArrayOf(EGL14.EGL_NONE), 0
         )
         if (eglSurface == EGL14.EGL_NO_SURFACE) {
@@ -112,13 +116,14 @@ class EglHelper(private val tag: String = "EglHelper") {
         EGL14.eglChooseConfig(display, attr, 0, configs, 0, 1, numConfigs, 0)
         config = configs[0]
 
+        val safeConfig = config ?: return false
         context = EGL14.eglCreateContext(
-            display, config!!, EGL14.EGL_NO_CONTEXT,
+            display, safeConfig, EGL14.EGL_NO_CONTEXT,
             intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0
         )
 
         eglSurface = EGL14.eglCreateWindowSurface(
-            display, config!!, surface,
+            display, safeConfig, surface,
             intArrayOf(EGL14.EGL_NONE), 0
         )
 
@@ -158,7 +163,7 @@ class EglHelper(private val tag: String = "EglHelper") {
      * 检查 EGL 是否已初始化
      */
     val isReady: Boolean
-        get() = display != EGL14.EGL_NO_DISPLAY && 
-                context != EGL14.EGL_NO_CONTEXT && 
+        get() = display != EGL14.EGL_NO_DISPLAY &&
+                context != EGL14.EGL_NO_CONTEXT &&
                 eglSurface != EGL14.EGL_NO_SURFACE
 }

@@ -26,7 +26,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,6 +76,7 @@ import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 
 @Composable
 fun AboutRouteScreen(
+    useDarkTheme: Boolean,
     onSelectionModeChange: (Boolean) -> Unit = {},
     onBack: () -> Unit = {}
 ) {
@@ -203,6 +203,7 @@ fun AboutRouteScreen(
         LiquidConfirmOverlay(
             visible = pendingOverwriteGroup != null,
             backdrop = dialogBackdrop,
+            isLightTheme = !useDarkTheme,
             message = "是否覆盖壁纸列表",
             onDismiss = { pendingOverwriteGroup = null },
             onConfirm = {
@@ -220,6 +221,7 @@ fun AboutRouteScreen(
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = liquidBackdrop,
                 isAllSelected = isAllSelected,
+                isLightTheme = !useDarkTheme,
                 onCancelSelect = { exitSelectionMode() },
                 onDelete = { deleteSelectedGroups() },
                 onToggleSelectAll = {
@@ -239,7 +241,7 @@ fun AboutRouteScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val isDark = isSystemInDarkTheme()
+                val isDark = useDarkTheme
                 val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
                 val textColor = if (isDark) Color.White else Color.Black
 
@@ -422,7 +424,7 @@ private suspend fun loadPreviewBitmap(context: Context, model: TianYinWallpaperM
                         targetHeight = VIDEO_PREVIEW_HEIGHT
                     )
                 } else {
-                    decodeSampledBitmap(context, path, VIDEO_PREVIEW_WIDTH, VIDEO_PREVIEW_HEIGHT)
+                    decodeSampledBitmap(context, path)
                 }
                 bitmap?.let {
                     if (cacheKey.isNotEmpty()) {
@@ -438,7 +440,7 @@ private suspend fun loadPreviewBitmap(context: Context, model: TianYinWallpaperM
     }
 }
 
-private fun decodeSampledBitmap(context: Context, path: String, reqWidth: Int, reqHeight: Int): Bitmap? {
+private fun decodeSampledBitmap(context: Context, path: String): Bitmap? {
     val options = BitmapFactory.Options().apply {
         inJustDecodeBounds = true
     }
@@ -452,7 +454,7 @@ private fun decodeSampledBitmap(context: Context, path: String, reqWidth: Int, r
         BitmapFactory.decodeFile(path, options)
     }
 
-    options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight)
+    options.inSampleSize = calculateInSampleSize(options, VIDEO_PREVIEW_WIDTH, VIDEO_PREVIEW_HEIGHT)
     options.inJustDecodeBounds = false
 
     return if (path.startsWith("content://")) {

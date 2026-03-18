@@ -2,7 +2,6 @@ package com.zeaze.tianyinwallpaper.catalog.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -52,9 +51,10 @@ fun LiquidSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     visibilityThreshold: Float,
     backdrop: Backdrop,
-    modifier: Modifier = Modifier
+    isLightTheme: Boolean,
+    modifier: Modifier = Modifier,
+    onValueChangeFinished: (() -> Unit)? = null
 ) {
-    val isLightTheme = !isSystemInDarkTheme()
     val accentColor =
         if (isLightTheme) Color(0xFF0088FF)
         else Color(0xFF0091FF)
@@ -85,6 +85,7 @@ fun LiquidSlider(
                 onDragStopped = {
                     if (didDrag) {
                         onValueChange(targetValue)
+                        onValueChangeFinished?.invoke()
                     }
                 },
                 onDrag = { _, dragAmount ->
@@ -122,6 +123,7 @@ fun LiquidSlider(
                                     .coerceIn(valueRange)
                             dampedDragAnimation.animateToValue(targetValue)
                             onValueChange(targetValue)
+                            onValueChangeFinished?.invoke()
                         }
                     }
                     .height(6f.dp)

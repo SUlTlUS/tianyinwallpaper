@@ -15,7 +15,7 @@ object FileUtil {
     var width = 9
     var height = 16
 
-    fun ImageSizeCompress(context: Context, uri: Uri): Bitmap? {
+    fun imageSizeCompress(context: Context, uri: Uri): Bitmap? {
         return try {
             context.contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, BitmapFactory.Options())

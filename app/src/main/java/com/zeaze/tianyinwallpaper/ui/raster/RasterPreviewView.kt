@@ -19,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +30,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.renderer.RasterGLRenderer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 光栅壁纸预览组件 - 使用 TextureView + 共享渲染器
@@ -38,6 +42,7 @@ import com.zeaze.tianyinwallpaper.renderer.RasterGLRenderer
  * - 多种扫描线效果
  * - 实时参数更新
  * - 集成传感器数据处理
+ * - 异步加载图片避免卡顿
  */
 @Composable
 fun RasterPreviewView(
@@ -45,6 +50,7 @@ fun RasterPreviewView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     
     // 渲染器实例（集成传感器处理）
     val renderer = remember { RasterGLRenderer() }
@@ -71,10 +77,15 @@ fun RasterPreviewView(
         }
     }
     
-    // 当图片列表变化时重新加载
+    // 当图片列表变化时异步重新加载
     LaunchedEffect(group.imageUris, isRendererStarted) {
-        if (isRendererStarted) {
-            renderer.loadFromModel(context, group)
+        if (isRendererStarted && group.imageUris.isNotEmpty()) {
+            // 异步加载图片
+            coroutineScope.launch {
+                withContext(Dispatchers.IO) {
+                    renderer.loadFromModel(context, group)
+                }
+            }
         }
     }
 
@@ -111,9 +122,13 @@ fun RasterPreviewView(
                         override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
                             renderer.start(Surface(surface))
                             renderer.resize(width, height)
-                            // 使用集成的加载方法
-                            renderer.loadFromModel(context, group)
+                            // 异步加载图片，避免阻塞主线程
                             isRendererStarted = true
+                            coroutineScope.launch {
+                                withContext(Dispatchers.IO) {
+                                    renderer.loadFromModel(context, group)
+                                }
+                            }
                         }
 
                         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
