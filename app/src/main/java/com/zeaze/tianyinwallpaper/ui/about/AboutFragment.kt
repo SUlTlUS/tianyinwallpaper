@@ -3,11 +3,11 @@ package com.zeaze.tianyinwallpaper.ui.about
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.util.Log
 import android.util.LruCache
 import android.widget.Toast
+import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
@@ -415,17 +415,12 @@ private suspend fun loadPreviewBitmap(context: Context, model: TianYinWallpaperM
                 null
             } else {
                 val bitmap = if (model.type == 1) {
-                    val retriever = MediaMetadataRetriever()
-                    try {
-                        retriever.setDataSource(context, android.net.Uri.parse(path))
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                            retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, VIDEO_PREVIEW_WIDTH, VIDEO_PREVIEW_HEIGHT)
-                        } else {
-                            retriever.frameAtTime
-                        }
-                    } finally {
-                        retriever.release()
-                    }
+                    ThumbnailUtils.getVideoFrame(
+                        context = context,
+                        videoUriString = path,
+                        targetWidth = VIDEO_PREVIEW_WIDTH,
+                        targetHeight = VIDEO_PREVIEW_HEIGHT
+                    )
                 } else {
                     decodeSampledBitmap(context, path, VIDEO_PREVIEW_WIDTH, VIDEO_PREVIEW_HEIGHT)
                 }

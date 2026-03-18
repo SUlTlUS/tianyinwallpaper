@@ -30,7 +30,7 @@ import kotlin.math.sign
 /**
  * 光栅壁纸共享渲染器
  * 支持：
- * - 多种扫描线效果（标准、马赛克、光栅透镜）
+ * - 标准扫描线效果
  * - 实时参数更新
  * - 优化的资源管理
  * - 无限制图片数量
@@ -51,7 +51,7 @@ class RasterGLRenderer {
             }
         }
     
-    // 光栅透镜效果参数
+    // 光栅透镜效果参数（已移除效果，保留接口兼容）
     var lenticularPitch: Float = 0.03f
     var lenticularAngle: Float = 0f
     
@@ -624,10 +624,9 @@ class RasterGLRenderer {
         private var texAId: Int = 0
         private var texBId: Int = 0
         
-        // 多个着色器程序
+        // 着色器程序
         private var singleProg: Int = 0
         private var standardProg: Int = 0
-        private var lenticularProg: Int = 0
         
         // 当前活动的效果类型
         private var activeEffectType: ScanlineEffectType = ScanlineEffectType.STANDARD
@@ -635,8 +634,6 @@ class RasterGLRenderer {
         // 参数缓存
         private var paramTransitionBand: Float = 0.55f
         private var paramEdgeSoftness: Float = 0.25f
-        private var paramLenticularPitch: Float = 0.03f
-        private var paramLenticularAngle: Float = 0f
 
         private var vBuf: FloatBuffer
         private var tBuf: FloatBuffer
@@ -703,8 +700,6 @@ class RasterGLRenderer {
                             paramTransitionBand = msg.transitionBand
                             paramEdgeSoftness = msg.edgeSoftness
                             activeEffectType = msg.effectType
-                            paramLenticularPitch = msg.lenticularPitch
-                            paramLenticularAngle = msg.lenticularAngle
                         }
                         is RenderMessage.ExecuteTask -> {
                             if (display != EGL14.EGL_NO_DISPLAY && eglSurface != EGL14.EGL_NO_SURFACE && isSurfaceValid.get()) {
@@ -770,9 +765,6 @@ class RasterGLRenderer {
             // 标准扫描线着色器
             val transVs = createTransitionVertexShader()
             standardProg = createProg(transVs, createStandardFragmentShader())
-            
-            // 光栅透镜着色器
-            lenticularProg = createProg(transVs, createLenticularFragmentShader())
 
             // 创建纹理
             val tex = IntArray(3)
@@ -834,99 +826,6 @@ class RasterGLRenderer {
                     blend = smoothstep(edge - uEdgeSoftness, edge + uEdgeSoftness, coord);
                     gl_FragColor = mix(colorB, colorA, blend);
                 }
-            }
-        """.trimIndent()
-
-        private fun createLenticularFragmentShader(): String = """
-            precision mediump float;
-            varying vec2 vTexA;
-            varying vec2 vTexB;
-            uniform sampler2D sTexA;
-            uniform sampler2D sTexB;
-            uniform float uProgress;
-            uniform float uDirection;
-            uniform float uScreenWidth;
-            uniform float uPitch;
-            uniform float uLensAngle;
-            uniform float uEdgeSoftness;
-
-            void main() {
-                // 计算屏幕坐标（用于扫描过渡）
-                float screenX = gl_FragCoord.x / uScreenWidth;
-                
-                // 计算扫描边缘位置
-                float scanEdge;
-                float blend;
-                
-                if (uDirection > 0.0) {
-                    // 从左向右扫描
-                    scanEdge = 1.0 - uProgress;
-                    blend = smoothstep(scanEdge - uEdgeSoftness, scanEdge + uEdgeSoftness, screenX);
-                } else {
-                    // 从右向左扫描
-                    scanEdge = uProgress;
-                    blend = smoothstep(scanEdge - uEdgeSoftness, scanEdge + uEdgeSoftness, screenX);
-                }
-                
-                // 过渡带范围（条纹效果只在这个范围内显示）
-                float bandWidth = uEdgeSoftness * 2.0;
-                float bandStart = scanEdge - uEdgeSoftness;
-                float bandEnd = scanEdge + uEdgeSoftness;
-                
-                // 计算条纹在过渡带内的位置
-                // 条纹随着扫描边缘移动
-                float stripeWorldX = screenX - scanEdge + 0.5;  // 以扫描边缘为中心
-                float rotatedCoord = stripeWorldX * cos(uLensAngle) +
-                    (gl_FragCoord.y / 1920.0) * sin(uLensAngle);
-                
-                // 计算条纹索引和条纹内位置
-                float stripeIndex = floor(rotatedCoord / uPitch);
-                float stripePos = mod(rotatedCoord, uPitch) / uPitch;
-                
-                // RGB 颜色分离强度
-                float chromaticStrength = 0.008;
-                float rOffset = -chromaticStrength * (1.0 - abs(stripePos - 0.5) * 2.0);
-                float bOffset = chromaticStrength * (1.0 - abs(stripePos - 0.5) * 2.0);
-                
-                // 条纹边缘变暗
-                float edgeFactor = abs(stripePos - 0.5) * 2.0;
-                float edgeDark = 1.0 - edgeFactor * 0.15;
-                
-                // 基础颜色采样（无条纹效果）
-                vec4 colorABase = texture2D(sTexA, vTexA);
-                vec4 colorBBase = texture2D(sTexB, vTexB);
-                
-                // 带条纹效果的颜色采样
-                vec2 texCoordRA = vTexA;
-                texCoordRA.x += rOffset;
-                vec2 texCoordBA = vTexA;
-                texCoordBA.x += bOffset;
-                
-                float rA = texture2D(sTexA, texCoordRA).r;
-                float gA = texture2D(sTexA, vTexA).g;
-                float bA = texture2D(sTexA, texCoordBA).b;
-                vec4 colorA = vec4(rA * edgeDark, gA * edgeDark, bA * edgeDark, 1.0);
-                
-                vec2 texCoordRB = vTexB;
-                texCoordRB.x += rOffset;
-                vec2 texCoordBB = vTexB;
-                texCoordBB.x += bOffset;
-                
-                float rB = texture2D(sTexB, texCoordRB).r;
-                float gB = texture2D(sTexB, vTexB).g;
-                float bB = texture2D(sTexB, texCoordBB).b;
-                vec4 colorB = vec4(rB * edgeDark, gB * edgeDark, bB * edgeDark, 1.0);
-                
-                // 在过渡带内应用条纹效果，过渡带外使用基础颜色
-                float inBand = smoothstep(bandStart, bandStart + 0.02, screenX) * 
-                               smoothstep(bandEnd, bandEnd - 0.02, screenX);
-                
-                // 混合条纹效果和基础颜色
-                vec4 finalColorA = mix(colorABase, colorA, inBand);
-                vec4 finalColorB = mix(colorBBase, colorB, inBand);
-                
-                // 最终混合
-                gl_FragColor = mix(finalColorA, finalColorB, blend);
             }
         """.trimIndent()
 
@@ -1007,10 +906,8 @@ class RasterGLRenderer {
             }
             
             // 选择当前效果类型的着色器程序
-            val prog = when (activeEffectType) {
-                ScanlineEffectType.STANDARD -> standardProg
-                ScanlineEffectType.LENTICULAR -> lenticularProg
-            }
+            // 光栅透镜效果已移除，LENTICULAR 类型回退到标准效果
+            val prog = standardProg
             
             GLES20.glUseProgram(prog)
 
@@ -1087,12 +984,6 @@ class RasterGLRenderer {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uDirection"), direction.toFloat())
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uEdgeSoftness"), paramEdgeSoftness)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uScreenWidth"), sW.toFloat())
-
-            // 光栅透镜特有参数
-            if (activeEffectType == ScanlineEffectType.LENTICULAR) {
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uPitch"), paramLenticularPitch)
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uLensAngle"), paramLenticularAngle)
-            }
 
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         }

@@ -14,6 +14,7 @@ import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.renderer.RasterGLRenderer
+import com.zeaze.tianyinwallpaper.utils.RasterPrefs
 
 /**
  * 图集光栅壁纸服务 - 专门处理静态图片光栅
@@ -53,7 +54,7 @@ class StaticRasterWallpaperService : WallpaperService() {
 
         // SharedPreferences 监听器 - 监听参数变化
         private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == PREF_RASTER_GROUPS || key == PREF_RASTER_ACTIVE_GROUP_ID) {
+            if (key == RasterPrefs.PREF_RASTER_GROUPS || key == RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID) {
                 // 参数变化，更新渲染器
                 loadActiveGroup()
                 val g = group
@@ -176,14 +177,7 @@ class StaticRasterWallpaperService : WallpaperService() {
         // ────────────────────────────────────────────
 
         private fun loadActiveGroup() {
-            val activeId = _pref?.getString(PREF_RASTER_ACTIVE_GROUP_ID, null) ?: return
-            val groupsJson = _pref?.getString(PREF_RASTER_GROUPS, "[]") ?: "[]"
-            val groups = try {
-                JSON.parseArray(groupsJson, RasterGroupModel::class.java) ?: emptyList()
-            } catch (_: Exception) {
-                emptyList()
-            }
-            group = groups.firstOrNull { it.id == activeId } ?: groups.firstOrNull()
+            group = _pref?.let { RasterPrefs.loadActiveGroup(it) }
         }
 
         private fun loadContent() {
@@ -205,8 +199,6 @@ class StaticRasterWallpaperService : WallpaperService() {
 
     companion object {
         const val ACTION_RELOAD = "com.zeaze.tianyinwallpaper.STATIC_RASTER_RELOAD"
-        const val PREF_RASTER_GROUPS = "rasterGroups"
-        const val PREF_RASTER_ACTIVE_GROUP_ID = "rasterActiveGroupId"
         private const val TAG = "StaticRasterService"
     }
 }

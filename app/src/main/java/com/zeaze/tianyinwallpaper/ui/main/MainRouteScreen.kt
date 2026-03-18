@@ -95,10 +95,11 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
-import com.zeaze.tianyinwallpaper.ui.setting.LiquidToggle
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
+import com.zeaze.tianyinwallpaper.utils.showToast
 import io.reactivex.functions.Consumer
 import java.io.File
 import java.io.FileOutputStream
@@ -233,10 +234,6 @@ fun MainRouteScreen(
     }
     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
-    fun toast(msg: String) {
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-    }
-
     fun checkAndSaveGroup() {
         if (groupName.isBlank() || wallpapers.isEmpty()) return
 
@@ -252,7 +249,7 @@ fun MainRouteScreen(
         } else {
             list.add(0, SaveData(currentContent, groupName))
             FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
-                toast("壁纸组已保存到列表")
+                context.showToast("壁纸组已保存到列表")
                 RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
             }
         }
@@ -270,7 +267,7 @@ fun MainRouteScreen(
             val item = list.removeAt(index)
             list.add(0, item)
             FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
-                toast("壁纸组已覆盖保存")
+                context.showToast("壁纸组已覆盖保存")
                 RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
             }
         }
@@ -296,7 +293,7 @@ fun MainRouteScreen(
 
     val wallpaperLaunch = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            toast("设置成功")
+            context.showToast("设置成功")
         } else {
             showPermissionDialog = true
         }
@@ -331,7 +328,7 @@ fun MainRouteScreen(
 
     fun applyWallpapers() {
         if (wallpapers.isEmpty()) {
-            toast("至少需要1张壁纸才能开始设置")
+            context.showToast("至少需要1张壁纸才能开始设置")
             return
         }
         performApply(wallpapers.toList())
@@ -396,11 +393,11 @@ fun MainRouteScreen(
             activity?.contentResolver?.takePersistableUriPermission(treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (e: SecurityException) {
             Log.e("MainRouteScreen", "Could not take persistable permission for tree URI: $treeUri", e)
-            toast(context.getString(R.string.main_wallpaper_directory_permission_failed))
+            context.showToast(context.getString(R.string.main_wallpaper_directory_permission_failed))
         }
         val media = collectMediaFromDirectory(treeUri)
         if (media.isEmpty()) {
-            toast(context.getString(R.string.main_wallpaper_type_directory_empty))
+            context.showToast(context.getString(R.string.main_wallpaper_type_directory_empty))
         } else {
             appendMixedModels(media, takeUriPermissions = false)
         }
@@ -469,7 +466,7 @@ fun MainRouteScreen(
             .subscribe(Consumer { o ->
                 wallpapers.add(0, o)
                 saveCache()
-                toast("已加入，请在“壁纸“里查看")
+                context.showToast("已加入，请在\"壁纸\"里查看")
             })
     
         val triggerAddDisposable = RxBus.getDefault()
@@ -500,7 +497,7 @@ fun MainRouteScreen(
                 wallpapers.addAll(list)
                 groupName = data.name ?: ""
                 saveCache()
-                toast("壁纸列表已覆盖")
+                context.showToast("壁纸列表已覆盖")
             }
 
         onDispose {
@@ -545,7 +542,7 @@ fun MainRouteScreen(
             -1
         } else {
             parseTimeText(text) ?: run {
-                toast("$label 格式错误，请使用HH:mm格式")
+                context.showToast("$label 格式错误，请使用HH:mm格式")
                 null
             }
         }
@@ -809,7 +806,7 @@ fun MainRouteScreen(
                 onCancelSelect = { exitSelectionMode() },
                 onDelete = {
                     if (selectedPositions.isEmpty()) {
-                        toast(context.getString(R.string.no_selected_tip))
+                        context.showToast(context.getString(R.string.no_selected_tip))
                     } else {
                         showDeleteSelectedDialog = true
                     }
@@ -1223,7 +1220,7 @@ fun MainRouteScreen(
                                                     checkAndSaveGroup()
                                                     showSaveDialog = false
                                                 } else {
-                                                    toast("请输入名称")
+                                                    context.showToast("请输入名称")
                                                 }
                                             }
                                             .height(48.dp),

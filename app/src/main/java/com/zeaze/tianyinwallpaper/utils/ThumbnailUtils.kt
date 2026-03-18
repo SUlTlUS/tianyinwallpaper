@@ -380,4 +380,56 @@ object ThumbnailUtils {
             Log.e(TAG, "Failed to save video thumbnail: ${file.absolutePath}", it)
         }
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // 公开的视频帧提取方法
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * 从视频中提取指定时间点的帧
+     * @param context 上下文
+     * @param videoUri 视频 URI
+     * @param timeUs 时间点（微秒），默认为 0
+     * @param option 帧提取选项，默认为 OPTION_CLOSEST_SYNC
+     * @param targetWidth 目标宽度（仅 API 27+），默认为 VIDEO_THUMBNAIL_WIDTH
+     * @param targetHeight 目标高度（仅 API 27+），默认为 VIDEO_THUMBNAIL_HEIGHT
+     * @return 提取的 Bitmap，失败返回 null
+     */
+    fun getVideoFrame(
+        context: Context,
+        videoUri: Uri,
+        timeUs: Long = 0L,
+        option: Int = MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+        targetWidth: Int = VIDEO_THUMBNAIL_WIDTH,
+        targetHeight: Int = VIDEO_THUMBNAIL_HEIGHT
+    ): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, videoUri)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+                retriever.getScaledFrameAtTime(timeUs, option, targetWidth, targetHeight)
+            } else {
+                retriever.getFrameAtTime(timeUs, option)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract video frame: $videoUri", e)
+            null
+        } finally {
+            retriever.release()
+        }
+    }
+
+    /**
+     * 从视频 URI 字符串中提取帧（便捷方法）
+     */
+    fun getVideoFrame(
+        context: Context,
+        videoUriString: String,
+        timeUs: Long = 0L,
+        option: Int = MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+        targetWidth: Int = VIDEO_THUMBNAIL_WIDTH,
+        targetHeight: Int = VIDEO_THUMBNAIL_HEIGHT
+    ): Bitmap? {
+        return getVideoFrame(context, Uri.parse(videoUriString), timeUs, option, targetWidth, targetHeight)
+    }
 }

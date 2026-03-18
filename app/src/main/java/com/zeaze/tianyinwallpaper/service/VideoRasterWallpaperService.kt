@@ -24,6 +24,7 @@ import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.service.raster.RVEffectPreCtrl
 import com.zeaze.tianyinwallpaper.service.raster.RasterVideoPreRenderParamBean
+import com.zeaze.tianyinwallpaper.utils.RasterPrefs
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
@@ -222,7 +223,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         }
 
         private fun checkGroupChange() {
-            val newGroupId = pref?.getString(PREF_RASTER_ACTIVE_GROUP_ID, null)
+            val newGroupId = pref?.getString(RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID, null)
             if (newGroupId != group?.id) {
                 loadActiveGroup()
                 eglThread?.post { loadContent() }
@@ -266,20 +267,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         }
 
         private fun loadActiveGroup() {
-            val activeId = pref?.getString(PREF_RASTER_ACTIVE_GROUP_ID, null)
-            Log.w(TAG, "loadActiveGroup: activeId=$activeId")
-            if (activeId == null) {
-                Log.w(TAG, "loadActiveGroup: no active group id")
-                return
-            }
-            val groupsJson = pref?.getString(PREF_RASTER_GROUPS, "[]") ?: "[]"
-            val groups = try {
-                JSON.parseArray(groupsJson, RasterGroupModel::class.java) ?: emptyList()
-            } catch (e: Exception) {
-                Log.e(TAG, "loadActiveGroup: parse error: ${e.message}")
-                emptyList()
-            }
-            group = groups.firstOrNull { it.id == activeId } ?: groups.firstOrNull()
+            group = pref?.let { RasterPrefs.loadActiveGroup(it) }
             Log.w(TAG, "loadActiveGroup: loaded group=$group")
         }
 
@@ -619,8 +607,6 @@ class VideoRasterWallpaperService : WallpaperService() {
 
     companion object {
         const val ACTION_RELOAD = "com.zeaze.tianyinwallpaper.VIDEO_RASTER_RELOAD"
-        const val PREF_RASTER_GROUPS = "rasterGroups"
-        const val PREF_RASTER_ACTIVE_GROUP_ID = "rasterActiveGroupId"
         private const val TAG = "VideoRasterGL"
     }
 }

@@ -15,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
+import com.zeaze.tianyinwallpaper.utils.RasterPrefs
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -121,6 +122,8 @@ import com.zeaze.tianyinwallpaper.service.VideoRasterWallpaperService
 import com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService
 import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import com.zeaze.tianyinwallpaper.utils.FileUtil
+import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
+import com.zeaze.tianyinwallpaper.utils.showToast
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
 import java.io.IOException
@@ -132,8 +135,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
-private const val PREF_RASTER_GROUPS = "rasterGroups"
-private const val PREF_RASTER_ACTIVE_GROUP_ID = "rasterActiveGroupId"
+
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
 private const val MAX_STATIC_GROUP_IMAGES = 5
@@ -197,29 +199,22 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
     }
     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
-    fun toast(msg: String) {
-        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-    }
-
     val wallpaperLaunch = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            toast("光栅壁纸设置成功")
+            context.showToast("光栅壁纸设置成功")
         } else {
-            toast("设置失败，请授予壁纸权限")
+            context.showToast("设置失败，请授予壁纸权限")
         }
     }
 
     fun persistGroups() {
-        pref.edit().putString(PREF_RASTER_GROUPS, JSON.toJSONString(groups)).apply()
+        RasterPrefs.saveGroups(pref, groups)
     }
 
     fun loadGroups() {
-        val parsed = JSON.parseArray(
-            pref.getString(PREF_RASTER_GROUPS, "[]"),
-            RasterGroupModel::class.java
-        ) ?: emptyList()
+        val parsed = RasterPrefs.loadGroups(pref)
         groups.clear()
         groups.addAll(parsed)
     }
@@ -248,10 +243,10 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
             detailGroup = null
         }
 
-        val activeGroupId = pref.getString(PREF_RASTER_ACTIVE_GROUP_ID, null)
+        val activeGroupId = pref.getString(RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID, null)
         if (activeGroupId == groupId) {
             val fallbackActiveId = groups.firstOrNull()?.id
-            pref.edit().putString(PREF_RASTER_ACTIVE_GROUP_ID, fallbackActiveId).apply()
+            pref.edit().putString(RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID, fallbackActiveId).apply()
         }
 
         if (groups.isEmpty()) {
@@ -285,20 +280,20 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
     fun applyRasterToSystem(group: RasterGroupModel) {
         val models = toWallpaperModels(group)
         if (models.isEmpty()) {
-            toast("当前光栅组合内容为空")
+            context.showToast("当前光栅组合内容为空")
             return
         }
         thread {
             FileUtil.save(context, JSON.toJSONString(models), FileUtil.wallpaperPath) {
                 val hostActivity = context as? Activity
                 if (hostActivity == null) {
-                    toast("当前页面无法打开系统壁纸设置")
+                    context.showToast("当前页面无法打开系统壁纸设置")
                     return@save
                 }
                 hostActivity.runOnUiThread {
                     // 视频光栅壁纸正在开发中
                     if (group.type == RasterGroupModel.TYPE_DYNAMIC) {
-                        toast("视频光栅壁纸正在开发中，敬请期待")
+                        context.showToast("视频光栅壁纸正在开发中，敬请期待")
                         return@runOnUiThread
                     }
 
@@ -323,7 +318,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                         )
                     }
                     wallpaperLaunch.launch(intent)
-                    toast("已应用光栅组合")
+                    context.showToast("已应用光栅组合")
                 }
             }
         }
@@ -335,15 +330,15 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
             else -> groups.firstOrNull()
         }
         if (target == null) {
-            toast("请先添加光栅组合")
+            context.showToast("请先添加光栅组合")
             return
         }
 
-        pref.edit().putString(PREF_RASTER_ACTIVE_GROUP_ID, target.id).apply()
+        pref.edit().putString(RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID, target.id).apply()
 
         // 视频光栅壁纸正在开发中
         if (target.type == RasterGroupModel.TYPE_DYNAMIC) {
-            toast("视频光栅壁纸正在开发中，敬请期待")
+            context.showToast("视频光栅壁纸正在开发中，敬请期待")
             return
         }
 
@@ -417,7 +412,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
             )
             persistGroups()
             if (uris.size > MAX_STATIC_GROUP_IMAGES) {
-                toast("静态光栅最多选择${MAX_STATIC_GROUP_IMAGES}张，已自动截取前${MAX_STATIC_GROUP_IMAGES}张")
+                context.showToast("静态光栅最多选择${MAX_STATIC_GROUP_IMAGES}张，已自动截取前${MAX_STATIC_GROUP_IMAGES}张")
             }
         }
 
@@ -517,7 +512,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     else -> groups.firstOrNull()?.copy()
                 }
                 if (detailGroup == null) {
-                    toast("请先添加光栅组合")
+                    context.showToast("请先添加光栅组合")
                 }
             }
 
@@ -736,7 +731,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                 onCancelSelect = { exitSelectionMode() },
                 onDelete = {
                     if (selectedIds.isEmpty()) {
-                        toast(context.getString(R.string.no_selected_tip))
+                        context.showToast(context.getString(R.string.no_selected_tip))
                     } else {
                         showDeleteDialog = true
                     }
@@ -858,7 +853,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                                         .background(accentColor)
                                         .clickable {
                                             showTypeDialog = false
-                                            toast("视频光栅壁纸正在开发中，敬请期待")
+                                            context.showToast("视频光栅壁纸正在开发中，敬请期待")
                                         }
                                         .height(48.dp)
                                         .fillMaxWidth(),
@@ -1012,7 +1007,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
 
                     val current = groups[idx]
                     if (current.imageUris.size <= MIN_STATIC_GROUP_IMAGES) {
-                        toast("图集至少保留${MIN_STATIC_GROUP_IMAGES}张图片")
+                        context.showToast("图集至少保留${MIN_STATIC_GROUP_IMAGES}张图片")
                         return@RasterDetailScreen
                     }
 
@@ -1081,7 +1076,7 @@ fun RasterRouteScreen(onBottomBarVisibleChange: (Boolean) -> Unit = {}) {
                     }
                 },
                 onVideoAction = {
-                    toast("视频光栅壁纸正在开发中，敬请期待")
+                    context.showToast("视频光栅壁纸正在开发中，敬请期待")
                 }
             )
         }
@@ -1178,7 +1173,7 @@ private fun RasterGroupThumbnail(group: RasterGroupModel) {
                 }
             } else {
                 val videoUri = group.videoUri ?: return@runCatching null
-                FileUtil.getVideoThumbnailFromUri(context, Uri.parse(videoUri))
+                ThumbnailUtils.getVideoFrame(context, Uri.parse(videoUri))
             }
         }.getOrNull()
     }
@@ -2051,18 +2046,12 @@ private fun GyroDynamicRasterPreview(
         }
         
         // 每次 targetTimeMs 变化时都重新提取帧
-        value = runCatching {
-            val retriever = MediaMetadataRetriever()
-            try {
-                retriever.setDataSource(context, Uri.parse(videoUri))
-                val timeUs = (targetTimeMs * 1000).coerceAtLeast(0L)
-                retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
-            } finally {
-                retriever.release()
-            }
-        }.onFailure {
-            Log.w("RasterRouteScreen", "Failed to extract frame", it)
-        }.getOrNull()
+        value = ThumbnailUtils.getVideoFrame(
+            context = context,
+            videoUriString = videoUri,
+            timeUs = (targetTimeMs * 1000).coerceAtLeast(0L),
+            option = MediaMetadataRetriever.OPTION_CLOSEST
+        )
     }
 
     Box(modifier = modifier) {

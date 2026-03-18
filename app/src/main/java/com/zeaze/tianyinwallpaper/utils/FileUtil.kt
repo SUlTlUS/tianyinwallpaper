@@ -26,23 +26,6 @@ object FileUtil {
         }
     }
 
-    fun getVideoThumbnailFromUri(context: Context, uri: Uri): Bitmap? {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, uri)
-            retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        } finally {
-            try {
-                retriever.release()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
     fun bitmap2Path(bitmap: Bitmap, path: String): Bitmap {
         var target = bitmap
         if (target.width * height != width * target.height) {
