@@ -839,7 +839,7 @@ fun RasterRouteScreen(
                                 BasicText("选择光栅类型", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
                                 Spacer(Modifier.height(4.dp))
                                 BasicText(
-                                    "静态光栅：每个组合支持多张图片\n动态光栅：每个组合只能选择1个视频",
+                                    "图集光栅：每个组合支持多张图片\n动态光栅：每个组合只能选择1个视频",
                                     style = TextStyle(contentColor.copy(alpha = 0.7f), 14.sp)
                                 )
                                 Spacer(Modifier.height(8.dp))
@@ -856,7 +856,7 @@ fun RasterRouteScreen(
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    BasicText("静态", style = TextStyle(Color.White, 16.sp))
+                                    BasicText("图集", style = TextStyle(Color.White, 16.sp))
                                 }
                                 Row(
                                     Modifier
@@ -871,7 +871,7 @@ fun RasterRouteScreen(
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    BasicText("动态", style = TextStyle(Color.White, 16.sp))
+                                    BasicText("视频", style = TextStyle(Color.White, 16.sp))
                                 }
                                 Row(
                                     Modifier
