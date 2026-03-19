@@ -850,9 +850,8 @@ private fun AboutSection(
             style = TextStyle(contentColor.copy(0.8f), 14.sp)
         )
         Spacer(Modifier.height(8.dp))
-        LinkText("QQ群: 722673402", "https://jq.qq.com/?_wv=1027&k=vjcrjY7L")
-        LinkText("项目开源地址", "https://github.com/prpr12/tianyinwallpaper.git")
-        LinkText("软件下载地址", "https://www.pgyer.com/eEna")
+        LinkText("项目开源地址", "https://github.com/SUlTlUS/tianyinwallpaper.git")
+        LinkText("软件下载地址", "https://github.com/SUlTlUS/tianyinwallpaper/releases/tag/v3.1")
         Text(
             text = "当前版本号：$verName",
             style = TextStyle(contentColor.copy(0.5f), 12.sp)
@@ -893,7 +892,6 @@ private fun getAboutText(): String {
             "齿轮里的“壁纸通用设置”，可以设置通用的壁纸切换方式\n" +
             "目前支持顺序切换和随机切换，和最小切换时间\n" +
             "最小切换时间的意思是在切换壁纸后，未达这个时间间隔的话是不会二次切换壁纸的\n" +
-            "齿轮里的“清空当前壁纸组”，可以方便的一键清空壁纸组来设置新的壁纸\n" +
             "点击壁纸缩略图，可以选择删除壁纸或者设置壁纸显示的条件，长按可以调整顺序\n" +
             "当满足条件时，会优先显示满足条件的壁纸，借此，可以设置早安壁纸，下班壁纸\n" +
             "目前仅支持按时间设置条件，开始时间为闭区间，结束时间为开区间"
