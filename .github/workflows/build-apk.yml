@@ -11,7 +11,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout code
@@ -29,8 +29,28 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
-      - name: Upload APK
+      - name: Get version name
+        id: version
+        run: |
+          VERSION=$(grep "versionName" app/build.gradle.kts | sed 's/.*versionName = "\([^"]*\)".*/\1/')
+          echo "name=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: app/build/outputs/apk/release/*.apk
+
+      - name: Create Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.name }}
+          name: Release v${{ steps.version.outputs.name }}
+          body: |
+            ## 天音壁纸 v${{ steps.version.outputs.name }}
+            
+            ### 下载
+            - 下载下方 APK 文件安装即可
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
