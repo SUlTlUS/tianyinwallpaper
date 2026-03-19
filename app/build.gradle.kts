@@ -23,12 +23,22 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
-            if (keystoreFile.exists()) {
-                storeFile = keystoreFile
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+            // 支持环境变量配置签名（CI 环境）
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            if (keystorePath != null && file(keystorePath).exists()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
+            } else {
+                // 本地开发使用 debug.keystore
+                val keystoreFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+                if (keystoreFile.exists()) {
+                    storeFile = keystoreFile
+                    storePassword = "android"
+                    keyAlias = "androiddebugkey"
+                    keyPassword = "android"
+                }
             }
         }
     }
