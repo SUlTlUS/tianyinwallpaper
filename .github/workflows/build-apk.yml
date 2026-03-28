@@ -48,13 +48,13 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Upload APK Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: app-release
           path: app/build/outputs/apk/release/*.apk
 
       - name: Upload Update Info Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: update-info
           path: update/
@@ -75,7 +75,6 @@ jobs:
             - update_info.json 文件用于应用内更新功能
           files: |
             app/build/outputs/apk/release/*.apk
-            update/update_info.json
           generate_release_notes: true
 
       - name: Commit and Push Update Info
