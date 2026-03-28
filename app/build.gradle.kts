@@ -28,17 +28,25 @@ android {
             val keystorePath = System.getenv("KEYSTORE_PATH")
             if (keystorePath != null && file(keystorePath).exists()) {
                 storeFile = file(keystorePath)
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"
-                keyAlias = System.getenv("KEY_ALIAS") ?: "androiddebugkey"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "tianyin123"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "tianyin"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "tianyin123"
             } else {
-                // 本地开发使用 debug.keystore
-                val keystoreFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+                // 本地使用项目根目录下的 release keystore
+                val keystoreFile = rootProject.file("app/tianyin.jks") 
                 if (keystoreFile.exists()) {
                     storeFile = keystoreFile
-                    storePassword = "android"
-                    keyAlias = "androiddebugkey"
-                    keyPassword = "android"
+                    storePassword = "tianyin123"
+                    keyAlias = "tianyin"
+                    keyPassword = "tianyin123"
+                } else {
+                    val fallbackFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+                    if (fallbackFile.exists()) {
+                        storeFile = fallbackFile
+                        storePassword = "android"
+                        keyAlias = "androiddebugkey"
+                        keyPassword = "android"
+                    }
                 }
             }
         }
