@@ -95,6 +95,9 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
 import com.kyant.shapes.Capsule
+import com.zeaze.tianyinwallpaper.update.AppUpdateManager
+import com.zeaze.tianyinwallpaper.update.UpdateDialog
+import com.zeaze.tianyinwallpaper.update.UpdateDialogState
 
 class MainActivity : BaseActivity() {
     private val tabItems: List<Pair<String, Int>> = listOf(
@@ -208,6 +211,11 @@ class MainActivity : BaseActivity() {
                 }
                 pendingRoute = null
             }
+            
+            // 更新对话框状态
+            var updateDialogState by remember { mutableStateOf(UpdateDialogState()) }
+            var hasCheckedUpdate by remember { mutableStateOf(false) }
+            
             val liquidBackdrop = if (enableLiquidGlass) {
                 rememberLayerBackdrop {
                     drawRect(themeBackgroundColor)
@@ -514,6 +522,73 @@ class MainActivity : BaseActivity() {
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+            }
+            
+            // 更新对话框
+            UpdateDialog(
+                state = updateDialogState,
+                parentBackdrop = liquidBackdrop,
+                onDismiss = {
+                    updateDialogState = UpdateDialogState(isVisible = false)
+                },
+                onConfirm = {
+                    val info = updateDialogState.updateInfo
+                    if (info != null) {
+                        // 开始下载
+                        updateDialogState = updateDialogState.copy(
+                            isDownloading = true,
+                            downloadProgress = 0
+                        )
+                        AppUpdateManager.downloadApk(this@MainActivity, info, object : AppUpdateManager.DownloadCallback {
+                            override fun onProgress(progress: Int) {
+                                updateDialogState = updateDialogState.copy(downloadProgress = progress)
+                            }
+                            
+                            override fun onSuccess(file: File) {
+                                updateDialogState = updateDialogState.copy(isDownloading = false)
+                                // 验证 MD5
+                                val md5 = AppUpdateManager.calculateMD5(file)
+                                if (md5 != null && md5.equals(info.md5, ignoreCase = true)) {
+                                    AppUpdateManager.installApk(this@MainActivity, file)
+                                } else {
+                                    Toast.makeText(this@MainActivity, "文件校验失败，请重新下载", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            
+                            override fun onError(message: String) {
+                                updateDialogState = updateDialogState.copy(
+                                    isDownloading = false,
+                                    errorMessage = message
+                                )
+                                Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+                            }
+                        })
+                    }
+                },
+                isLightTheme = !useDarkTheme
+            )
+            
+            // 启动时自动检查更新（只检查一次）
+            LaunchedEffect(Unit) {
+                if (!hasCheckedUpdate) {
+                    hasCheckedUpdate = true
+                    when (val result = AppUpdateManager.checkUpdate()) {
+                        is AppUpdateManager.CheckResult.HasUpdate -> {
+                            updateDialogState = UpdateDialogState(
+                                isVisible = true,
+                                isChecking = false,
+                                updateInfo = result.updateInfo
+                            )
+                        }
+                        is AppUpdateManager.CheckResult.NoUpdate -> {
+                            // 已是最新版本，不显示对话框
+                        }
+                        is AppUpdateManager.CheckResult.Error -> {
+                            // 检查失败，静默处理
+                            Log.w("MainActivity", "检查更新失败: ${result.message}")
                         }
                     }
                 }

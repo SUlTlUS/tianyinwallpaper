@@ -41,7 +41,11 @@ jobs:
         id: version
         run: |
           VERSION=$(grep "versionName" app/build.gradle.kts | sed 's/.*versionName = "\([^"]*\)".*/\1/')
+          VERSION_CODE=$(grep "versionCode" app/build.gradle.kts | sed 's/.*versionCode = \([0-9]*\).*/\1/')
           echo "name=$VERSION" >> $GITHUB_OUTPUT
+          echo "code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          # 使用版本号作为 tag，确保唯一性
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
@@ -49,16 +53,36 @@ jobs:
           name: app-release
           path: app/build/outputs/apk/release/*.apk
 
+      - name: Upload Update Info Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-info
+          path: update/
+
       - name: Create Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.version.outputs.name }}
-          name: Release v${{ steps.version.outputs.name }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.tag }}
           body: |
-            ## 天音壁纸 v${{ steps.version.outputs.name }}
+            ## 天音壁纸 ${{ steps.version.outputs.tag }}
             
             ### 下载
             - 下载下方 APK 文件安装即可
-          files: app/build/outputs/apk/release/*.apk
+            
+            ### 应用内更新
+            - update_info.json 文件用于应用内更新功能
+          files: |
+            app/build/outputs/apk/release/*.apk
+            update/update_info.json
           generate_release_notes: true
+
+      - name: Commit and Push Update Info
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add update/ || true
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update: update_info.json for ${{ steps.version.outputs.tag }}"
+          git push

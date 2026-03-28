@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 外部存储的下载目录 -->
+    <external-files-path
+        name="download"
+        path="Download" />
+    
+    <!-- 外部存储根目录 -->
+    <external-path
+        name="external"
+        path="." />
+    
+    <!-- 应用私有目录 -->
+    <files-path
+        name="files"
+        path="." />
+    
+    <!-- 缓存目录 -->
+    <cache-path
+        name="cache"
+        path="." />
+</paths>

@@ -66,6 +66,10 @@ import com.zeaze.tianyinwallpaper.MainActivity
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
+import com.zeaze.tianyinwallpaper.update.AppUpdateManager
+import com.zeaze.tianyinwallpaper.update.UpdateDialog
+import com.zeaze.tianyinwallpaper.update.UpdateDialogState
+import kotlinx.coroutines.launch
 
 private sealed class SettingsDialogState {
     object MinTime : SettingsDialogState()
@@ -119,6 +123,11 @@ fun SettingRouteScreen(
     var showAutoPointsDialog by remember { mutableStateOf(false) }
     var showTimePickerDialog by remember { mutableStateOf(false) }
     var autoPointsInput by remember { mutableStateOf(autoSwitchPoints) }
+    
+    // 更新对话框状态
+    var updateDialogState by remember { mutableStateOf(UpdateDialogState()) }
+    var shouldCheckUpdate by remember { mutableStateOf(false) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     var pickingHour by remember { mutableStateOf(12) }
     var pickingMinute by remember { mutableStateOf(0) }
@@ -266,8 +275,94 @@ fun SettingRouteScreen(
 
                 AboutSection(
                     context = context,
-                    contentColor = contentColor
+                    contentColor = contentColor,
+                    onCheckUpdate = {
+                        shouldCheckUpdate = true
+                        updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
+                    }
                 )
+            }
+        }
+
+        // 更新对话框
+        UpdateDialog(
+            state = updateDialogState,
+            parentBackdrop = liquidBackdrop,
+            onDismiss = {
+                updateDialogState = UpdateDialogState(isVisible = false)
+                shouldCheckUpdate = false
+            },
+            onConfirm = {
+                val info = updateDialogState.updateInfo
+                if (info != null) {
+                    // 开始下载
+                    updateDialogState = updateDialogState.copy(
+                        isDownloading = true,
+                        downloadProgress = 0
+                    )
+                    AppUpdateManager.downloadApk(context, info, object : AppUpdateManager.DownloadCallback {
+                        override fun onProgress(progress: Int) {
+                            updateDialogState = updateDialogState.copy(downloadProgress = progress)
+                        }
+                        
+                        override fun onSuccess(file: java.io.File) {
+                            updateDialogState = updateDialogState.copy(isDownloading = false)
+                            // 验证 MD5
+                            val md5 = AppUpdateManager.calculateMD5(file)
+                            if (md5 != null && md5.equals(info.md5, ignoreCase = true)) {
+                                AppUpdateManager.installApk(context, file)
+                            } else {
+                                Toast.makeText(context, "文件校验失败，请重新下载", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        
+                        override fun onError(message: String) {
+                            updateDialogState = updateDialogState.copy(
+                                isDownloading = false,
+                                errorMessage = message
+                            )
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
+                    })
+                } else if (updateDialogState.isLatestVersion) {
+                    // 已是最新版本，关闭对话框
+                    updateDialogState = UpdateDialogState(isVisible = false)
+                    shouldCheckUpdate = false
+                } else {
+                    // 重新检查更新
+                    shouldCheckUpdate = true
+                    updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
+                }
+            },
+            isLightTheme = isLightTheme
+        )
+
+        // 检查更新副作用
+        androidx.compose.runtime.LaunchedEffect(shouldCheckUpdate) {
+            if (shouldCheckUpdate) {
+                when (val result = AppUpdateManager.checkUpdate()) {
+                    is AppUpdateManager.CheckResult.HasUpdate -> {
+                        updateDialogState = UpdateDialogState(
+                            isVisible = true,
+                            isChecking = false,
+                            updateInfo = result.updateInfo
+                        )
+                    }
+                    is AppUpdateManager.CheckResult.NoUpdate -> {
+                        updateDialogState = UpdateDialogState(
+                            isVisible = true,
+                            isChecking = false,
+                            isLatestVersion = true
+                        )
+                    }
+                    is AppUpdateManager.CheckResult.Error -> {
+                        updateDialogState = UpdateDialogState(
+                            isVisible = true,
+                            isChecking = false,
+                            errorMessage = result.message
+                        )
+                    }
+                }
             }
         }
 
@@ -829,7 +924,8 @@ private fun SettingTextItem(label: String, contentColor: Color, onClick: () -> U
 @Composable
 private fun AboutSection(
     context: Context,
-    contentColor: Color
+    contentColor: Color,
+    onCheckUpdate: () -> Unit
 ) {
     val verName = getVersionName(context)
     val aboutText = remember { getAboutText() }
@@ -856,6 +952,21 @@ private fun AboutSection(
             text = "当前版本号：$verName",
             style = TextStyle(contentColor.copy(0.5f), 12.sp)
         )
+        
+        // 检查更新按钮
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(Capsule())
+                .background(Color(0xFF0088FF))
+                .clickable { onCheckUpdate() }
+                .height(44.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BasicText("检查更新", style = TextStyle(Color.White, 15.sp))
+        }
     }
 }
 
