@@ -99,6 +99,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
@@ -1473,11 +1475,6 @@ private fun RasterDetailScreen(
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
                 val sheetBackdrop = rememberLayerBackdrop()  // 为 LiquidSlider 导出
                 val thumbnailListState = rememberLazyListState()
-                var draggingIndex by remember(currentEditorGroup.id, currentEditorGroup.imageUris) { mutableStateOf<Int?>(null) }
-                var draggingItemKeyKey by remember(currentEditorGroup.id, currentEditorGroup.imageUris) { mutableStateOf<String?>(null) }
-                var dragOffsetX by remember(currentEditorGroup.id, currentEditorGroup.imageUris) { mutableStateOf(0f) }
-                var draggingItemInitialOffsetX by remember(currentEditorGroup.id, currentEditorGroup.imageUris) { mutableStateOf(0f) }
-                var didReorderInCurrentDrag by remember(currentEditorGroup.id, currentEditorGroup.imageUris) { mutableStateOf(false) }
 
                 Column(
                     Modifier
@@ -1516,67 +1513,17 @@ private fun RasterDetailScreen(
                         style = TextStyle(contentColor.copy(alpha = 0.7f), 14.sp)
                     )
                     Spacer(Modifier.height(12.dp))
+                    val reorderableState = rememberReorderableLazyListState(
+                        lazyListState = thumbnailListState,
+                        onMove = { from, to ->
+                            onStaticEditorMove(currentEditorGroup, from.index, to.index)
+                            onStaticEditorCommitReorder()
+                        }
+                    )
+                    
                     LazyRow(
                         state = thumbnailListState,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .pointerInput(currentEditorGroup.id, currentEditorGroup.imageUris) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = { offset ->
-                                        val touched = thumbnailListState.layoutInfo.visibleItemsInfo
-                                            .firstOrNull { item ->
-                                                item.index < currentEditorGroup.imageUris.size &&
-                                                        offset.x in item.offset.toFloat()..(item.offset + item.size).toFloat()
-                                            }
-                                        if (touched != null) {
-                                            draggingIndex = touched.index
-                                            draggingItemKeyKey = touched.key.toString()
-                                            draggingItemInitialOffsetX = touched.offset.toFloat()
-                                            dragOffsetX = 0f
-                                            didReorderInCurrentDrag = false
-                                        }
-                                    },
-                                    onDrag = { change, dragAmount ->
-                                        change.consume()
-                                        dragOffsetX += dragAmount.x
-
-                                        val currentKey = draggingItemKeyKey ?: return@detectDragGesturesAfterLongPress
-                                        val visibleItems = thumbnailListState.layoutInfo.visibleItemsInfo
-                                        val draggingItem = visibleItems.firstOrNull { it.key.toString() == currentKey } ?: return@detectDragGesturesAfterLongPress
-                                        val currentIndex = draggingItem.index
-
-                                        val draggingCenterX = draggingItemInitialOffsetX + dragOffsetX + draggingItem.size / 2f
-
-                                        visibleItems
-                                            .filter { it.index != currentIndex && it.index < currentEditorGroup.imageUris.size }
-                                            .minByOrNull { item ->
-                                                abs(item.offset + item.size / 2f - draggingCenterX)
-                                            }
-                                            ?.let { targetItem ->
-                                                val targetCenterX = targetItem.offset + targetItem.size / 2f
-                                                val distance = abs(targetCenterX - draggingCenterX)
-                                                if (distance < targetItem.size * 0.6f) {
-                                                    onStaticEditorMove(currentEditorGroup, currentIndex, targetItem.index)
-                                                    draggingIndex = targetItem.index
-                                                    didReorderInCurrentDrag = true
-                                                }
-                                            }
-                                    },
-                                    onDragEnd = {
-                                        if (didReorderInCurrentDrag) {
-                                            onStaticEditorCommitReorder()
-                                        }
-                                        draggingIndex = null
-                                        dragOffsetX = 0f
-                                        didReorderInCurrentDrag = false
-                                    },
-                                    onDragCancel = {
-                                        draggingIndex = null
-                                        dragOffsetX = 0f
-                                        didReorderInCurrentDrag = false
-                                    }
-                                )
-                            },
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         lazyItemsIndexed(
@@ -1588,33 +1535,30 @@ private fun RasterDetailScreen(
                                 "${uri}#$occurrence"
                             }
                         ) { index, uri ->
-                            val isDragging = draggingIndex == index
-                            Box(
-                                modifier = Modifier
-                                    .height(150.dp)
-                                    .aspectRatio(screenAspectRatio)
-                                    .zIndex(if (isDragging) 1f else 0f)
-                                    .graphicsLayer {
-                                        if (isDragging) {
-                                            val currentItem = thumbnailListState.layoutInfo.visibleItemsInfo.find { it.key.toString() == draggingItemKeyKey }
-                                            if (currentItem != null) {
-                                                translationX = draggingItemInitialOffsetX + dragOffsetX - currentItem.offset.toFloat()
-                                            } else {
-                                                translationX = dragOffsetX
-                                            }
-                                            scaleX = 1.04f
-                                            scaleY = 1.04f
-                                            alpha = 0.92f
+                            val occurrence = currentEditorGroup.imageUris.take(index + 1).count { it == uri }
+                            val itemKey = "${uri}#$occurrence"
+                            ReorderableItem(reorderableState, key = itemKey) { isDragging ->
+                                Box(
+                                    modifier = Modifier
+                                        .height(150.dp)
+                                        .aspectRatio(screenAspectRatio)
+                                        .zIndex(if (isDragging) 1f else 0f)
+                                        .graphicsLayer {
+                                            scaleX = if (isDragging) 1.05f else 1f
+                                            scaleY = if (isDragging) 1.05f else 1f
+                                            shadowElevation = if (isDragging) 8.dp.toPx() else 0f
+                                            shape = RoundedCornerShape(12.dp)
+                                            clip = true
                                         }
-                                    }
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(
-                                        1.dp,
-                                        if (index == 0) Color(0xFF2A83FF) else Color.Transparent,
-                                        RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { onStaticEditorReplaceSingle(currentEditorGroup, index) }
-                            ) {
+                                        .longPressDraggableHandle()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(
+                                            1.dp,
+                                            if (index == 0) Color(0xFF2A83FF) else Color.Transparent,
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                        .clickable { onStaticEditorReplaceSingle(currentEditorGroup, index) }
+                                ) {
                                 val bmp by produceState<android.graphics.Bitmap?>(initialValue = null, uri) {
                                     value = withContext(Dispatchers.IO) {
                                         runCatching {
@@ -1677,8 +1621,9 @@ private fun RasterDetailScreen(
                                 )
                             }
                         }
+                    }
 
-                        item {
+                    item {
                             Box(
                                 modifier = Modifier
                                     .height(150.dp)
@@ -2063,6 +2008,16 @@ private fun rememberTiltState(sensorWidth: Float = 4.5f, maxAngle: Float = 30f):
 
     return tilt to direction
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

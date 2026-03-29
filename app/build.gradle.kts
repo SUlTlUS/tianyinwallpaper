@@ -16,8 +16,8 @@ android {
         applicationId = "com.zeaze.tianyinwallpaper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 32
-        versionName = "3.2"
+        versionCode = 33
+        versionName = "3.3"
         multiDexEnabled = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -86,6 +86,10 @@ dependencies {
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.material.ripple)
+
+    implementation(libs.reorderable)
+
+    implementation(libs.kyant.shapes)
 
     // UI 与 架构
     implementation(libs.androidx.appcompat)
@@ -225,9 +229,13 @@ tasks.register("generateUpdateInfo") {
         // 更新说明：可以在打包前修改这里，或通过环境变量传入
         val versionDes = System.getenv("UPDATE_DES") ?: ""
 
-        // 查找生成的 APK 文件
-        val apkDir = file("build/outputs/apk/release")
-        val apkFile = apkDir.listFiles()?.firstOrNull { it.extension == "apk" }
+        // 查找生成的 APK 文件（支持命令行和IDE路径）
+        val buildApkDir = file("build/outputs/apk/release")
+        val ideApkDir = file("release")
+        
+        val apkFile = listOf(buildApkDir, ideApkDir)
+            .flatMap { it.listFiles()?.filter { f -> f.extension == "apk" } ?: emptyList() }
+            .maxByOrNull { it.lastModified() }
 
         if (apkFile != null && apkFile.exists()) {
             generateUpdateInfo(
@@ -240,7 +248,7 @@ tasks.register("generateUpdateInfo") {
                 versionDes = versionDes
             )
         } else {
-            println("No APK file found in ${apkDir.absolutePath}")
+            println("No APK file found in expected directories")
         }
     }
 }

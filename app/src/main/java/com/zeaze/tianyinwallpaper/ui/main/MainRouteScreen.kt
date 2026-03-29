@@ -111,6 +111,8 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntOffset
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyGridState
 
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
@@ -567,11 +569,6 @@ fun MainRouteScreen(
     }
 
     val gridState = rememberLazyGridState()
-    var draggingItemIndex by remember { mutableStateOf<Int?>(null) }
-    var draggingItemKey by remember { mutableStateOf<Any?>(null) }
-    var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    var draggingItemInitialOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    var startViewportOffset by remember { mutableStateOf(0) }
 
     // 辅助函数：更新排序后的选中索引
     fun updateSelectedIndices(from: Int, to: Int) {
@@ -586,6 +583,15 @@ fun MainRouteScreen(
             }
         }
     }
+
+    val reorderableState = rememberReorderableLazyGridState(
+        lazyGridState = gridState,
+        onMove = { from, to ->
+            updateSelectedIndices(from.index, to.index)
+            val item = wallpapers.removeAt(from.index)
+            wallpapers.add(to.index, item)
+        }
+    )
 
     val contentLayerBackground = MaterialTheme.colors.background
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
@@ -606,108 +612,7 @@ fun MainRouteScreen(
                 state = gridState,
                 columns = GridCells.Fixed(3),
                 modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { offset ->
-                                dragOffset = Offset.Zero
-
-                                val layoutInfo = gridState.layoutInfo
-                                startViewportOffset = layoutInfo.viewportStartOffset
-
-                                // 1. 查找触摸点所在的item（考虑滚动偏移）
-                                val touchedItem = layoutInfo.visibleItemsInfo
-                                    .filter { it.index != -1 }
-                                    .firstOrNull { item ->
-                                        val left = item.offset.x.toFloat()
-                                        val right = (item.offset.x + item.size.width).toFloat()
-                                        val top = (item.offset.y - startViewportOffset).toFloat()
-                                        val bottom = (item.offset.y - startViewportOffset + item.size.height).toFloat()
-                                        offset.x in left..right && offset.y in top..bottom
-                                    }
-
-                                if (touchedItem != null) {
-                                    draggingItemIndex = touchedItem.index
-                                    draggingItemKey = touchedItem.key
-                                    draggingItemInitialOffset = Offset(touchedItem.offset.x.toFloat(), touchedItem.offset.y.toFloat() - startViewportOffset)
-                                } else {
-                                    // 2. 回退方案：按屏幕中心距离最近选择
-                                    layoutInfo.visibleItemsInfo
-                                        .filter { it.index != -1 }
-                                        .minByOrNull { item ->
-                                            val screenCenterX = item.offset.x + item.size.width / 2f
-                                            val screenCenterY = item.offset.y - startViewportOffset + item.size.height / 2f
-                                            (screenCenterX - offset.x) * (screenCenterX - offset.x) +
-                                                    (screenCenterY - offset.y) * (screenCenterY - offset.y)
-                                        }?.let { item ->
-                                            draggingItemIndex = item.index
-                                            draggingItemKey = item.key
-                                            draggingItemInitialOffset = Offset(item.offset.x.toFloat(), item.offset.y.toFloat() - startViewportOffset)
-                                        }
-                                }
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                dragOffset += dragAmount
-                                draggingItemKey?.let { currentKey ->
-                                    val draggingItem = gridState.layoutInfo.visibleItemsInfo.find { it.key == currentKey }
-                                    if (draggingItem != null) {
-                                        val currentIndex = draggingItem.index
-                                        
-                                        // 被拖动项的当前屏幕中心（基于初始位置和全量偏移）
-                                        val draggingScreenCenter = draggingItemInitialOffset + dragOffset + Offset(
-                                            draggingItem.size.width / 2f,
-                                            draggingItem.size.height / 2f
-                                        )
-
-                                        // 查找最近的其他可见项
-                                        gridState.layoutInfo.visibleItemsInfo
-                                            .filter { it.key != currentKey && it.index != -1 }
-                                            .minByOrNull { item ->
-                                                val screenCenterX = item.offset.x + item.size.width / 2f
-                                                val screenCenterY = item.offset.y - startViewportOffset + item.size.height / 2f
-                                                (screenCenterX - draggingScreenCenter.x) * (screenCenterX - draggingScreenCenter.x) +
-                                                        (screenCenterY - draggingScreenCenter.y) * (screenCenterY - draggingScreenCenter.y)
-                                            }?.let { targetItem ->
-                                                val targetScreenCenter = Offset(
-                                                    targetItem.offset.x + targetItem.size.width / 2f,
-                                                    targetItem.offset.y - startViewportOffset + targetItem.size.height / 2f
-                                                )
-                                                val distSq = (targetScreenCenter.x - draggingScreenCenter.x) * (targetScreenCenter.x - draggingScreenCenter.x) +
-                                                        (targetScreenCenter.y - draggingScreenCenter.y) * (targetScreenCenter.y - draggingScreenCenter.y)
-
-                                                if (distSq < (targetItem.size.width * targetItem.size.width * 0.6f)) {
-                                                    val targetIndex = targetItem.index
-
-                                                    // 阻止列表还没刷新导致的状态不同步时继续覆盖交换
-                                                    if (wallpapers.getOrNull(currentIndex)?.uuid != currentKey) return@let
-
-                                                    updateSelectedIndices(currentIndex, targetIndex)
-
-                                                    val movedItem = wallpapers.removeAt(currentIndex)
-                                                    wallpapers.add(targetIndex, movedItem)
-
-                                                    draggingItemIndex = targetIndex
-                                                }
-                                            }
-                                    }
-                                }
-                            },
-                            onDragEnd = {
-                                draggingItemIndex = null
-                                draggingItemKey = null
-                                dragOffset = Offset.Zero
-                                startViewportOffset = 0
-                                saveCache()
-                            },
-                            onDragCancel = {
-                                draggingItemIndex = null
-                                draggingItemKey = null
-                                dragOffset = Offset.Zero
-                                startViewportOffset = 0
-                            }
-                        )
-                    },
+                    .fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 12.dp,
                     end = 12.dp,
@@ -718,104 +623,95 @@ fun MainRouteScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 itemsIndexed(wallpapers, key = { _, model -> 
-                    model.uuid ?: UUID.randomUUID().toString().also { model.uuid = it }
+                    model.uuid ?: java.util.UUID.randomUUID().toString().also { model.uuid = it }
                 }) { index, model ->
                     val selected = selectedPositions.contains(index)
-                    val isDragging = draggingItemKey != null && draggingItemKey == (model.uuid ?: index)
+                    val key = model.uuid ?: index
 
-                    Box(
-                        modifier = Modifier.animateItem()
-                            .fillMaxWidth()
-                            .aspectRatio(0.62f)
-                            .zIndex(if (isDragging) 1f else 0f)
-                            .graphicsLayer {
-                                if (isDragging) {
-                                    val currentItem = gridState.layoutInfo.visibleItemsInfo.find { it.key == draggingItemKey }
-                                    if (currentItem != null) {
-                                        val itemScreenOffset = androidx.compose.ui.geometry.Offset(
-                                            currentItem.offset.x.toFloat(),
-                                            currentItem.offset.y.toFloat() - startViewportOffset
-                                        )
-                                        translationX = draggingItemInitialOffset.x + dragOffset.x - itemScreenOffset.x
-                                        translationY = draggingItemInitialOffset.y + dragOffset.y - itemScreenOffset.y
-                                    } else {
-                                        translationX = dragOffset.x
-                                        translationY = dragOffset.y
-                                    }
-                                    scaleX = 1.05f
-                                    scaleY = 1.05f
-                                    alpha = 0.9f
-                                }
-                            }
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable {
-                                if (selectionMode) {
-                                    if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
-                                } else {
-                                    actionDialogIndex = index
-                                }
-                            }
-                            .background(Color.Black)
-                    ) {
-                        WallpaperCardImage(
-                            modifier = Modifier.fillMaxSize(),
-                            model = model
-                        )
-                        Text(
-                            text = if (model.type == 0) "静态" else "动态",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
+                    ReorderableItem(reorderableState, key = key) { isDragging ->
+                        Box(
                             modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(3.dp)
-                                .background(Color(0x66000000), shape = RoundedCornerShape(16.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                        if (model.startTime != -1 && model.endTime != -1) {
+                                .fillMaxWidth()
+                                .aspectRatio(0.62f)
+                                .zIndex(if (isDragging) 1f else 0f)
+                                .graphicsLayer {
+                                    scaleX = if (isDragging) 1.05f else 1f
+                                    scaleY = if (isDragging) 1.05f else 1f
+                                    shadowElevation = if (isDragging) 8.dp.toPx() else 0f
+                                    shape = RoundedCornerShape(16.dp)
+                                    clip = true
+                                }
+                                .longPressDraggableHandle()
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    if (selectionMode) {
+                                        if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
+                                    } else {
+                                        actionDialogIndex = index
+                                    }
+                                }
+                                .background(Color.Black)
+                        ) {
+                            WallpaperCardImage(
+                                modifier = Modifier.fillMaxSize(),
+                                model = model
+                            )
                             Text(
-                                text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
+                                text = if (model.type == 0) "静态" else "动态",
                                 color = Color.White,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
                                 modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(bottom = 3.dp)
+                                    .align(Alignment.TopEnd)
+                                    .padding(3.dp)
                                     .background(Color(0x66000000), shape = RoundedCornerShape(16.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             )
-                        }
-                        if (selected) {
-                            Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
-                            Surface(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(4.dp),
-                                shape = RoundedCornerShape(18.dp),
-                                color = Color(0xD91A1A1A)
-                            ) {
+                            if (model.startTime != -1 && model.endTime != -1) {
                                 Text(
-                                    text = "✓",
+                                    text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
                                     color = Color.White,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 0.dp)
+                                    fontSize = 11.sp,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .padding(bottom = 3.dp)
+                                        .background(Color(0x66000000), shape = RoundedCornerShape(16.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
-                        }
+                            if (selected) {
+                                Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
+                                Surface(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(4.dp),
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = Color(0xD91A1A1A)
+                                ) {
+                                    Text(
+                                        text = "✓",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 0.dp)
+                                    )
+                                }
+                            }
 
-                        if (selectionMode) {
-                            Text(
-                                text = "×",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(6.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFE53935))
-                                    .clickable { removeWallpaperAt(index) }
-                                    .padding(horizontal = 5.dp)
-                            )
+                            if (selectionMode) {
+                                Text(
+                                    text = "×",
+                                    color = Color.White,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(6.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFE53935))
+                                        .clickable { removeWallpaperAt(index) }
+                                        .padding(horizontal = 5.dp)
+                                )
+                            }
                         }
                     }
                 }
