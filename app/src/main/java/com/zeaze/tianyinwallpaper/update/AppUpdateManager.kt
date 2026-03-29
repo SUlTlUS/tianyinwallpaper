@@ -28,11 +28,11 @@ object AppUpdateManager {
     private const val TAG = "AppUpdateManager"
     
     // 更新信息 JSON 文件的远程地址列表 (会依次尝试)
-    // 主地址: jsDelivr CDN (国内访问稳定)
-    // 备用地址: GitHub raw
+    // 主地址: GitHub raw (带时间戳防缓存)
+    // 备用地址: jsDelivr CDN (国内访问稳定)
     private val updateInfoUrls = listOf(
-        "https://cdn.jsdelivr.net/gh/SUlTlUS/tianyinwallpaper@master/update/update_info.json",
-        "https://raw.githubusercontent.com/SUlTlUS/tianyinwallpaper/master/update/update_info.json"
+        "https://raw.githubusercontent.com/SUlTlUS/tianyinwallpaper/master/update/update_info.json",
+        "https://cdn.jsdelivr.net/gh/SUlTlUS/tianyinwallpaper@master/update/update_info.json"
     )
     
     private val okHttpClient = OkHttpClient.Builder()
@@ -66,10 +66,17 @@ object AppUpdateManager {
         // 依次尝试多个地址
         for (url in updateInfoUrls) {
             try {
-                Log.d(TAG, "尝试从 $url 获取更新信息")
+                // 如果是 GitHub raw 地址，加上时间戳防缓存
+                val targetUrl = if (url.contains("raw.githubusercontent.com")) {
+                    "$url?t=${System.currentTimeMillis()}"
+                } else {
+                    url
+                }
+                
+                Log.d(TAG, "尝试从 $targetUrl 获取更新信息")
                 
                 val request = Request.Builder()
-                    .url(url)
+                    .url(targetUrl)
                     .get()
                     .build()
                 

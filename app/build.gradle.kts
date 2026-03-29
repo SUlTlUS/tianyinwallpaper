@@ -225,7 +225,8 @@ tasks.register("generateUpdateInfo") {
         val versionName = android.defaultConfig.versionName ?: return@doLast
         val updateDir = file("${project.rootDir}/update")
         val updateInfoFile = File(updateDir, "update_info.json")
-        val baseUrl = "https://raw.githubusercontent.com/SUlTlUS/tianyinwallpaper/master/update/"
+        // APK 应该从 GitHub Releases 中下载，标签名为 v$versionName
+        val baseUrl = "https://github.com/SUlTlUS/tianyinwallpaper/releases/download/v${versionName}/"
         // 更新说明：可以在打包前修改这里，或通过环境变量传入
         val versionDes = System.getenv("UPDATE_DES") ?: ""
 
