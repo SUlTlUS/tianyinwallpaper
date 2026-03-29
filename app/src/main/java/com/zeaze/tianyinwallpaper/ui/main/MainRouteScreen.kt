@@ -570,6 +570,7 @@ fun MainRouteScreen(
     var draggingItemIndex by remember { mutableStateOf<Int?>(null) }
     var draggingItemKey by remember { mutableStateOf<Any?>(null) }
     var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var draggingItemInitialOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     var startViewportOffset by remember { mutableStateOf(0) }
 
     // 辅助函数：更新排序后的选中索引
@@ -628,6 +629,7 @@ fun MainRouteScreen(
                                 if (touchedItem != null) {
                                     draggingItemIndex = touchedItem.index
                                     draggingItemKey = touchedItem.key
+                                    draggingItemInitialOffset = Offset(touchedItem.offset.x.toFloat(), touchedItem.offset.y.toFloat() - startViewportOffset)
                                 } else {
                                     // 2. 回退方案：按屏幕中心距离最近选择
                                     layoutInfo.visibleItemsInfo
@@ -640,6 +642,7 @@ fun MainRouteScreen(
                                         }?.let { item ->
                                             draggingItemIndex = item.index
                                             draggingItemKey = item.key
+                                            draggingItemInitialOffset = Offset(item.offset.x.toFloat(), item.offset.y.toFloat() - startViewportOffset)
                                         }
                                 }
                             },
@@ -650,12 +653,12 @@ fun MainRouteScreen(
                                     val draggingItem = gridState.layoutInfo.visibleItemsInfo.find { it.key == currentKey }
                                     if (draggingItem != null) {
                                         val currentIndex = draggingItem.index
-
-                                        // 被拖动项的当前屏幕中心
-                                        val draggingScreenCenter = Offset(
-                                            draggingItem.offset.x + draggingItem.size.width / 2f,
-                                            draggingItem.offset.y - startViewportOffset + draggingItem.size.height / 2f
-                                        ) + dragOffset
+                                        
+                                        // 被拖动项的当前屏幕中心（基于初始位置和全量偏移）
+                                        val draggingScreenCenter = draggingItemInitialOffset + dragOffset + Offset(
+                                            draggingItem.size.width / 2f,
+                                            draggingItem.size.height / 2f
+                                        )
 
                                         // 查找最近的其他可见项
                                         gridState.layoutInfo.visibleItemsInfo
@@ -675,21 +678,15 @@ fun MainRouteScreen(
 
                                                 if (distSq < (targetItem.size.width * targetItem.size.width * 0.6f)) {
                                                     val targetIndex = targetItem.index
+
+                                                    // 阻止列表还没刷新导致的状态不同步时继续覆盖交换
+                                                    if (wallpapers.getOrNull(currentIndex)?.uuid != currentKey) return@let
+
                                                     updateSelectedIndices(currentIndex, targetIndex)
 
                                                     val movedItem = wallpapers.removeAt(currentIndex)
                                                     wallpapers.add(targetIndex, movedItem)
 
-                                                    // 更新dragOffset以保持视觉连续性
-                                                    val oldScreenCenter = Offset(
-                                                        draggingItem.offset.x + draggingItem.size.width / 2f,
-                                                        draggingItem.offset.y - startViewportOffset + draggingItem.size.height / 2f
-                                                    )
-                                                    val newScreenCenter = Offset(
-                                                        targetItem.offset.x + targetItem.size.width / 2f,
-                                                        targetItem.offset.y - startViewportOffset + targetItem.size.height / 2f
-                                                    )
-                                                    dragOffset -= (newScreenCenter - oldScreenCenter)
                                                     draggingItemIndex = targetIndex
                                                 }
                                             }
@@ -720,19 +717,31 @@ fun MainRouteScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                itemsIndexed(wallpapers, key = { _, model -> model.uuid ?: UUID.randomUUID().toString() }) { index, model ->
+                itemsIndexed(wallpapers, key = { _, model -> 
+                    model.uuid ?: UUID.randomUUID().toString().also { model.uuid = it }
+                }) { index, model ->
                     val selected = selectedPositions.contains(index)
                     val isDragging = draggingItemKey != null && draggingItemKey == (model.uuid ?: index)
 
                     Box(
-                        modifier = Modifier
+                        modifier = Modifier.animateItem()
                             .fillMaxWidth()
                             .aspectRatio(0.62f)
                             .zIndex(if (isDragging) 1f else 0f)
                             .graphicsLayer {
                                 if (isDragging) {
-                                    translationX = dragOffset.x
-                                    translationY = dragOffset.y
+                                    val currentItem = gridState.layoutInfo.visibleItemsInfo.find { it.key == draggingItemKey }
+                                    if (currentItem != null) {
+                                        val itemScreenOffset = androidx.compose.ui.geometry.Offset(
+                                            currentItem.offset.x.toFloat(),
+                                            currentItem.offset.y.toFloat() - startViewportOffset
+                                        )
+                                        translationX = draggingItemInitialOffset.x + dragOffset.x - itemScreenOffset.x
+                                        translationY = draggingItemInitialOffset.y + dragOffset.y - itemScreenOffset.y
+                                    } else {
+                                        translationX = dragOffset.x
+                                        translationY = dragOffset.y
+                                    }
                                     scaleX = 1.05f
                                     scaleY = 1.05f
                                     alpha = 0.9f
