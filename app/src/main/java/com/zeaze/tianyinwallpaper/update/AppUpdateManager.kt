@@ -96,11 +96,14 @@ object AppUpdateManager {
                 }
                 
                 val updateInfo = JSON.parseObject(body, UpdateInfo::class.java)
+                Log.d(TAG, "解析到的远端更新配置: code=${updateInfo.code}, name=${updateInfo.name}, 当前应用版本号: ${BuildConfig.VERSION_CODE}")
                 
                 // 比较版本号
                 return@withContext if (updateInfo.code > BuildConfig.VERSION_CODE) {
+                    Log.d(TAG, "发现新版本！远端(${updateInfo.code}) > 当前(${BuildConfig.VERSION_CODE})")
                     CheckResult.HasUpdate(updateInfo)
                 } else {
+                    Log.d(TAG, "当前已是最新版本或开发版。远端(${updateInfo.code}) <= 当前(${BuildConfig.VERSION_CODE})")
                     CheckResult.NoUpdate
                 }
                 
@@ -176,6 +179,18 @@ object AppUpdateManager {
                             if (localUriIndex != -1) {
                                 val localUri = cursor.getString(localUriIndex)
                                 downloadedApkPath = localUri?.let { Uri.parse(it).path }
+                                downloadedApkPath?.let {
+                                    val file = File(it)
+                                    if (file.exists()) {
+                                        callback.onSuccess(file)
+                                    } else {
+                                        callback.onError("下载成功但文件不存在")
+                                    }
+                                } ?: run {
+                                    callback.onError("无法解析下载路径")
+                                }
+                            } else {
+                                callback.onError("获取下载路径失败")
                             }
                             cursor.close()
                             return

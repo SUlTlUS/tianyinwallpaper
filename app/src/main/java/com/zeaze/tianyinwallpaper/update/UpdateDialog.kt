@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -180,25 +181,27 @@ fun UpdateDialog(
                     )
 
                     // 更新说明
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(contentColor.copy(0.05f))
-                            .padding(12.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.verticalScroll(rememberScrollState())
+                    if (info.des.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 160.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(contentColor.copy(0.05f))
+                                .padding(12.dp)
                         ) {
-                            BasicText(
-                                text = info.des.replace("\\n", "\n"),
-                                style = TextStyle(
-                                    color = contentColor.copy(0.8f),
-                                    fontSize = 14.sp,
-                                    lineHeight = 20.sp
+                            Column(
+                                modifier = Modifier.verticalScroll(rememberScrollState())
+                            ) {
+                                BasicText(
+                                    text = info.des.replace("\\n", "\n"),
+                                    style = TextStyle(
+                                        color = contentColor.copy(0.8f),
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
