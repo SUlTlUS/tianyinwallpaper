@@ -39,8 +39,33 @@ jobs:
           VERSION_CODE=$(grep -m 1 "versionCode" app/build.gradle.kts | sed 's/.*versionCode = \([0-9]*\).*/\1/')
           echo "name=$VERSION" >> $GITHUB_OUTPUT
           echo "code=$VERSION_CODE" >> $GITHUB_OUTPUT
-          # 使用版本号作为 tag，确保唯一性
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate update_info.json
+        run: |
+          mkdir -p update
+          APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          APK_NAME=$(basename "$APK_FILE")
+          APK_SIZE=$(stat -c%s "$APK_FILE")
+          APK_MD5=$(md5sum "$APK_FILE" | cut -d ' ' -f 1)
+          CURRENT_TIME=$(date +%s%3N)
+          VERSION_NAME="${{ steps.version.outputs.name }}"
+          VERSION_CODE="${{ steps.version.outputs.code }}"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION_NAME}/${APK_NAME}"
+          
+          cat <<EOF > update/update_info.json
+          {
+              "code": $VERSION_CODE,
+              "name": "$VERSION_NAME",
+              "filename": "$APK_NAME",
+              "url": "$DOWNLOAD_URL",
+              "time": $CURRENT_TIME,
+              "des": "",
+              "size": $APK_SIZE,
+              "md5": "$APK_MD5"
+          }
+          EOF
+          cat update/update_info.json
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

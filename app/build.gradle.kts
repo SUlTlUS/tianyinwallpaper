@@ -1,6 +1,5 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.gradle.api.JavaVersion
-import java.security.MessageDigest
 import java.io.File
 
 plugins {
@@ -16,8 +15,8 @@ android {
         applicationId = "com.zeaze.tianyinwallpaper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 33
-        versionName = "3.3"
+        versionCode = 34
+        versionName = "3.4"
         multiDexEnabled = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -125,136 +124,4 @@ dependencies {
     // 其他
     implementation(libs.androidx.multidex)
     debugImplementation(libs.androidx.compose.ui.tooling)
-}
-
-// ==================== 自动生成更新信息 ====================
-
-// 计算 MD5
-fun generateMD5(file: File): String {
-    if (!file.exists() || !file.isFile) {
-        return ""
-    }
-    val digest = MessageDigest.getInstance("MD5")
-    file.inputStream().use { input ->
-        val buffer = ByteArray(8192)
-        var read: Int
-        while (input.read(buffer).also { read = it } > 0) {
-            digest.update(buffer, 0, read)
-        }
-    }
-    return digest.digest().joinToString("") { "%02x".format(it) }
-}
-
-// 生成更新信息 JSON
-fun generateUpdateInfo(
-    apkFile: File,
-    versionCode: Int,
-    versionName: String,
-    updateDir: File,
-    updateInfoFile: File,
-    baseUrl: String,
-    versionDes: String
-) {
-    println("------------------ Generating update info ------------------")
-
-    if (!apkFile.exists()) {
-        println("APK file not found: ${apkFile.absolutePath}")
-        return
-    }
-
-    val apkHash = generateMD5(apkFile)
-
-    // 检查是否需要更新
-    var writeNewFile = true
-    if (updateInfoFile.exists()) {
-        try {
-            val oldContent = updateInfoFile.readText()
-            val oldCodeRegex = """"code"\s*:\s*(\d+)""".toRegex()
-            val oldMd5Regex = """"md5"\s*:\s*"([^"]+)"""".toRegex()
-            val oldCode = oldCodeRegex.find(oldContent)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            val oldMd5 = oldMd5Regex.find(oldContent)?.groupValues?.get(1) ?: ""
-
-            if (versionCode <= oldCode && apkHash == oldMd5) {
-                writeNewFile = false
-                println("This version is already released. Skip generating update info.")
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    if (writeNewFile) {
-        // 创建更新目录
-        if (!updateDir.exists()) {
-            updateDir.mkdirs()
-        }
-
-        // 复制 APK 到更新目录
-        val targetApk = File(updateDir, apkFile.name)
-        apkFile.copyTo(targetApk, overwrite = true)
-
-        // 生成 JSON
-        val json = """
-{
-    "code": $versionCode,
-    "name": "$versionName",
-    "filename": "${apkFile.name}",
-    "url": "${baseUrl}${apkFile.name}",
-    "time": ${System.currentTimeMillis()},
-    "des": "${versionDes.replace("\n", "\\n")}",
-    "size": ${apkFile.length()},
-    "md5": "$apkHash"
-}
-        """.trimIndent()
-
-        updateInfoFile.writeText(json)
-        println("Generated update info:")
-        println(json)
-    }
-
-    println("------------------ Finish generating update info ------------------")
-}
-
-// 创建生成更新信息的 Task
-tasks.register("generateUpdateInfo") {
-    group = "build"
-    description = "Generate update_info.json after building release APK"
-
-    doLast {
-        val versionCode = android.defaultConfig.versionCode ?: return@doLast
-        val versionName = android.defaultConfig.versionName ?: return@doLast
-        val updateDir = file("${project.rootDir}/update")
-        val updateInfoFile = File(updateDir, "update_info.json")
-        // APK 应该从 GitHub Releases 中下载，标签名为 v$versionName
-        val baseUrl = "https://github.com/SUlTlUS/tianyinwallpaper/releases/download/v${versionName}/"
-        // 更新说明：可以在打包前修改这里，或通过环境变量传入
-        val versionDes = System.getenv("UPDATE_DES") ?: ""
-
-        // 查找生成的 APK 文件（支持命令行和IDE路径）
-        val buildApkDir = file("build/outputs/apk/release")
-        val ideApkDir = file("release")
-        
-        val apkFile = listOf(buildApkDir, ideApkDir)
-            .flatMap { it.listFiles()?.filter { f -> f.extension == "apk" } ?: emptyList() }
-            .maxByOrNull { it.lastModified() }
-
-        if (apkFile != null && apkFile.exists()) {
-            generateUpdateInfo(
-                apkFile = apkFile,
-                versionCode = versionCode,
-                versionName = versionName,
-                updateDir = updateDir,
-                updateInfoFile = updateInfoFile,
-                baseUrl = baseUrl,
-                versionDes = versionDes
-            )
-        } else {
-            println("No APK file found in expected directories")
-        }
-    }
-}
-
-// 让 assembleRelease 完成后自动执行 generateUpdateInfo
-project.afterEvaluate {
-    tasks.findByName("assembleRelease")?.finalizedBy("generateUpdateInfo")
 }
