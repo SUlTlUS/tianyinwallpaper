@@ -782,7 +782,13 @@ fun MainRouteScreen(
                                 stiffness = Spring.StiffnessLow
                             )
                         ))
-                    .togetherWith(fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)))
+                    .togetherWith(
+                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                scaleOut(
+                                    targetScale = 0.8f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessLow)
+                                )
+                    )
             },
             contentAlignment = Alignment.Center,
             label = "DialogOverlay",

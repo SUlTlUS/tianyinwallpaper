@@ -807,7 +807,13 @@ fun RasterRouteScreen(
                                 stiffness = Spring.StiffnessLow
                             )
                         ))
-                    .togetherWith(fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)))
+                    .togetherWith(
+                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                scaleOut(
+                                    targetScale = 0.8f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessLow)
+                                )
+                    )
             },
             contentAlignment = Alignment.Center,
             label = "RasterDialogOverlay",
@@ -1465,7 +1471,13 @@ private fun RasterDetailScreen(
                                 stiffness = Spring.StiffnessLow
                             )
                         ))
-                    .togetherWith(fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)))
+                    .togetherWith(
+                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                scaleOut(
+                                    targetScale = 0.8f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessLow)
+                                )
+                    )
             },
             contentAlignment = Alignment.BottomCenter,
             label = "StaticEditOverlay",

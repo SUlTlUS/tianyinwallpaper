@@ -11,6 +11,7 @@ import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -144,12 +145,13 @@ fun SettingRouteScreen(
 
     val isLightTheme = !useDarkTheme
     val backgroundColor =
-        if (isLightTheme) Color(0xFFFFFFFF)
+        if (isLightTheme) Color(0xFFF2F2F6)
         else Color(0xFF121212)
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
     val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF121212).copy(0.56f)
+    val groupBackgroundColor = if (isLightTheme) Color.White else Color(0xFF1E1E1E)
 
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
@@ -165,7 +167,7 @@ fun SettingRouteScreen(
                     } else m
                 }
         ) {
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colors.background))
+            Box(Modifier.fillMaxSize().background(backgroundColor))
 
             Column(
                 modifier = Modifier
@@ -189,15 +191,14 @@ fun SettingRouteScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colors.surface, RoundedCornerShape(48.dp))
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(groupBackgroundColor)
                 ) {
-                    SettingCheckItem("随机切换壁纸", rand, contentColor, backgroundColor, isLightTheme) {
+                    SettingCheckItem("随机切换壁纸", rand, contentColor, groupBackgroundColor, isLightTheme) {
                         rand = it
                         editor.putBoolean("rand", it).apply()
                     }
-                    SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, backgroundColor, isLightTheme) {
+                    SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, groupBackgroundColor, isLightTheme) {
                         pageChange = it
                         editor.putBoolean("pageChange", it).apply()
                         if (it && wallpaperScroll) {
@@ -205,7 +206,7 @@ fun SettingRouteScreen(
                             editor.putBoolean("wallpaperScroll", false).apply()
                         }
                     }
-                    SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, backgroundColor, isLightTheme) {
+                    SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, groupBackgroundColor, isLightTheme) {
                         wallpaperScroll = it
                         editor.putBoolean("wallpaperScroll", it).apply()
                         if (it && pageChange) {
@@ -219,9 +220,8 @@ fun SettingRouteScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colors.surface, RoundedCornerShape(48.dp))
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(groupBackgroundColor)
                 ) {
                     SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor) {
                         tempMinTime = minTime
@@ -402,7 +402,13 @@ fun SettingRouteScreen(
                                 stiffness = Spring.StiffnessLow
                             )
                         ))
-                    .togetherWith(fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)))
+                    .togetherWith(
+                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                scaleOut(
+                                    targetScale = 0.8f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessLow)
+                                )
+                    )
             },
             contentAlignment = Alignment.Center,
             label = "SettingsDialogOverlay",
@@ -883,7 +889,7 @@ private fun SettingCheckItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 8.dp),
+            .padding(horizontal = 24.dp, vertical = 20.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -917,7 +923,7 @@ private fun SettingTextItem(label: String, contentColor: Color, onClick: () -> U
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(vertical = 10.dp)
+            .padding(horizontal = 24.dp, vertical = 22.dp)
     )
 }
 
@@ -933,7 +939,8 @@ private fun AboutSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colors.surface, RoundedCornerShape(48.dp))
+            .clip(RoundedCornerShape(28.dp))
+            .background(if (contentColor == Color.Black) Color.White else Color(0xFF1E1E1E))
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -947,7 +954,7 @@ private fun AboutSection(
         )
         Spacer(Modifier.height(8.dp))
         LinkText("项目开源地址", "https://github.com/SUlTlUS/tianyinwallpaper.git")
-        LinkText("软件下载地址", "https://github.com/SUlTlUS/tianyinwallpaper/releases/tag/v3.1")
+        LinkText("软件下载地址", "https://github.com/SUlTlUS/tianyinwallpaper/releases")
         Text(
             text = "当前版本号：$verName",
             style = TextStyle(contentColor.copy(0.5f), 12.sp)
