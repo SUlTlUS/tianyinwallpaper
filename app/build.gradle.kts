@@ -118,6 +118,9 @@ dependencies {
     implementation(libs.backdrop)
     implementation(libs.xpopup)
     
+    // SplashScreen
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
     // MediaPlayer-Extended - 用于视频光栅的帧精确seek
     implementation(libs.mediaplayer.extended)
 

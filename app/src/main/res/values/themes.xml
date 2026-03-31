@@ -3,4 +3,13 @@
     <style name="Theme.TianYinWallpaper" parent="Theme.AppCompat.Light.DarkActionBar">
 
     </style>
+
+    <style name="Theme.TianYinWallpaper.Splash" parent="Theme.SplashScreen">
+        <!-- Light mode background color -->
+        <item name="windowSplashScreenBackground">#F2F2F6</item>
+        <!-- The icon -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon_scale</item>
+        <!-- The post-splash screen theme -->
+        <item name="postSplashScreenTheme">@style/Theme.AppCompat.Light.NoActionBar</item>
+    </style>
 </resources>

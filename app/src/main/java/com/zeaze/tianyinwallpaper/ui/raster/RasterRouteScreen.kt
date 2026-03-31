@@ -49,6 +49,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -66,6 +68,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -154,6 +157,7 @@ private enum class StaticPickMode {
 private sealed class RasterDialogState {
     object Type : RasterDialogState()
     object Delete : RasterDialogState()
+    object Permission : RasterDialogState()
 }
 
 @OptIn(ExperimentalAnimationApi::class)
@@ -177,6 +181,7 @@ fun RasterRouteScreen(
     var selectionMode by remember { mutableStateOf(false) }
     var showTypeDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
     var detailGroup by remember { mutableStateOf<RasterGroupModel?>(null) }
     var staticPickMode by remember { mutableStateOf(StaticPickMode.CREATE_NEW) }
     var staticPickTargetId by remember { mutableStateOf<String?>(null) }
@@ -191,6 +196,7 @@ fun RasterRouteScreen(
     val currentDialogState = when {
         showTypeDialog -> RasterDialogState.Type
         showDeleteDialog -> RasterDialogState.Delete
+        showPermissionDialog -> RasterDialogState.Permission
         else -> null
     }
 
@@ -211,7 +217,11 @@ fun RasterRouteScreen(
         if (result.resultCode == Activity.RESULT_OK) {
             context.showToast("光栅壁纸设置成功")
         } else {
-            context.showToast("设置失败，请授予壁纸权限")
+            if (pref.getBoolean("hide_permission_dialog", false)) {
+                context.showToast("设置失败")
+            } else {
+                showPermissionDialog = true
+            }
         }
     }
 
@@ -789,6 +799,7 @@ fun RasterRouteScreen(
                     ) {
                         showTypeDialog = false
                         showDeleteDialog = false
+                        showPermissionDialog = false
                         staticEditorGroupId = null
                     }
             )
@@ -958,6 +969,74 @@ fun RasterRouteScreen(
                                             .clip(Capsule())
                                             .background(containerColor.copy(0.2f))
                                             .clickable { showDeleteDialog = false }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_cancel), style = TextStyle(contentColor, 16.sp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    RasterDialogState.Permission -> {
+                        Column(
+                            Modifier
+                                .padding(50f.dp)
+                                .wrapContentHeight()
+                                .drawBackdrop(
+                                    backdrop = dialogBackdrop,
+                                    shape = { RoundedRectangle(48f.dp) },
+                                    effects = {
+                                        colorControls(
+                                            brightness = if (isLightTheme) 0.2f else 0f,
+                                            saturation = 1.5f
+                                        )
+                                        blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
+                                        lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
+                                    },
+                                    highlight = { Highlight.Plain },
+                                    onDrawSurface = { drawRect(containerColor) }
+                                )
+                                .pointerInput(Unit) { detectTapGestures { } }
+                        ) {
+                            Column(
+                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                BasicText(context.getString(R.string.main_set_wallpaper_failed_permission_title), style = TextStyle(color = contentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+                                BasicText(context.getString(R.string.main_set_wallpaper_failed_permission_tip), style = TextStyle(color = contentColor.copy(alpha=0.8f), fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center), modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(accentColor)
+                                            .clickable {
+                                                val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                                                }
+                                                context.startActivity(intent)
+                                                showPermissionDialog = false
+                                            }
+                                            .height(48.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(context.getString(R.string.common_confirm), style = TextStyle(Color.White, 16.sp))
+                                    }
+                                    Row(
+                                        Modifier
+                                            .weight(1f)
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable {
+                                                showPermissionDialog = false
+                                            }
                                             .height(48.dp),
                                         horizontalArrangement = Arrangement.Center,
                                         verticalAlignment = Alignment.CenterVertically
@@ -2020,6 +2099,21 @@ private fun rememberTiltState(sensorWidth: Float = 4.5f, maxAngle: Float = 30f):
 
     return tilt to direction
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

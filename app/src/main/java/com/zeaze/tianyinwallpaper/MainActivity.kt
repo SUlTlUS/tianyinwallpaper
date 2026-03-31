@@ -52,19 +52,20 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import kotlin.math.abs
-import kotlin.math.sign
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.darkColors
 import androidx.compose.material.lightColors
-import androidx.navigation.compose.NavHost
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.Lifecycle
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -112,6 +113,7 @@ class MainActivity : BaseActivity() {
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
         private const val ROUTE_MAIN = "main"
         private const val ROUTE_ABOUT = "about"
+        private const val ROUTE_APP_INFO = "app_info"
         private const val ROUTE_RASTER = "raster"
         private const val ROUTE_SETTING = "setting"
         const val PREF_THEME_MODE = "themeMode"
@@ -122,6 +124,7 @@ class MainActivity : BaseActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         
         // 机型判断：如果是手机则锁定为竖屏
@@ -287,7 +290,27 @@ class MainActivity : BaseActivity() {
                             useDarkTheme = useDarkTheme,
                             onThemeModeChange = { mode ->
                                 themeMode = mode
-                            }
+                            },
+                            onOpenAppInfo = { openAppInfoPage() }
+                        )
+                    }
+                    composable(
+                        route = ROUTE_APP_INFO,
+                        enterTransition = {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Left,
+                                animationSpec = tween(280)
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Right,
+                                animationSpec = tween(280)
+                            )
+                        }
+                    ) {
+                        com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(
+                            useDarkTheme = useDarkTheme
                         )
                     }
                 }
@@ -630,10 +653,6 @@ class MainActivity : BaseActivity() {
             return // 如果已经在当前页，不执行跳转，避免重复触发
         }
         navController.navigate(route) {
-            // 弹出到图表的起始目标，避免堆栈无限增长
-            popUpTo(navController.graph.startDestinationId) {
-                saveState = true
-            }
             launchSingleTop = true
             restoreState = true
         }
@@ -645,6 +664,10 @@ class MainActivity : BaseActivity() {
 
     fun openSettingPage() {
         pendingRoute = ROUTE_SETTING
+    }
+
+    fun openAppInfoPage() {
+        pendingRoute = ROUTE_APP_INFO
     }
 
     fun setBottomBarVisible(visible: Boolean) {

@@ -49,6 +49,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
+import androidx.compose.foundation.border
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -312,7 +314,11 @@ fun MainRouteScreen(
         if (result.resultCode == Activity.RESULT_OK) {
             context.showToast("设置成功")
         } else {
-            showPermissionDialog = true
+            if (pref.getBoolean("hide_permission_dialog", false)) {
+                context.showToast("设置失败")
+            } else {
+                showPermissionDialog = true
+            }
         }
     }
 
@@ -745,6 +751,14 @@ fun MainRouteScreen(
             )
         }
 
+        if (!selectionMode && wallpapers.isEmpty()) {
+            androidx.compose.material.Text(
+                text = "点击顶部 + 添加壁纸",
+                color = androidx.compose.material.MaterialTheme.colors.onBackground.copy(alpha = 0.7f),
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+
         // 1. Background dimming layer
         AnimatedVisibility(
             visible = currentDialogState != null,
@@ -969,8 +983,8 @@ fun MainRouteScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                BasicText(context.getString(R.string.main_set_wallpaper_failed_permission_tip), style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
-                                Spacer(Modifier.height(12.dp))
+                                BasicText(context.getString(R.string.main_set_wallpaper_failed_permission_title), style = TextStyle(color = contentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold))
+                                BasicText(context.getString(R.string.main_set_wallpaper_failed_permission_tip), style = TextStyle(color = contentColor.copy(alpha=0.8f), fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center), modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                                 Row(
                                     Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -998,7 +1012,9 @@ fun MainRouteScreen(
                                             .weight(1f)
                                             .clip(Capsule())
                                             .background(containerColor.copy(0.2f))
-                                            .clickable { showPermissionDialog = false }
+                                            .clickable {
+                                                showPermissionDialog = false
+                                            }
                                             .height(48.dp),
                                         horizontalArrangement = Arrangement.Center,
                                         verticalAlignment = Alignment.CenterVertically

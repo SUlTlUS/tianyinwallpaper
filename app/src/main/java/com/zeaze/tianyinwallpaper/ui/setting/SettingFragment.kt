@@ -3,6 +3,7 @@ package com.zeaze.tianyinwallpaper.ui.setting
 import java.util.Locale
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.text.TextUtils
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
@@ -15,6 +16,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -35,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -65,6 +69,7 @@ import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.MainActivity
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.update.AppUpdateManager
@@ -85,12 +90,14 @@ private sealed class SettingsDialogState {
 @Composable
 fun SettingRouteScreen(
     useDarkTheme: Boolean,
-    onThemeModeChange: (Int) -> Unit = {}
+    onThemeModeChange: (Int) -> Unit = {},
+    onOpenAppInfo: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
 
+    var hidePermissionDialog by remember { mutableStateOf(pref.getBoolean("hide_permission_dialog", false)) }
     var rand by remember { mutableStateOf(pref.getBoolean("rand", false)) }
     var pageChange by remember { mutableStateOf(pref.getBoolean("pageChange", false)) }
     var wallpaperScroll by remember { mutableStateOf(pref.getBoolean("wallpaperScroll", false)) }
@@ -194,6 +201,10 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
+                    SettingCheckItem("不显示权限提示", hidePermissionDialog, contentColor, groupBackgroundColor, isLightTheme) {
+                        hidePermissionDialog = it
+                        editor.putBoolean("hide_permission_dialog", it).apply()
+                    }
                     SettingCheckItem("随机切换壁纸", rand, contentColor, groupBackgroundColor, isLightTheme) {
                         rand = it
                         editor.putBoolean("rand", it).apply()
@@ -273,14 +284,34 @@ fun SettingRouteScreen(
                 }
                 }
 
-                AboutSection(
-                    context = context,
-                    contentColor = contentColor,
-                    onCheckUpdate = {
-                        shouldCheckUpdate = true
-                        updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
+                // Settings Group 3: About
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(groupBackgroundColor)
+                ) {
+                    SettingTextItem("关于", contentColor) {
+                        onOpenAppInfo()
                     }
-                )
+                }
+                
+                // Keep the Check Update button separate and styled as before
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(Capsule())
+                        .background(accentColor)
+                        .clickable { 
+                            shouldCheckUpdate = true
+                            updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
+                        }
+                        .height(48.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicText("检查更新", style = TextStyle(Color.White, 16.sp, fontWeight = FontWeight.Bold))
+                }
             }
         }
 
@@ -656,12 +687,13 @@ fun SettingRouteScreen(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(200.dp)
+                                        .heightIn(max = 280.dp)
                                         .clip(RoundedCornerShape(24.dp))
                                         .background(containerColor.copy(0.1f))
-                                        .padding(8.dp)
+                                        .padding(16.dp)
                                         .verticalScroll(rememberScrollState()),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalAlignment = Alignment.Start
                                 ) {
                                     if (points.isEmpty()) {
                                         BasicText("暂无时间点", style = TextStyle(contentColor.copy(0.5f), 14.sp))
@@ -877,6 +909,138 @@ fun SettingRouteScreen(
 }
 
 @Composable
+fun AppInfoRouteScreen(
+    useDarkTheme: Boolean
+) {
+    val context = LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val statusBarTopPadding = remember(context) {
+        val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (id > 0) context.resources.getDimensionPixelSize(id) else 0
+    }
+    val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
+
+    val isLightTheme = !useDarkTheme
+    val backgroundColor =
+        if (isLightTheme) Color(0xFFF2F2F6)
+        else Color(0xFF121212)
+    val contentColor = if (isLightTheme) Color.Black else Color.White
+    val containerColor = if (isLightTheme) Color.White else Color(0xFF1E1E1E)
+
+    val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+    val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+
+    val verName = getVersionName(context)
+    val aboutText = remember { getAboutText() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .let { m ->
+                if (enableLiquidGlass && liquidBackdrop != null) {
+                    m.layerBackdrop(liquidBackdrop)
+                } else m
+            }
+    ) {
+        Box(Modifier.fillMaxSize().background(backgroundColor))
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = statusBarTopPaddingDp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // App Icon
+            Spacer(modifier = Modifier.height(48.dp))
+            Box(
+                modifier = Modifier
+                    .height(100.dp)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                // You can add an actual Image here later, for now just text
+                Text(
+                    text = "天音壁纸",
+                    style = TextStyle(
+                        color = contentColor,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            }
+            Text(
+                text = "版本 $verName",
+                style = TextStyle(
+                    color = contentColor.copy(0.6f),
+                    fontSize = 14.sp
+                )
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Main Info Block
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(containerColor)
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "使用说明",
+                    style = TextStyle(contentColor, 18.sp, FontWeight.Bold)
+                )
+                Text(
+                    text = aboutText,
+                    style = TextStyle(color = contentColor.copy(0.8f), fontSize = 15.sp, lineHeight = 22.sp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Links Block
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(containerColor)
+                    .padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "开源地址", style = TextStyle(color = contentColor, fontSize = 16.sp))
+                    LinkText("GitHub", "https://github.com/SUlTlUS/tianyinwallpaper.git")
+                }
+                
+                Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).padding(horizontal = 24.dp).background(contentColor.copy(0.1f)))
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "下载地址", style = TextStyle(color = contentColor, fontSize = 16.sp))
+                    LinkText("Releases", "https://github.com/SUlTlUS/tianyinwallpaper/releases")
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(48.dp))
+        }
+    }
+}
+
+@Composable
 private fun SettingCheckItem(
     label: String,
     checked: Boolean,
@@ -885,10 +1049,14 @@ private fun SettingCheckItem(
     isLightTheme: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
+            .clickable { 
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                onCheckedChange(!checked) 
+            }
             .padding(horizontal = 24.dp, vertical = 20.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -927,55 +1095,6 @@ private fun SettingTextItem(label: String, contentColor: Color, onClick: () -> U
     )
 }
 
-@Composable
-private fun AboutSection(
-    context: Context,
-    contentColor: Color,
-    onCheckUpdate: () -> Unit
-) {
-    val verName = getVersionName(context)
-    val aboutText = remember { getAboutText() }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(if (contentColor == Color.Black) Color.White else Color(0xFF1E1E1E))
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = "关于",
-            style = TextStyle(contentColor, 18.sp, FontWeight.Bold)
-        )
-        Text(
-            text = aboutText,
-            style = TextStyle(contentColor.copy(0.8f), 14.sp)
-        )
-        Spacer(Modifier.height(8.dp))
-        LinkText("项目开源地址", "https://github.com/SUlTlUS/tianyinwallpaper.git")
-        LinkText("软件下载地址", "https://github.com/SUlTlUS/tianyinwallpaper/releases")
-        Text(
-            text = "当前版本号：$verName",
-            style = TextStyle(contentColor.copy(0.5f), 12.sp)
-        )
-        
-        // 检查更新按钮
-        Spacer(Modifier.height(8.dp))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(Capsule())
-                .background(Color(0xFF0088FF))
-                .clickable { onCheckUpdate() }
-                .height(44.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BasicText("检查更新", style = TextStyle(Color.White, 15.sp))
-        }
-    }
-}
 
 @Composable
 private fun LinkText(label: String, url: String) {

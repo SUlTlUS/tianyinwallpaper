@@ -42,6 +42,8 @@ import com.zeaze.tianyinwallpaper.backdrop.shadow.InnerShadow
 import com.zeaze.tianyinwallpaper.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import kotlinx.coroutines.flow.collectLatest
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 
 @Composable
 fun LiquidToggle(
@@ -62,6 +64,7 @@ fun LiquidToggle(
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
     val dragWidth = with(density) { 20f.dp.toPx() }
     val animationScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     var didDrag by remember { mutableStateOf(false) }
     var fraction by remember { mutableFloatStateOf(if (selected()) 1f else 0f) }
     val dampedDragAnimation = remember(animationScope) {
@@ -75,11 +78,17 @@ fun LiquidToggle(
             onDragStarted = {},
             onDragStopped = {
                 if (didDrag) {
+                    val wasSelected = fraction == 1f
                     fraction = if (targetValue >= 0.5f) 1f else 0f
-                    onSelect(fraction == 1f)
+                    val isSelected = fraction == 1f
+                    if (wasSelected != isSelected) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) // Or any other suitable feedback
+                    }
+                    onSelect(isSelected)
                     didDrag = false
                 } else {
                     fraction = if (selected()) 0f else 1f
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress) // Using LongPress for a strong click feel, or TextHandleMove
                     onSelect(fraction == 1f)
                 }
             },
@@ -87,10 +96,16 @@ fun LiquidToggle(
                 if (!didDrag) {
                     didDrag = dragAmount.x != 0f
                 }
+                val oldFraction = fraction
                 val delta = dragAmount.x / dragWidth
                 fraction =
                     if (isLtr) (fraction + delta).fastCoerceIn(0f, 1f)
                     else (fraction - delta).fastCoerceIn(0f, 1f)
+                    
+                // Add haptic feedback when crossing the 50% threshold during drag
+                if ((oldFraction < 0.5f && fraction >= 0.5f) || (oldFraction > 0.5f && fraction <= 0.5f)) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
             }
         )
     }
