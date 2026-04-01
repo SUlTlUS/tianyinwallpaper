@@ -9,5 +9,6 @@ data class TianYinWallpaperModel(
     var videoUri: String? = null,
     var startTime: Int = -1,
     var endTime: Int = -1,
-    var loop: Boolean = true
+    var loop: Boolean = true,
+    var independentTime: Boolean = false
 )

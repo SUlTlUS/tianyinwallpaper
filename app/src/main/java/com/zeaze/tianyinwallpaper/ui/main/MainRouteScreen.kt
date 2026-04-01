@@ -19,6 +19,7 @@ import android.view.Surface
 import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -28,9 +29,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -81,7 +85,6 @@ import androidx.documentfile.provider.DocumentFile
 import com.alibaba.fastjson.JSON
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
-import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
@@ -96,8 +99,9 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
-import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
+import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import com.zeaze.tianyinwallpaper.utils.showToast
@@ -115,6 +119,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntOffset
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.geometry.Rect
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
+import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
@@ -146,13 +156,21 @@ internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): In
 }
 
 private sealed class DialogState {
-    data class Action(val index: Int) : DialogState()
     object Type : DialogState()
     object Permission : DialogState()
     object Delete : DialogState()
     object Overwrite : DialogState()
     data class Time(val index: Int) : DialogState()
     object Save : DialogState()
+}
+
+private fun getTimeString(t: Int): String {
+    var time = t
+    var s = ""
+    s = if (time / 60 == 0) s + "00" else if (time / 60 < 10) s + "0" + time / 60 else s + time / 60
+    time %= 60
+    s = if (time < 10) "$s:0$time" else "$s:$time"
+    return s
 }
 
 
@@ -189,8 +207,8 @@ fun MainRouteScreen(
     var showOverwriteDialog by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
 
-    var actionDialogIndex by remember { mutableStateOf<Int?>(null) }
     var timeDialogIndex by remember { mutableStateOf<Int?>(null) }
+    var replaceIndex by remember { mutableStateOf<Int?>(null) }
     var fullScreenPreviewModel by remember { mutableStateOf<TianYinWallpaperModel?>(null) }
     var showLivePreview by remember { mutableStateOf(false) }
 
@@ -217,7 +235,6 @@ fun MainRouteScreen(
     }
 
     val currentDialogState = when {
-        actionDialogIndex != null -> DialogState.Action(actionDialogIndex!!)
         showWallpaperTypeDialog -> DialogState.Type
         showPermissionDialog -> DialogState.Permission
         showDeleteSelectedDialog -> DialogState.Delete
@@ -413,6 +430,34 @@ fun MainRouteScreen(
     val videoLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { results ->
         if (results.isNotEmpty()) appendModels(results, dynamic = true)
     }
+    val replaceImageLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && replaceIndex != null) {
+            takePersistableUriPermissions(listOf(uri))
+            val newModel = TianYinWallpaperModel().apply {
+                uuid = UUID.randomUUID().toString()
+                type = WALLPAPER_TYPE_STATIC
+                imgUri = uri.toString()
+            }
+            wallpapers[replaceIndex!!] = newModel
+            fullScreenPreviewModel = newModel
+            saveCache()
+            replaceIndex = null
+        }
+    }
+    val replaceVideoLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && replaceIndex != null) {
+            takePersistableUriPermissions(listOf(uri))
+            val newModel = TianYinWallpaperModel().apply {
+                uuid = UUID.randomUUID().toString()
+                type = WALLPAPER_TYPE_DYNAMIC
+                videoUri = uri.toString()
+            }
+            wallpapers[replaceIndex!!] = newModel
+            fullScreenPreviewModel = newModel
+            saveCache()
+            replaceIndex = null
+        }
+    }
     val directoryLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
         if (treeUri == null) return@rememberLauncherForActivityResult
         try {
@@ -588,15 +633,6 @@ fun MainRouteScreen(
         }
     }
 
-    fun getTimeString(t: Int): String {
-        var time = t
-        var s = ""
-        s = if (time / 60 == 0) s + "00" else if (time / 60 < 10) s + "0" + time / 60 else s + time / 60
-        time %= 60
-        s = if (time < 10) "$s:0$time" else "$s:$time"
-        return s
-    }
-
     fun parseTimeText(text: String): Int? {
         val parts = text.split(":")
         if (parts.size != 2) return null
@@ -711,7 +747,7 @@ fun MainRouteScreen(
                                     if (selectionMode) {
                                         if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
                                     } else {
-                                        actionDialogIndex = index
+                                        fullScreenPreviewModel = model
                                     }
                                 }
                                 .background(Color.Black)
@@ -804,7 +840,6 @@ fun MainRouteScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        actionDialogIndex = null
                         showWallpaperTypeDialog = false
                         showPermissionDialog = false
                         showDeleteSelectedDialog = false
@@ -864,120 +899,6 @@ fun MainRouteScreen(
                         .pointerInput(Unit) { detectTapGestures { /* consume */ } }
                 ) {
                     when (state) {
-                        is DialogState.Action -> {
-                            val targetIndex = state.index
-                            val model = wallpapers.getOrNull(targetIndex)
-                            if (model != null) {
-                                var loopState by remember(targetIndex) { mutableStateOf(model.loop) }
-
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 16.dp)
-                                        .padding(horizontal = 9f.dp)
-                                        .clickable { fullScreenPreviewModel = model },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    WallpaperThumbnail(
-                                        model = model,
-                                        modifier = Modifier
-                                            .fillMaxWidth(0.946f)
-                                            .aspectRatio(0.62f)
-                                            .clip(RoundedRectangle(35f.dp))
-                                    )
-                                }
-
-                                Column(
-                                    Modifier
-                                        .padding(16.dp, 4.dp, 16.dp, 20.dp)
-                                        .fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    // Time Button
-                                    Row(
-                                        Modifier
-                                            .clip(Capsule())
-                                            .background(containerColor.copy(0.2f))
-                                            .clickable {
-                                                timeDialogIndex = targetIndex
-                                                actionDialogIndex = null
-                                            }
-                                            .height(48.dp)
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        BasicText("时间", style = TextStyle(contentColor, 16.sp))
-                                    }
-
-                                    // Loop Toggle
-                                    Row(
-                                        Modifier
-                                            .clip(Capsule())
-                                            .background(containerColor.copy(0.2f))
-                                            .height(48.dp)
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 24.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        BasicText("循环播放", style = TextStyle(contentColor, 16.sp))
-                                        LiquidToggle(
-                                            selected = { loopState },
-                                            onSelect = {
-                                                loopState = it
-                                                model.loop = it
-                                                saveCache()
-                                            },
-                                            backdrop = sheetBackdrop,
-                                            isLightTheme = isLightTheme
-                                        )
-                                    }
-
-                                    // Delete & Cancel Buttons
-                                    Row(
-                                        Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        // Delete Button
-                                        Row(
-                                            Modifier
-                                                .weight(1f)
-                                                .clip(Capsule())
-                                                .background(Color(0xFFFF4D4F))
-                                                .clickable {
-                                                    delete(targetIndex)
-                                                    actionDialogIndex = null
-                                                }
-                                                .height(48.dp)
-                                                .padding(horizontal = 16f.dp),
-
-                                            horizontalArrangement = Arrangement.spacedBy(4f.dp, Alignment.CenterHorizontally),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            BasicText("删除", style = TextStyle(Color.White, 16.sp))
-                                        }
-
-                                        // Cancel Button
-                                        Row(
-                                            Modifier
-                                                .weight(1f)
-                                                .clip(Capsule())
-                                                .background(accentColor.copy(alpha = 0.75f))
-                                                .clickable { actionDialogIndex = null }
-                                                .height(48.dp)
-                                                .padding(horizontal = 16f.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(4f.dp, Alignment.CenterHorizontally),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            BasicText("取消", style = TextStyle(Color.White, 16.sp))
-                                        }
-                                    }
-                                }
-                            }
-                        }
                         DialogState.Type -> {
                             Column(
                                 Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
@@ -1366,106 +1287,48 @@ fun MainRouteScreen(
             }
         }
 
-        // Full screen preview overlay
-        AnimatedContent(
-            targetState = fullScreenPreviewModel,
-            transitionSpec = {
-                scaleIn(
-                    initialScale = 0.8f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessLow
-                    )
-                ).togetherWith(
-                    scaleOut(
-                        targetScale = 0.8f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessLow
-                        )
-                    )
+        // Full screen preview overlay (使用 Dialog 方式，对齐光栅页)
+        val currentPreviewModel: TianYinWallpaperModel? = fullScreenPreviewModel
+        currentPreviewModel?.let { model ->
+            Dialog(
+                onDismissRequest = { fullScreenPreviewModel = null },
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false
                 )
-            },
-            contentAlignment = Alignment.Center,
-            label = "FullScreenPreview",
-            modifier = Modifier.fillMaxSize()
-        ) { model ->
-            if (model != null) {
-                val previewBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        //.padding(horizontal = 16.dp, vertical = 32.dp)
-                        .clip(RoundedCornerShape(32.dp))
-                        .background(Color.Black)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            fullScreenPreviewModel = null
-                        }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .let { m ->
-                                if (enableLiquidGlass && previewBackdrop != null) {
-                                    m.layerBackdrop(previewBackdrop)
-                                } else m
-                            }
-                    ) {
-                        WallpaperThumbnail(
-                            model = model,
-                            modifier = Modifier.fillMaxSize(),
-                            useClip = false
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 24.dp)
-                    ) {
-                        val isDark = !isLightTheme
-                        val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
-                        val textColor = if (isDark) Color.White else Color.Black
-
-                        if (enableLiquidGlass && previewBackdrop != null) {
-                            LiquidButton(
-                                onClick = { applySingleWallpaper(model) },
-                                backdrop = previewBackdrop,
-                                surfaceColor = accentColor.copy(alpha = 0.75f),
-                                modifier = Modifier.height(44.dp)
-                            ) {
-                                BasicText(
-                                    "应用此壁纸",
-                                    modifier = Modifier.padding(horizontal = 12.dp),
-                                    style = TextStyle(Color.White, 16.sp, fontWeight = FontWeight.Medium)
-                                )
-                            }
-                        } else {
-                            Surface(
-                                modifier = Modifier
-                                    .height(44.dp)
-                                    .clickable { applySingleWallpaper(model) },
-                                shape = Capsule(),
-                                color = accentColor.copy(alpha = 0.75f)
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(horizontal = 32.dp)
-                                ) {
-                                    Text(
-                                        text = "应用此壁纸",
-                                        color = Color.White,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
+            ) {
+                WallpaperDetailScreen(
+                    model = model,
+                    statusBarTopPaddingDp = statusBarTopPaddingDp,
+                    enableLiquidGlass = enableLiquidGlass,
+                    backdrop = liquidBackdrop,
+                    onDismiss = { fullScreenPreviewModel = null },
+                    onApply = { applySingleWallpaper(model) },
+                    onReplaceAction = { isDynamic ->
+                        val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
+                        if (index >= 0) {
+                            replaceIndex = index
+                            if (isDynamic) {
+                                replaceVideoLaunch.launch(arrayOf("video/*"))
+                            } else {
+                                replaceImageLaunch.launch(arrayOf("image/*"))
                             }
                         }
+                    },
+                    onTimeAction = { newStartTime, newEndTime, newLoop, newIndependentTime ->
+                        val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
+                        if (index >= 0) {
+                            // 创建新对象替换，触发 Compose 重新渲染
+                            wallpapers[index] = model.copy(
+                                startTime = newStartTime,
+                                endTime = newEndTime,
+                                loop = newLoop,
+                                independentTime = newIndependentTime
+                            )
+                        }
+                        saveCache()
                     }
-                }
+                )
             }
         }
 
@@ -1789,3 +1652,617 @@ private data class VideoPlayerHolder(
     val player: MediaPlayer,
     var uri: String?
 )
+
+@Composable
+private fun WallpaperDetailScreen(
+    model: TianYinWallpaperModel,
+    statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
+    enableLiquidGlass: Boolean,
+    backdrop: Backdrop?,
+    onDismiss: () -> Unit,
+    onApply: () -> Unit,
+    onReplaceAction: (isDynamic: Boolean) -> Unit,
+    onTimeAction: (startTime: Int, endTime: Int, loop: Boolean, independentTime: Boolean) -> Unit
+) {
+    val isLightTheme = MaterialTheme.colors.isLight
+    val pageBackground = MaterialTheme.colors.background
+    val onPage = MaterialTheme.colors.onBackground
+    val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
+    val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
+    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+    val contentColor = if (isLightTheme) Color.Black else Color.White
+
+    val detailBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+
+    // 时间设置dialog状态
+    var showTimeDialog by remember { mutableStateOf(false) }
+    var showReplaceDialog by remember { mutableStateOf(false) }
+    var showTimePicker by remember { mutableStateOf<String?>(null) } // null = 不显示, "start" = 开始时间, "end" = 结束时间
+    var startTime by remember { mutableStateOf(model.startTime) }
+    var endTime by remember { mutableStateOf(model.endTime) }
+    var loopEnabled by remember { mutableStateOf(model.loop) }
+    var independentTimeEnabled by remember { mutableStateOf(model.independentTime) }
+    // 开始时间的小时和分钟
+    var startHour by remember { mutableStateOf(if (startTime == -1) 0 else startTime / 60) }
+    var startMinute by remember { mutableStateOf(if (startTime == -1) 0 else startTime % 60) }
+    // 结束时间的小时和分钟
+    var endHour by remember { mutableStateOf(if (endTime == -1) 23 else endTime / 60) }
+    var endMinute by remember { mutableStateOf(if (endTime == -1) 59 else endTime % 60) }
+
+    // 定义需要采样的区域
+    val luminanceRegions = remember {
+        mapOf(
+            "cancel" to Rect(0f, 0f, 0.15f, 0.08f),
+            "apply" to Rect(0.85f, 0f, 1f, 0.08f),
+            "replace" to Rect(0.2f, 0.92f, 0.4f, 1f),
+            "time" to Rect(0.6f, 0.92f, 1f, 1f)
+        )
+    }
+
+    val luminanceSampler = if (enableLiquidGlass && detailBackdrop != null) {
+        rememberMultiRegionLuminanceSampler(
+            enabled = true,
+            sampleLayer = detailBackdrop.graphicsLayer,
+            regions = luminanceRegions,
+            sampleIntervalMs = 200L
+        )
+    } else null
+
+    val cancelLuminanceState = if (luminanceSampler != null) {
+        rememberRegionLuminanceState(luminanceSampler, "cancel")
+    } else null
+
+    val applyLuminanceState = if (luminanceSampler != null) {
+        rememberRegionLuminanceState(luminanceSampler, "apply")
+    } else null
+
+    val replaceLuminanceState = if (luminanceSampler != null) {
+        rememberRegionLuminanceState(luminanceSampler, "replace")
+    } else null
+
+    val timeLuminanceState = if (luminanceSampler != null) {
+        rememberRegionLuminanceState(luminanceSampler, "time")
+    } else null
+
+    // 时间确认函数
+    fun parseTimeText(text: String): Int? {
+        val parts = text.split(":")
+        if (parts.size != 2) return null
+        val hour = parts[0].toIntOrNull() ?: return null
+        val minute = parts[1].toIntOrNull() ?: return null
+        if (hour !in 0..23 || minute !in 0..59) return null
+        return hour * 60 + minute
+    }
+
+    fun parseAndValidateTime(text: String, label: String): Int? {
+        return if (text.isBlank()) {
+            -1
+        } else {
+            parseTimeText(text) ?: -1
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 捕获层
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .let { m ->
+                    if (enableLiquidGlass && detailBackdrop != null) {
+                        m.layerBackdrop(detailBackdrop)
+                    } else m
+                }
+        ) {
+            Box(Modifier.fillMaxSize().background(pageBackground))
+
+            // 全屏预览区域
+            Box(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                WallpaperThumbnail(
+                    model = model,
+                    modifier = Modifier.fillMaxSize(),
+                    useClip = false
+                )
+            }
+        }
+
+        // 顶部按钮
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = statusBarTopPaddingDp + 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (enableLiquidGlass && detailBackdrop != null) {
+                LiquidButton(
+                    onClick = onDismiss,
+                    backdrop = detailBackdrop,
+                    surfaceColor = pillBackground,
+                    luminanceState = cancelLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "取消",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(
+                            color = cancelLuminanceState?.contentColor ?: onPage,
+                            fontSize = 15.sp
+                        )
+                    )
+                }
+                LiquidButton(
+                    onClick = onApply,
+                    backdrop = detailBackdrop,
+                    surfaceColor = Color(0xFF2A83FF).copy(alpha = 0.75f),
+                    tint = Color(0xFF2A83FF),
+                    luminanceState = applyLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "应用",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(Color.White, 15.sp)
+                    )
+                }
+            } else {
+                Text(
+                    text = "取消", color = onPage,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(pillBackground)
+                        .clickable { onDismiss() }
+                        .padding(horizontal = 18.dp, vertical = 8.dp)
+                )
+                Text(
+                    text = "应用", color = Color.White,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0x662A83FF))
+                        .clickable { onApply() }
+                        .padding(horizontal = 18.dp, vertical = 8.dp)
+                )
+            }
+        }
+
+        // 底部操作栏
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (enableLiquidGlass && detailBackdrop != null) {
+                LiquidButton(
+                    onClick = { showReplaceDialog = true },
+                    backdrop = detailBackdrop,
+                    surfaceColor = pillBackground,
+                    luminanceState = replaceLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "更换",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(
+                            color = replaceLuminanceState?.contentColor ?: onPage,
+                            15.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
+                LiquidButton(
+                    onClick = { showTimeDialog = true },
+                    backdrop = detailBackdrop,
+                    surfaceColor = pillBackground,
+                    luminanceState = timeLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "效果",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(
+                            color = timeLuminanceState?.contentColor ?: onPage,
+                            15.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clickable { showReplaceDialog = true },
+                    shape = Capsule(),
+                    color = Color.Black.copy(0.4f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(text = "更换", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+                Surface(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clickable { showTimeDialog = true },
+                    shape = Capsule(),
+                    color = Color.Black.copy(0.4f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(text = "效果", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+
+        // 时间设置Dialog - 使用 AnimatedVisibility 在当前页面内显示
+        AnimatedVisibility(
+            visible = showTimeDialog,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // 返回键关闭
+            BackHandler(enabled = true) {
+                if (independentTimeEnabled) {
+                    startTime = startHour * 60 + startMinute
+                    endTime = endHour * 60 + endMinute
+                } else {
+                    startTime = -1
+                    endTime = -1
+                }
+                onTimeAction(startTime, endTime, loopEnabled, independentTimeEnabled)
+                showTimeDialog = false
+            }
+            
+            // 保存并关闭函数
+            fun saveAndClose() {
+                if (independentTimeEnabled) {
+                    startTime = startHour * 60 + startMinute
+                    endTime = endHour * 60 + endMinute
+                } else {
+                    startTime = -1
+                    endTime = -1
+                }
+                onTimeAction(startTime, endTime, loopEnabled, independentTimeEnabled)
+                showTimeDialog = false
+            }
+            
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { saveAndClose() }
+            ) {
+                val sheetBackdrop = rememberLayerBackdrop()
+                Column(
+                    Modifier
+                        .align(Alignment.Center)
+                        .padding(40.dp)
+                        .wrapContentHeight()
+                        .drawBackdrop(
+                            backdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) },
+                            shape = { RoundedRectangle(48f.dp) },
+                            effects = {
+                                colorControls(
+                                    brightness = if (isLightTheme) 0.2f else 0f,
+                                    saturation = 1.5f
+                                )
+                                blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
+                                lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
+                            },
+                            highlight = { Highlight.Plain },
+                            exportedBackdrop = sheetBackdrop,
+                            onDrawSurface = { drawRect(containerColor) }
+                        )
+                        .pointerInput(Unit) { detectTapGestures { /* consume */ } }
+                ) {
+                    Column(
+                        Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        BasicText("效果", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+                        
+                        Spacer(Modifier.height(12.dp))
+
+                        // 循环播放开关
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("循环播放", style = TextStyle(contentColor, 16.sp))
+                            if (enableLiquidGlass && sheetBackdrop != null) {
+                                LiquidToggle(
+                                    selected = { loopEnabled },
+                                    onSelect = { loopEnabled = it },
+                                    backdrop = sheetBackdrop,
+                                    isLightTheme = isLightTheme
+                                )
+                            } else {
+                                androidx.compose.material.Switch(
+                                    checked = loopEnabled,
+                                    onCheckedChange = { loopEnabled = it }
+                                )
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(12.dp))
+
+                        // 独立时间开关
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("独立时间", style = TextStyle(contentColor, 16.sp))
+                            if (enableLiquidGlass && sheetBackdrop != null) {
+                                LiquidToggle(
+                                    selected = { independentTimeEnabled },
+                                    onSelect = { independentTimeEnabled = it },
+                                    backdrop = sheetBackdrop,
+                                    isLightTheme = isLightTheme
+                                )
+                            } else {
+                                androidx.compose.material.Switch(
+                                    checked = independentTimeEnabled,
+                                    onCheckedChange = { independentTimeEnabled = it }
+                                )
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(12.dp))
+
+                        // 时间选择（仅在独立时间开启时显示）
+                        AnimatedVisibility(
+                            visible = independentTimeEnabled,
+                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                    fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
+                            ) {
+                                // 开始时间选择
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable {
+                                                showTimePicker = if (showTimePicker == "start") null else "start"
+                                            }
+                                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText("开始时间", style = TextStyle(contentColor, 16.sp))
+                                        BasicText(
+                                            "${if (startHour < 10) "0$startHour" else "$startHour"}:${if (startMinute < 10) "0$startMinute" else "$startMinute"}",
+                                            style = TextStyle(contentColor.copy(alpha = 0.8f), 16.sp)
+                                        )
+                                    }
+                                
+                                // 开始时间 WheelPicker - 使用 animateContentSize 避免动画跳跃
+                                if (showTimePicker == "start") {
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(180.dp),
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        WheelPicker(
+                                            count = 24,
+                                            initialIndex = startHour,
+                                            onItemSelected = { startHour = it },
+                                            contentColor = contentColor,
+                                            label = "时",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        WheelPicker(
+                                            count = 60,
+                                            initialIndex = startMinute,
+                                            onItemSelected = { startMinute = it },
+                                            contentColor = contentColor,
+                                            label = "分",
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                                }
+                                
+                                Spacer(Modifier.height(12.dp))
+                                
+                                // 结束时间选择
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(Capsule())
+                                            .background(containerColor.copy(0.2f))
+                                            .clickable {
+                                                showTimePicker = if (showTimePicker == "end") null else "end"
+                                            }
+                                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText("结束时间", style = TextStyle(contentColor, 16.sp))
+                                        BasicText(
+                                            "${if (endHour < 10) "0$endHour" else "$endHour"}:${if (endMinute < 10) "0$endMinute" else "$endMinute"}",
+                                            style = TextStyle(contentColor.copy(alpha = 0.8f), 16.sp)
+                                        )
+                                    }
+                                    
+                                    // 结束时间 WheelPicker - 使用 animateContentSize 避免动画跳跃
+                                    if (showTimePicker == "end") {
+                                        Spacer(Modifier.height(8.dp))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(180.dp),
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            WheelPicker(
+                                                count = 24,
+                                                initialIndex = endHour,
+                                                onItemSelected = { endHour = it },
+                                                contentColor = contentColor,
+                                                label = "时",
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            WheelPicker(
+                                                count = 60,
+                                                initialIndex = endMinute,
+                                                onItemSelected = { endMinute = it },
+                                                contentColor = contentColor,
+                                                label = "分",
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(Modifier.height(12.dp))
+
+                        Row(
+                            Modifier
+                                .clip(Capsule())
+                                .background(containerColor.copy(0.2f))
+                                .clickable { saveAndClose() }
+                                .height(48.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("关闭", style = TextStyle(contentColor, 16.sp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // 更换壁纸Dialog
+        AnimatedVisibility(
+            visible = showReplaceDialog,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // 返回键关闭
+            BackHandler(enabled = true) {
+                showReplaceDialog = false
+            }
+            
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showReplaceDialog = false }
+            ) {
+                val replaceSheetBackdrop = rememberLayerBackdrop()
+                Column(
+                    Modifier
+                        .align(Alignment.Center)
+                        .padding(40.dp)
+                        .wrapContentHeight()
+                        .drawBackdrop(
+                            backdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) },
+                            shape = { RoundedRectangle(48f.dp) },
+                            effects = {
+                                colorControls(
+                                    brightness = if (isLightTheme) 0.2f else 0f,
+                                    saturation = 1.5f
+                                )
+                                blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
+                                lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
+                            },
+                            highlight = { Highlight.Plain },
+                            exportedBackdrop = replaceSheetBackdrop,
+                            onDrawSurface = { drawRect(containerColor) }
+                        )
+                        .pointerInput(Unit) { detectTapGestures { /* consume */ } }
+                ) {
+                    Column(
+                        Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        BasicText("更换壁纸", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+
+                        // 静态壁纸选项
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(Capsule())
+                                .background(accentColor.copy(alpha = 0.75f))
+                                .clickable {
+                                    showReplaceDialog = false
+                                    onReplaceAction(false)
+                                }
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("静态壁纸", style = TextStyle(Color.White, 16.sp))
+                        }
+
+                        // 动态壁纸选项
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(Capsule())
+                                .background(containerColor.copy(0.2f))
+                                .clickable {
+                                    showReplaceDialog = false
+                                    onReplaceAction(true)
+                                }
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("动态壁纸", style = TextStyle(contentColor, 16.sp))
+                        }
+
+                        // 取消按钮
+                        Row(
+                            Modifier
+                                .clip(Capsule())
+                                .background(containerColor.copy(0.2f))
+                                .clickable { showReplaceDialog = false }
+                                .height(48.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("取消", style = TextStyle(contentColor, 16.sp))
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+}
