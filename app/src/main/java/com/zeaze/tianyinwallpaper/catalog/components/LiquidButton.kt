@@ -20,9 +20,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceAtMost
 import androidx.compose.ui.util.lerp
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
+import com.zeaze.tianyinwallpaper.catalog.utils.AdaptiveLuminanceGlassState
 import com.zeaze.tianyinwallpaper.catalog.utils.InteractiveHighlight
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
+import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
 import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
 import com.kyant.shapes.Capsule
@@ -40,6 +42,7 @@ fun LiquidButton(
     isInteractive: Boolean = true,
     tint: Color = Color.Unspecified,
     surfaceColor: Color = Color.Unspecified,
+    luminanceState: AdaptiveLuminanceGlassState? = null,
     content: @Composable RowScope.() -> Unit
 ) {
     val animationScope = rememberCoroutineScope()
@@ -56,7 +59,14 @@ fun LiquidButton(
                 backdrop = backdrop,
                 shape = { Capsule() },
                 effects = {
-                    vibrancy()
+                    // 联动 luminance 状态的 brightness、contrast、saturation
+                    luminanceState?.let { state ->
+                        colorControls(
+                            brightness = state.brightness,
+                            contrast = state.contrast,
+                            saturation = state.saturation
+                        )
+                    } ?: vibrancy()
                     blur(2f.dp.toPx())
                     lens(12f.dp.toPx(), 24f.dp.toPx())
                 },

@@ -92,6 +92,7 @@ import com.kyant.shapes.RoundedRectangle
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.ui.main.MainTopBar
+import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
@@ -225,6 +226,7 @@ class MainActivity : BaseActivity() {
                     drawContent()
                 }
             } else null
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()

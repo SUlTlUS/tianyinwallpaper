@@ -36,6 +36,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -56,6 +57,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed as lazyItemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -83,7 +86,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Size as GeometrySize
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -107,6 +110,9 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
+import androidx.compose.ui.geometry.Rect
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
@@ -1348,13 +1354,10 @@ private fun RasterDetailScreen(
     onImageAction: () -> Unit,
     onVideoAction: () -> Unit
 ) {
-    val isDark = !MaterialTheme.colors.isLight
     val isLightTheme = MaterialTheme.colors.isLight
     val pageBackground = MaterialTheme.colors.background
     val onPage = MaterialTheme.colors.onBackground
-    val frameBackground = if (isDark) Color(0xFF151515) else Color(0xFFF2F2F2)
-    val frameBorder = if (isDark) Color(0x55FFFFFF) else Color(0x33000000)
-    val pillBackground = if (isDark) Color(0x22222222) else Color(0x22FFFFFF)
+    val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
@@ -1372,6 +1375,43 @@ private fun RasterDetailScreen(
     val showStaticEditor = staticEditorGroupId != null
     val editorGroup = staticEditorGroupId?.let { id -> groups.firstOrNull { it.id == id } }
 
+    // 定义需要采样的区域
+    val luminanceRegions = remember {
+        mapOf(
+            "cancel" to Rect(0f, 0f, 0.15f, 0.08f),      // 左上角
+            "apply" to Rect(0.85f, 0f, 1f, 0.08f),       // 右上角
+            "imageAction" to Rect(0.2f, 0.92f, 0.4f, 1f), // 底部左侧
+            "videoAction" to Rect(0.6f, 0.92f, 0.8f, 1f)  // 底部右侧
+        )
+    }
+
+    // 使用单个采样器，一次性计算所有区域 luminance
+    val luminanceSampler = if (enableLiquidGlass && detailBackdrop != null) {
+        rememberMultiRegionLuminanceSampler(
+            enabled = true,
+            sampleLayer = detailBackdrop.graphicsLayer,
+            regions = luminanceRegions,
+            sampleIntervalMs = 200L
+        )
+    } else null
+
+    // 每个按钮直接读取预计算结果（无额外协程）
+    val cancelLuminanceState = if (luminanceSampler != null) {
+        rememberRegionLuminanceState(luminanceSampler, "cancel")
+    } else null
+
+    val applyLuminanceState = if (luminanceSampler != null) {
+        rememberRegionLuminanceState(luminanceSampler, "apply")
+    } else null
+
+    val imageActionLuminanceState = if (luminanceSampler != null) {
+        rememberRegionLuminanceState(luminanceSampler, "imageAction")
+    } else null
+
+    val videoActionLuminanceState = if (luminanceSampler != null) {
+        rememberRegionLuminanceState(luminanceSampler, "videoAction")
+    } else null
+
     Box(modifier = Modifier.fillMaxSize()) {
         // 捕获层
         Box(
@@ -1385,37 +1425,21 @@ private fun RasterDetailScreen(
         ) {
             Box(Modifier.fillMaxSize().background(pageBackground))
 
-            BoxWithConstraints(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .fillMaxWidth(0.72f)
+            // 全屏预览区域
+            Box(
+                modifier = Modifier.fillMaxSize()
             ) {
-                val safeRatio = if (screenAspectRatio > 0f) screenAspectRatio else 9f / 16f
-                val frameHeight = maxWidth / safeRatio
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(frameHeight)
-                        .clip(RoundedCornerShape(30.dp))
-                        .border(1.dp, frameBorder, RoundedCornerShape(30.dp))
-                        .background(frameBackground)
-                ) {
-                    if (group.type == RasterGroupModel.TYPE_STATIC) {
-                        RasterPreviewView(
-                            group = group,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(30.dp))
-                        )
-                    } else {
-                        GyroDynamicRasterPreview(
-                            group = group,
-                            sensorWidth = group.sensorWidth,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(30.dp))
-                        )
-                    }
+                if (group.type == RasterGroupModel.TYPE_STATIC) {
+                    RasterPreviewView(
+                        group = group,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    GyroDynamicRasterPreview(
+                        group = group,
+                        sensorWidth = group.sensorWidth,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
         }
@@ -1429,11 +1453,37 @@ private fun RasterDetailScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (enableLiquidGlass && detailBackdrop != null) {
-                LiquidButton(onClick = onDismiss, backdrop = detailBackdrop) {
-                    Text(text = "取消", color = onPage)
+                // 取消按钮 - 使用独立的 luminance 采样
+                LiquidButton(
+                    onClick = onDismiss,
+                    backdrop = detailBackdrop,
+                    surfaceColor = pillBackground,
+                    luminanceState = cancelLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "取消",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(
+                            color = cancelLuminanceState?.contentColor ?: onPage,
+                            fontSize = 15.sp
+                        )
+                    )
                 }
-                LiquidButton(onClick = onApply, backdrop = detailBackdrop, tint = Color(0xFF2A83FF)) {
-                    Text(text = "应用", color = Color.White)
+                // 应用按钮 - 蓝色按钮也联动 luminance
+                LiquidButton(
+                    onClick = onApply,
+                    backdrop = detailBackdrop,
+                    surfaceColor = Color(0xFF2A83FF).copy(alpha = 0.75f),
+                    tint = Color(0xFF2A83FF),
+                    luminanceState = applyLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "应用",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(Color.White, 15.sp)
+                    )
                 }
             } else {
                 Text(
@@ -1456,7 +1506,6 @@ private fun RasterDetailScreen(
         }
 
         // 底部切换栏
-        // 底部切换栏
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1469,14 +1518,16 @@ private fun RasterDetailScreen(
                     onClick = onImageAction,
                     backdrop = detailBackdrop,
                     surfaceColor = if (isStatic) Color(0xFF2A83FF).copy(alpha = 0.75f)
-                    else Color.Black.copy(0.3f),
+                    else pillBackground,
+                    tint = if (isStatic) Color(0xFF2A83FF) else Color.Unspecified,
+                    luminanceState = imageActionLuminanceState,
                     modifier = Modifier.height(44.dp)
                 ) {
                     BasicText(
-                        "图集光栅",
+                        "图集",
                         modifier = Modifier.padding(horizontal = 14.dp),
                         style = TextStyle(
-                            if (isStatic) Color.White else onPage,
+                            if (isStatic) Color.White else imageActionLuminanceState?.contentColor ?: onPage,
                             15.sp
                         )
                     )
@@ -1485,14 +1536,16 @@ private fun RasterDetailScreen(
                     onClick = onVideoAction,
                     backdrop = detailBackdrop,
                     surfaceColor = if (!isStatic) Color(0xFF2A83FF).copy(alpha = 0.75f)
-                    else Color.Black.copy(0.3f),
+                    else pillBackground,
+                    tint = if (!isStatic) Color(0xFF2A83FF) else Color.Unspecified,
+                    luminanceState = videoActionLuminanceState,
                     modifier = Modifier.height(44.dp)
                 ) {
                     BasicText(
-                        "视频光栅",
+                        "视频",
                         modifier = Modifier.padding(horizontal = 14.dp),
                         style = TextStyle(
-                            if (!isStatic) Color.White else onPage,
+                            if (!isStatic) Color.White else videoActionLuminanceState?.contentColor ?: onPage,
                             15.sp
                         )
                     )
@@ -1500,7 +1553,7 @@ private fun RasterDetailScreen(
             } else {
                 Text(
                     text = "图集光栅",
-                    color = if (isStatic) onPage else onPage.copy(alpha = 0.7f),
+                    color = onPage,
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (isStatic) Color(0x332A83FF) else Color.Transparent)
@@ -1509,7 +1562,7 @@ private fun RasterDetailScreen(
                 )
                 Text(
                     text = "视频光栅",
-                    color = if (!isStatic) onPage else onPage.copy(alpha = 0.7f),
+                    color = onPage,
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (!isStatic) Color(0x332A83FF) else Color.Transparent)
@@ -1959,6 +2012,7 @@ private fun RasterDetailScreen(
             }
         }
     }
+
 }
 
 @Composable
@@ -2099,6 +2153,10 @@ private fun rememberTiltState(sensorWidth: Float = 4.5f, maxAngle: Float = 30f):
 
     return tilt to direction
 }
+
+
+
+
 
 
 

@@ -590,14 +590,29 @@ fun MainRouteScreen(
         }
     }
 
+    // 拖动保存状态
+    var pendingReorderSave by remember { mutableStateOf(false) }
+
     val reorderableState = rememberReorderableLazyGridState(
         lazyGridState = gridState,
         onMove = { from, to ->
             updateSelectedIndices(from.index, to.index)
             val item = wallpapers.removeAt(from.index)
             wallpapers.add(to.index, item)
+            pendingReorderSave = true
         }
     )
+
+    // 拖动结束后保存
+    LaunchedEffect(pendingReorderSave) {
+        if (pendingReorderSave) {
+            kotlinx.coroutines.delay(300) // 等待拖动稳定
+            if (pendingReorderSave) {
+                saveCache()
+                pendingReorderSave = false
+            }
+        }
+    }
 
     val contentLayerBackground = MaterialTheme.colors.background
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
@@ -1578,7 +1593,7 @@ fun MainTopBar(
 
         previewButtonSlot(showPreviewButton, onPreview, textColor, adaptiveSurfaceColor, isDark)
         roundButtonSlot(showApplyButton, onApply, "✓", textColor, adaptiveSurfaceColor, isDark)
-        roundButtonSlot(showMoreButton, onMoreClick, "…", textColor, adaptiveSurfaceColor, isDark)
+        roundButtonSlot(showMoreButton, onMoreClick, "⋯", textColor, adaptiveSurfaceColor, isDark)
     }
 }
 
