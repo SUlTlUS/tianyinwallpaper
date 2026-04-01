@@ -458,10 +458,16 @@ fun MainRouteScreen(
         selectionMode = true
         selectedPositions.clear()
     }
-    
+
     fun exitSelectionMode() {
         selectionMode = false
         selectedPositions.clear()
+    }
+
+    // 发送选择模式状态
+    fun publishSelectionState() {
+        val isAllSelected = selectedPositions.size == wallpapers.size && wallpapers.isNotEmpty()
+        RxBus.postWithCode(RxConstants.RX_SELECTION_MODE_CHANGED, SelectionBarState(selectionMode, isAllSelected))
     }
 
     fun removeWallpaperAt(index: Int) {
@@ -484,6 +490,11 @@ fun MainRouteScreen(
 
     LaunchedEffect(selectionMode, fullScreenPreviewModel, showLivePreview) {
         onBottomBarVisibleChange(!selectionMode && fullScreenPreviewModel == null && !showLivePreview)
+    }
+
+    // 发布选择模式状态
+    LaunchedEffect(selectionMode, selectedPositions.size, wallpapers.size) {
+        publishSelectionState()
     }
     
     DisposableEffect(Unit) {
@@ -526,6 +537,33 @@ fun MainRouteScreen(
                 context.showToast("壁纸列表已覆盖")
             }
 
+        // 选择模式操作监听
+        val selectionCancelDisposable = RxBus.getDefault()
+            .toObservableWithCode(RxConstants.RX_SELECTION_CANCEL, Unit::class.java)
+            .subscribe { exitSelectionMode() }
+
+        val selectionDeleteDisposable = RxBus.getDefault()
+            .toObservableWithCode(RxConstants.RX_SELECTION_DELETE, Unit::class.java)
+            .subscribe {
+                if (selectedPositions.isEmpty()) {
+                    context.showToast(context.getString(R.string.no_selected_tip))
+                } else {
+                    showDeleteSelectedDialog = true
+                }
+            }
+
+        val selectionToggleAllDisposable = RxBus.getDefault()
+            .toObservableWithCode(RxConstants.RX_SELECTION_TOGGLE_ALL, Unit::class.java)
+            .subscribe {
+                val isAllSelected = selectedPositions.size == wallpapers.size && wallpapers.isNotEmpty()
+                if (isAllSelected) {
+                    selectedPositions.clear()
+                } else {
+                    selectedPositions.clear()
+                    wallpapers.indices.forEach { selectedPositions.add(it) }
+                }
+            }
+
         onDispose {
             addDisposable.dispose()
             triggerAddDisposable.dispose()
@@ -534,7 +572,12 @@ fun MainRouteScreen(
             triggerSaveDisposable.dispose()
             triggerSelectDisposable.dispose()
             overwriteListDisposable.dispose()
+            selectionCancelDisposable.dispose()
+            selectionDeleteDisposable.dispose()
+            selectionToggleAllDisposable.dispose()
             onBottomBarVisibleChange(true)
+            // 退出时清除选择模式状态
+            RxBus.postWithCode(RxConstants.RX_SELECTION_MODE_CHANGED, SelectionBarState(false, false))
         }
     }
 
@@ -737,33 +780,6 @@ fun MainRouteScreen(
                     }
                 }
             }
-        }
-        // 前景层：包含 TopBar 和删除按钮，它们采样底层捕获的内容
-        if (selectionMode) {
-            val isAllSelected = selectedPositions.size == wallpapers.size && wallpapers.isNotEmpty()
-            SelectionTopBar(
-                statusBarTopPaddingDp = statusBarTopPaddingDp,
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
-                isAllSelected = isAllSelected,
-                isLightTheme = isLightTheme,
-                onCancelSelect = { exitSelectionMode() },
-                onDelete = {
-                    if (selectedPositions.isEmpty()) {
-                        context.showToast(context.getString(R.string.no_selected_tip))
-                    } else {
-                        showDeleteSelectedDialog = true
-                    }
-                },
-                onToggleSelectAll = {
-                    if (isAllSelected) {
-                        selectedPositions.clear()
-                    } else {
-                        selectedPositions.clear()
-                        wallpapers.indices.forEach { selectedPositions.add(it) }
-                    }
-                }
-            )
         }
 
         if (!selectionMode && wallpapers.isEmpty()) {
@@ -1478,233 +1494,6 @@ fun MainRouteScreen(
                 onPrev = { sendServiceIntent(TianYinWallpaperService.ACTION_PREV_WALLPAPER) },
                 onNext = { sendServiceIntent(TianYinWallpaperService.ACTION_NEXT_WALLPAPER) }
             )
-        }
-    }
-}
-
-@Composable
-fun MainTopBar(
-    statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
-    enableLiquidGlass: Boolean,
-    backdrop: LayerBackdrop?,
-    isLightTheme: Boolean,
-    onAdd: () -> Unit,
-    onApply: () -> Unit,
-    onMoreClick: () -> Unit,
-    onPreview: () -> Unit,
-    showAddButton: Boolean = true,
-    showPreviewButton: Boolean = true,
-    showApplyButton: Boolean = true,
-    showMoreButton: Boolean = true,
-    keepSlotWhenHidden: Boolean = true
-) {
-    @Composable
-    fun roundButtonSlot(
-        visible: Boolean,
-        onClick: () -> Unit,
-        text: String,
-        textColor: Color,
-        adaptiveSurfaceColor: Color,
-        isDark: Boolean
-    ) {
-        if (visible) {
-            if (enableLiquidGlass && backdrop != null) {
-                LiquidButton(
-                    onClick = onClick,
-                    backdrop = backdrop,
-                    modifier = Modifier.size(48.dp),
-                    surfaceColor = adaptiveSurfaceColor
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        BasicText(text = text, style = TextStyle(textColor, 20.sp))
-                    }
-                }
-            } else {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = CircleShape,
-                    color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize().clickable(onClick = onClick),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = text, color = textColor, fontSize = 20.sp)
-                    }
-                }
-            }
-        } else if (keepSlotWhenHidden) {
-            Spacer(modifier = Modifier.size(48.dp))
-        }
-    }
-
-    @Composable
-    fun previewButtonSlot(
-        visible: Boolean,
-        onClick: () -> Unit,
-        textColor: Color,
-        adaptiveSurfaceColor: Color,
-        isDark: Boolean
-    ) {
-        if (visible) {
-            if (enableLiquidGlass && backdrop != null) {
-                LiquidButton(
-                    onClick = onClick,
-                    backdrop = backdrop,
-                    modifier = Modifier.height(48.dp),
-                    surfaceColor = adaptiveSurfaceColor
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp).fillMaxHeight()) {
-                        BasicText(text = "当前播放", style = TextStyle(textColor, 15.sp))
-                    }
-                }
-            } else {
-                Surface(
-                    modifier = Modifier.height(48.dp).clickable(onClick = onClick),
-                    shape = Capsule(),
-                    color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp).fillMaxHeight()) {
-                        Text(text = "当前播放", color = textColor, fontSize = 15.sp)
-                    }
-                }
-            }
-        } else if (keepSlotWhenHidden) {
-            Spacer(modifier = Modifier.width(64.dp).height(48.dp))
-        }
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        val isDark = !isLightTheme
-        val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
-        val textColor = if (isDark) Color.White else Color.Black
-
-        roundButtonSlot(showAddButton, onAdd, "+", textColor, adaptiveSurfaceColor, isDark)
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        previewButtonSlot(showPreviewButton, onPreview, textColor, adaptiveSurfaceColor, isDark)
-        roundButtonSlot(showApplyButton, onApply, "✓", textColor, adaptiveSurfaceColor, isDark)
-        roundButtonSlot(showMoreButton, onMoreClick, "⋯", textColor, adaptiveSurfaceColor, isDark)
-    }
-}
-
-@Composable
-fun SelectionTopBar(
-    statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
-    enableLiquidGlass: Boolean,
-    backdrop: LayerBackdrop?,
-    isAllSelected: Boolean,
-    isLightTheme: Boolean,
-    onCancelSelect: () -> Unit,
-    onDelete: () -> Unit,
-    onToggleSelectAll: () -> Unit
-) {
-    val context = LocalContext.current
-    val isDark = !isLightTheme
-    val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
-    val textColor = if (isDark) Color.White else Color.Black
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = statusBarTopPaddingDp + 10.dp, start = 12.dp, end = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Delete Button (Red)
-        if (enableLiquidGlass && backdrop != null) {
-            LiquidButton(
-                onClick = onDelete,
-                backdrop = backdrop,
-                surfaceColor = Color(0xFFFF4D4F).copy(alpha = 0.8f),
-                modifier = Modifier.height(44.dp)
-            ) {
-                BasicText(
-                    context.getString(R.string.common_delete),
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Medium)
-                )
-            }
-        } else {
-            Surface(
-                modifier = Modifier
-                    .height(44.dp)
-                    .clickable { onDelete() },
-                shape = Capsule(),
-                color = Color(0xFFFF4D4F)
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                    Text(text = context.getString(R.string.common_delete), color = Color.White, fontSize = 15.sp)
-                }
-            }
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Select All Toggle Button
-            val selectAllLabel = if (isAllSelected) "取消全选" else "全选"
-            if (enableLiquidGlass && backdrop != null) {
-                LiquidButton(
-                    onClick = onToggleSelectAll,
-                    backdrop = backdrop,
-                    surfaceColor = adaptiveSurfaceColor,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        selectAllLabel,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        style = TextStyle(textColor, 15.sp)
-                    )
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clickable { onToggleSelectAll() },
-                    shape = Capsule(),
-                    color = adaptiveSurfaceColor
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                        Text(text = selectAllLabel, color = textColor, fontSize = 15.sp)
-                    }
-                }
-            }
-
-            // Cancel Button
-            if (enableLiquidGlass && backdrop != null) {
-                LiquidButton(
-                    onClick = onCancelSelect,
-                    backdrop = backdrop,
-                    surfaceColor = adaptiveSurfaceColor,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        context.getString(R.string.common_cancel),
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        style = TextStyle(textColor, 15.sp)
-                    )
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clickable { onCancelSelect() },
-                    shape = Capsule(),
-                    color = adaptiveSurfaceColor
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                        Text(text = context.getString(R.string.common_cancel), color = textColor, fontSize = 15.sp)
-                    }
-                }
-            }
         }
     }
 }

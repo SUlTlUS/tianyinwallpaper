@@ -1,264 +1,264 @@
 package com.zeaze.tianyinwallpaper.ui.main
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material.Surface
+import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.shapes.Capsule
-import com.zeaze.tianyinwallpaper.backdrop.Backdrop
+import com.zeaze.tianyinwallpaper.R
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 
 /**
- * 主页顶部栏
- * 包含添加、预览、应用、更多按钮
+ * 选择模式状态数据类，用于 RxBus 通信
  */
+data class SelectionBarState(val selectionMode: Boolean, val isAllSelected: Boolean)
+
 @Composable
 fun MainTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
-    backdrop: Backdrop?,
+    backdrop: LayerBackdrop?,
     isLightTheme: Boolean,
     onAdd: () -> Unit,
     onApply: () -> Unit,
     onMoreClick: () -> Unit,
     onPreview: () -> Unit,
-    showAddButton: Boolean,
-    showPreviewButton: Boolean,
-    showApplyButton: Boolean,
-    showMoreButton: Boolean,
-    keepSlotWhenHidden: Boolean = false
+    showAddButton: Boolean = true,
+    showPreviewButton: Boolean = true,
+    showApplyButton: Boolean = true,
+    showMoreButton: Boolean = true,
+    keepSlotWhenHidden: Boolean = true
 ) {
-    val onPage = if (isLightTheme) Color.Black else Color.White
-    val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
+    @Composable
+    fun roundButtonSlot(
+        visible: Boolean,
+        onClick: () -> Unit,
+        text: String,
+        textColor: Color,
+        adaptiveSurfaceColor: Color,
+        isDark: Boolean
+    ) {
+        if (visible) {
+            if (enableLiquidGlass && backdrop != null) {
+                LiquidButton(
+                    onClick = onClick,
+                    backdrop = backdrop,
+                    modifier = Modifier.size(48.dp),
+                    surfaceColor = adaptiveSurfaceColor
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        BasicText(text = text, style = TextStyle(textColor, 20.sp))
+                    }
+                }
+            } else {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = CircleShape,
+                    color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                    border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().clickable(onClick = onClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = text, color = textColor, fontSize = 20.sp)
+                    }
+                }
+            }
+        } else if (keepSlotWhenHidden) {
+            Spacer(modifier = Modifier.size(48.dp))
+        }
+    }
+
+    @Composable
+    fun previewButtonSlot(
+        visible: Boolean,
+        onClick: () -> Unit,
+        textColor: Color,
+        adaptiveSurfaceColor: Color,
+        isDark: Boolean
+    ) {
+        if (visible) {
+            if (enableLiquidGlass && backdrop != null) {
+                LiquidButton(
+                    onClick = onClick,
+                    backdrop = backdrop,
+                    modifier = Modifier.height(48.dp),
+                    surfaceColor = adaptiveSurfaceColor
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp).fillMaxHeight()) {
+                        BasicText(text = "当前播放", style = TextStyle(textColor, 15.sp))
+                    }
+                }
+            } else {
+                Surface(
+                    modifier = Modifier.height(48.dp).clickable(onClick = onClick),
+                    shape = Capsule(),
+                    color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                    border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp).fillMaxHeight()) {
+                        Text(text = "当前播放", color = textColor, fontSize = 15.sp)
+                    }
+                }
+            }
+        } else if (keepSlotWhenHidden) {
+            Spacer(modifier = Modifier.width(64.dp).height(48.dp))
+        }
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = statusBarTopPaddingDp + 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(top = statusBarTopPaddingDp + 10.dp, start = 8.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // 左侧：添加按钮
-        if (showAddButton && enableLiquidGlass && backdrop != null) {
-            LiquidButton(
-                onClick = onAdd,
-                backdrop = backdrop,
-                surfaceColor = pillBackground,
-                modifier = Modifier.width(80.dp).height(44.dp)
-            ) {
-                BasicText(
-                    "+",
-                    style = TextStyle(
-                        color = onPage,
-                        fontSize = 20.sp
-                    )
-                )
-            }
-        } else if (showAddButton) {
-            Box(
-                modifier = Modifier
-                    .background(pillBackground, Capsule())
-                    .padding(horizontal = 18.dp, vertical = 8.dp)
-            ) {
-                BasicText("+", style = TextStyle(onPage, 20.sp, fontWeight = FontWeight.Bold))
-            }
-        } else if (keepSlotWhenHidden) {
-            Spacer(Modifier.width(80.dp))
-        }
+        val isDark = !isLightTheme
+        val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
+        val textColor = if (isDark) Color.White else Color.Black
 
-        // 右侧按钮组
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 预览按钮
-            if (showPreviewButton && enableLiquidGlass && backdrop != null) {
-                LiquidButton(
-                    onClick = onPreview,
-                    backdrop = backdrop,
-                    surfaceColor = pillBackground,
-                    modifier = Modifier.width(80.dp).height(44.dp)
-                ) {
-                    BasicText(
-                        "预览",
-                        style = TextStyle(
-                            color = onPage,
-                            fontSize = 15.sp
-                        )
-                    )
-                }
-            } else if (showPreviewButton) {
-                Box(
-                    modifier = Modifier
-                        .background(pillBackground, Capsule())
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                ) {
-                    BasicText("预览", style = TextStyle(onPage, 14.sp))
-                }
-            }
+        roundButtonSlot(showAddButton, onAdd, "+", textColor, adaptiveSurfaceColor, isDark)
 
-            // 应用按钮
-            if (showApplyButton && enableLiquidGlass && backdrop != null) {
-                LiquidButton(
-                    onClick = onApply,
-                    backdrop = backdrop,
-                    surfaceColor = Color(0xFF2A83FF).copy(alpha = 0.75f),
-                    tint = Color(0xFF2A83FF),
-                    modifier = Modifier.width(80.dp).height(44.dp)
-                ) {
-                    BasicText(
-                        "应用",
-                        style = TextStyle(Color.White, 15.sp)
-                    )
-                }
-            } else if (showApplyButton) {
-                Box(
-                    modifier = Modifier
-                        .background(Color(0x662A83FF), Capsule())
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                ) {
-                    BasicText("应用", style = TextStyle(Color.White, 14.sp))
-                }
-            }
+        Spacer(modifier = Modifier.weight(1f))
 
-            // 更多按钮
-            if (showMoreButton && enableLiquidGlass && backdrop != null) {
-                LiquidButton(
-                    onClick = onMoreClick,
-                    backdrop = backdrop,
-                    surfaceColor = pillBackground,
-                    modifier = Modifier.width(60.dp).height(44.dp)
-                ) {
-                    BasicText(
-                        "⋯",
-                        style = TextStyle(
-                            color = onPage,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
-                }
-            } else if (showMoreButton) {
-                Box(
-                    modifier = Modifier
-                        .background(pillBackground, Capsule())
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    BasicText("⋯", style = TextStyle(onPage, 18.sp, fontWeight = FontWeight.Bold))
-                }
-            }
-        }
+        previewButtonSlot(showPreviewButton, onPreview, textColor, adaptiveSurfaceColor, isDark)
+        roundButtonSlot(showApplyButton, onApply, "✓", textColor, adaptiveSurfaceColor, isDark)
+        roundButtonSlot(showMoreButton, onMoreClick, "⋯", textColor, adaptiveSurfaceColor, isDark)
     }
 }
 
-/**
- * 通用文字按钮组件
- */
-@Composable
-private fun TextLiquidButton(
-    text: String,
-    onClick: () -> Unit,
-    backdrop: Backdrop?,
-    enableLiquidGlass: Boolean,
-    isLightTheme: Boolean,
-    surfaceColor: Color? = null,
-    textColor: Color? = null,
-    modifier: Modifier = Modifier
-) {
-    val onPage = if (isLightTheme) Color.Black else Color.White
-    val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
-    val finalSurfaceColor = surfaceColor ?: pillBackground
-    val finalTextColor = textColor ?: onPage
-
-    if (enableLiquidGlass && backdrop != null) {
-        LiquidButton(
-            onClick = onClick,
-            backdrop = backdrop,
-            surfaceColor = finalSurfaceColor,
-            modifier = modifier.height(44.dp)
-        ) {
-            BasicText(
-                text,
-                modifier = Modifier.padding(horizontal = 14.dp),
-                style = TextStyle(
-                    color = finalTextColor,
-                    fontSize = 15.sp
-                )
-            )
-        }
-    } else {
-        Box(
-            modifier = Modifier
-                .background(finalSurfaceColor, Capsule())
-                .padding(horizontal = 18.dp, vertical = 8.dp)
-        ) {
-            BasicText(text, style = TextStyle(finalTextColor, 14.sp))
-        }
-    }
-}
-
-/**
- * 选择模式顶部栏
- */
 @Composable
 fun SelectionTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
-    backdrop: Backdrop?,
+    backdrop: LayerBackdrop?,
     isAllSelected: Boolean,
     isLightTheme: Boolean,
     onCancelSelect: () -> Unit,
     onDelete: () -> Unit,
     onToggleSelectAll: () -> Unit
 ) {
+    val context = LocalContext.current
+    val isDark = !isLightTheme
+    val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
+    val textColor = if (isDark) Color.White else Color.Black
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = statusBarTopPaddingDp + 12.dp),
+            .padding(top = statusBarTopPaddingDp + 10.dp, start = 12.dp, end = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 取消按钮
-        TextLiquidButton(
-            text = "取消",
-            onClick = onCancelSelect,
-            backdrop = backdrop,
-            enableLiquidGlass = enableLiquidGlass,
-            isLightTheme = isLightTheme
-        )
+        // Delete Button (Red)
+        if (enableLiquidGlass && backdrop != null) {
+            LiquidButton(
+                onClick = onDelete,
+                backdrop = backdrop,
+                surfaceColor = Color(0xFFFF4D4F).copy(alpha = 0.8f),
+                modifier = Modifier.height(48.dp)
+            ) {
+                BasicText(
+                    context.getString(R.string.common_delete),
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Medium)
+                )
+            }
+        } else {
+            Surface(
+                modifier = Modifier
+                    .height(48.dp)
+                    .clickable { onDelete() },
+                shape = Capsule(),
+                color = Color(0xFFFF4D4F)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Text(text = context.getString(R.string.common_delete), color = Color.White, fontSize = 15.sp)
+                }
+            }
+        }
 
-        // 全选/取消全选按钮
-        TextLiquidButton(
-            text = if (isAllSelected) "取消全选" else "全选",
-            onClick = onToggleSelectAll,
-            backdrop = backdrop,
-            enableLiquidGlass = enableLiquidGlass,
-            isLightTheme = isLightTheme
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Select All Toggle Button
+            val selectAllLabel = if (isAllSelected) "取消全选" else "全选"
+            if (enableLiquidGlass && backdrop != null) {
+                LiquidButton(
+                    onClick = onToggleSelectAll,
+                    backdrop = backdrop,
+                    surfaceColor = adaptiveSurfaceColor,
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    BasicText(
+                        selectAllLabel,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = TextStyle(textColor, 15.sp)
+                    )
+                }
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .height(48.dp)
+                        .clickable { onToggleSelectAll() },
+                    shape = Capsule(),
+                    color = adaptiveSurfaceColor
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Text(text = selectAllLabel, color = textColor, fontSize = 15.sp)
+                    }
+                }
+            }
 
-        // 删除按钮
-        TextLiquidButton(
-            text = "删除",
-            onClick = onDelete,
-            backdrop = backdrop,
-            enableLiquidGlass = enableLiquidGlass,
-            isLightTheme = isLightTheme,
-            surfaceColor = Color(0xFFFF4D4F).copy(alpha = 0.75f),
-            textColor = Color.White
-        )
+            // Cancel Button
+            if (enableLiquidGlass && backdrop != null) {
+                LiquidButton(
+                    onClick = onCancelSelect,
+                    backdrop = backdrop,
+                    surfaceColor = adaptiveSurfaceColor,
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    BasicText(
+                        context.getString(R.string.common_cancel),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = TextStyle(textColor, 15.sp)
+                    )
+                }
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .height(48.dp)
+                        .clickable { onCancelSelect() },
+                    shape = Capsule(),
+                    color = adaptiveSurfaceColor
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                        Text(text = context.getString(R.string.common_cancel), color = textColor, fontSize = 15.sp)
+                    }
+                }
+            }
+        }
     }
 }

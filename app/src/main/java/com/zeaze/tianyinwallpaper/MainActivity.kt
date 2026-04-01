@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -92,6 +93,7 @@ import com.kyant.shapes.RoundedRectangle
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.ui.main.MainTopBar
+import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
 import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.text.TextStyle
@@ -323,8 +325,31 @@ class MainActivity : BaseActivity() {
                     else currentRoute
                 val isWallpaperPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_MAIN
                 val isRasterPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_RASTER
-                val shouldShowTopBar = showBottomBar && currentRoute == ROUTE_MAIN
+                val shouldShowTopBar = currentRoute == ROUTE_MAIN
                 var showMoreMenu by remember { mutableStateOf(false) }
+
+                // 选择模式状态
+                var wallpaperSelectionState by remember { mutableStateOf(SelectionBarState(false, false)) }
+                var rasterSelectionState by remember { mutableStateOf(SelectionBarState(false, false)) }
+
+                // 监听选择模式状态变化
+                DisposableEffect(Unit) {
+                    val wallpaperSelectionDisposable = RxBus.getDefault()
+                        .toObservableWithCode(RxConstants.RX_SELECTION_MODE_CHANGED, SelectionBarState::class.java)
+                        .subscribe { state -> wallpaperSelectionState = state }
+
+                    val rasterSelectionDisposable = RxBus.getDefault()
+                        .toObservableWithCode(RxConstants.RX_RASTER_SELECTION_MODE_CHANGED, SelectionBarState::class.java)
+                        .subscribe { state -> rasterSelectionState = state }
+
+                    onDispose {
+                        wallpaperSelectionDisposable.dispose()
+                        rasterSelectionDisposable.dispose()
+                    }
+                }
+
+                val isInSelectionMode = (isWallpaperPage && wallpaperSelectionState.selectionMode) ||
+                                        (isRasterPage && rasterSelectionState.selectionMode)
 
                 if (shouldShowTopBar) {
                     val density = LocalDensity.current
@@ -334,39 +359,73 @@ class MainActivity : BaseActivity() {
                     }
                     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
-                    MainTopBar(
-                        statusBarTopPaddingDp = statusBarTopPaddingDp,
-                        enableLiquidGlass = enableLiquidGlass,
-                        backdrop = liquidBackdrop,
-                        isLightTheme = !useDarkTheme,
-                        onAdd = {
-                            if (isRasterPage) {
-                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_RASTER, Unit)
-                            } else {
-                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit)
+                    if (isInSelectionMode) {
+                        // 选择模式顶部栏
+                        val selectionState = if (isWallpaperPage) wallpaperSelectionState else rasterSelectionState
+                        SelectionTopBar(
+                            statusBarTopPaddingDp = statusBarTopPaddingDp,
+                            enableLiquidGlass = enableLiquidGlass,
+                            backdrop = liquidBackdrop,
+                            isAllSelected = selectionState.isAllSelected,
+                            isLightTheme = !useDarkTheme,
+                            onCancelSelect = {
+                                if (isWallpaperPage) {
+                                    RxBus.postWithCode(RxConstants.RX_SELECTION_CANCEL, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_RASTER_SELECTION_CANCEL, Unit)
+                                }
+                            },
+                            onDelete = {
+                                if (isWallpaperPage) {
+                                    RxBus.postWithCode(RxConstants.RX_SELECTION_DELETE, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_RASTER_SELECTION_DELETE, Unit)
+                                }
+                            },
+                            onToggleSelectAll = {
+                                if (isWallpaperPage) {
+                                    RxBus.postWithCode(RxConstants.RX_SELECTION_TOGGLE_ALL, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_RASTER_SELECTION_TOGGLE_ALL, Unit)
+                                }
                             }
-                        },
-                        onApply = {
-                            if (isRasterPage) {
-                                RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_RASTER, Unit)
-                            } else {
-                                RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_WALLPAPER, Unit)
-                            }
-                        },
-                        onMoreClick = { showMoreMenu = true },
-                        onPreview = {
-                            if (isRasterPage) {
-                                RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_RASTER, Unit)
-                            } else {
-                                RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit)
-                            }
-                        },
-                        showAddButton = isWallpaperPage || isRasterPage,
-                        showPreviewButton = isWallpaperPage,
-                        showApplyButton = isWallpaperPage,
-                        showMoreButton = true,
-                        keepSlotWhenHidden = true
-                    )
+                        )
+                    } else if (showBottomBar) {
+                        // 正常模式顶部栏
+                        MainTopBar(
+                            statusBarTopPaddingDp = statusBarTopPaddingDp,
+                            enableLiquidGlass = enableLiquidGlass,
+                            backdrop = liquidBackdrop,
+                            isLightTheme = !useDarkTheme,
+                            onAdd = {
+                                if (isRasterPage) {
+                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_RASTER, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit)
+                                }
+                            },
+                            onApply = {
+                                if (isRasterPage) {
+                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_RASTER, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_WALLPAPER, Unit)
+                                }
+                            },
+                            onMoreClick = { showMoreMenu = true },
+                            onPreview = {
+                                if (isRasterPage) {
+                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_RASTER, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit)
+                                }
+                            },
+                            showAddButton = isWallpaperPage || isRasterPage,
+                            showPreviewButton = isWallpaperPage,
+                            showApplyButton = isWallpaperPage,
+                            showMoreButton = true,
+                            keepSlotWhenHidden = true
+                        )
+                    }
 
                     if (showMoreMenu) {
                         Box(

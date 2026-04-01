@@ -131,6 +131,7 @@ import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.VideoRasterWallpaperService
 import com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService
+import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
 import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
@@ -263,6 +264,12 @@ fun RasterRouteScreen(
     fun exitSelectionMode() {
         selectionMode = false
         selectedIds.clear()
+    }
+
+    // 发送选择模式状态
+    fun publishSelectionState() {
+        val isAllSelected = groups.isNotEmpty() && selectedIds.size == groups.size
+        RxBus.postWithCode(RxConstants.RX_RASTER_SELECTION_MODE_CHANGED, SelectionBarState(selectionMode, isAllSelected))
     }
 
     fun removeGroupById(groupId: String) {
@@ -548,12 +555,44 @@ fun RasterRouteScreen(
             .toObservableWithCode(RxConstants.RX_TRIGGER_ENTER_RASTER_SELECT_MODE, Unit::class.java)
             .subscribe { enterSelectionMode() }
 
+        // 选择模式操作监听
+        val selectionCancelDisposable = RxBus.getDefault()
+            .toObservableWithCode(RxConstants.RX_RASTER_SELECTION_CANCEL, Unit::class.java)
+            .subscribe { exitSelectionMode() }
+
+        val selectionDeleteDisposable = RxBus.getDefault()
+            .toObservableWithCode(RxConstants.RX_RASTER_SELECTION_DELETE, Unit::class.java)
+            .subscribe {
+                if (selectedIds.isEmpty()) {
+                    context.showToast(context.getString(R.string.no_selected_tip))
+                } else {
+                    showDeleteDialog = true
+                }
+            }
+
+        val selectionToggleAllDisposable = RxBus.getDefault()
+            .toObservableWithCode(RxConstants.RX_RASTER_SELECTION_TOGGLE_ALL, Unit::class.java)
+            .subscribe {
+                val isAllSelected = groups.isNotEmpty() && selectedIds.size == groups.size
+                if (isAllSelected) {
+                    selectedIds.clear()
+                } else {
+                    selectedIds.clear()
+                    selectedIds.addAll(groups.map { it.id })
+                }
+            }
+
         onDispose {
             addDisposable.dispose()
             applyDisposable.dispose()
             previewDisposable.dispose()
             selectDisposable.dispose()
+            selectionCancelDisposable.dispose()
+            selectionDeleteDisposable.dispose()
+            selectionToggleAllDisposable.dispose()
             onBottomBarVisibleChange(true)
+            // 退出时清除选择模式状态
+            RxBus.postWithCode(RxConstants.RX_RASTER_SELECTION_MODE_CHANGED, SelectionBarState(false, false))
         }
     }
 
@@ -561,20 +600,15 @@ fun RasterRouteScreen(
         onBottomBarVisibleChange(!selectionMode && detailGroup == null)
     }
 
+    // 发布选择模式状态
+    LaunchedEffect(selectionMode, selectedIds.size, groups.size) {
+        publishSelectionState()
+    }
+
     val cardAspectRatio = remember {
         val width = FileUtil.width.takeIf { it > 0 } ?: 9
         val height = FileUtil.height.takeIf { it > 0 } ?: 16
         width.toFloat() / height.toFloat()
-    }
-
-    var showSelectionBar by remember { mutableStateOf(false) }
-    LaunchedEffect(selectionMode) {
-        if (selectionMode) {
-            delay(16)
-            showSelectionBar = true
-        } else {
-            showSelectionBar = false
-        }
     }
 
     // 拖拽排序状态（对齐 MainRouteScreen 的拖拽排序）
@@ -751,34 +785,6 @@ fun RasterRouteScreen(
                     )
                 }
             }
-        }
-
-        // 前景层：SelectionTopBar
-        if (showSelectionBar) {
-            val isAllSelected = groups.isNotEmpty() && selectedIds.size == groups.size
-            SelectionTopBar(
-                statusBarTopPaddingDp = statusBarTopPaddingDp,
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
-                isAllSelected = isAllSelected,
-                isLightTheme = isLightTheme,
-                onCancelSelect = { exitSelectionMode() },
-                onDelete = {
-                    if (selectedIds.isEmpty()) {
-                        context.showToast(context.getString(R.string.no_selected_tip))
-                    } else {
-                        showDeleteDialog = true
-                    }
-                },
-                onToggleSelectAll = {
-                    if (isAllSelected) {
-                        selectedIds.clear()
-                    } else {
-                        selectedIds.clear()
-                        selectedIds.addAll(groups.map { it.id })
-                    }
-                }
-            )
         }
 
         if (!selectionMode && groups.isEmpty()) {
