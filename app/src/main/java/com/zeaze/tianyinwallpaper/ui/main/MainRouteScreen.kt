@@ -2021,22 +2021,14 @@ private fun WallpaperDetailScreen(
                         // 时间选择（仅在独立时间开启时显示）
                         AnimatedVisibility(
                             visible = independentTimeEnabled,
-                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
-                            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                    fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+                            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                    fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                            ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
                                 // 开始时间选择
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                                ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -2055,44 +2047,48 @@ private fun WallpaperDetailScreen(
                                             style = TextStyle(contentColor.copy(alpha = 0.8f), 16.sp)
                                         )
                                     }
-                                
-                                // 开始时间 WheelPicker - 使用 animateContentSize 避免动画跳跃
-                                if (showTimePicker == "start") {
-                                    Spacer(Modifier.height(8.dp))
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(180.dp),
-                                        horizontalArrangement = Arrangement.Center
+                                    
+                                    // 开始时间 WheelPicker
+                                    AnimatedVisibility(
+                                        visible = showTimePicker == "start",
+                                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                                expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+                                        exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                                fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
                                     ) {
-                                        WheelPicker(
-                                            count = 24,
-                                            initialIndex = startHour,
-                                            onItemSelected = { startHour = it },
-                                            contentColor = contentColor,
-                                            label = "时",
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        WheelPicker(
-                                            count = 60,
-                                            initialIndex = startMinute,
-                                            onItemSelected = { startMinute = it },
-                                            contentColor = contentColor,
-                                            label = "分",
-                                            modifier = Modifier.weight(1f)
-                                        )
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            Spacer(Modifier.height(8.dp))
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(180.dp),
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                WheelPicker(
+                                                    count = 24,
+                                                    initialIndex = startHour,
+                                                    onItemSelected = { startHour = it },
+                                                    contentColor = contentColor,
+                                                    label = "时",
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                WheelPicker(
+                                                    count = 60,
+                                                    initialIndex = startMinute,
+                                                    onItemSelected = { startMinute = it },
+                                                    contentColor = contentColor,
+                                                    label = "分",
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                        }
                                     }
-                                }
                                 }
                                 
                                 Spacer(Modifier.height(12.dp))
                                 
                                 // 结束时间选择
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                                ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -2112,31 +2108,39 @@ private fun WallpaperDetailScreen(
                                         )
                                     }
                                     
-                                    // 结束时间 WheelPicker - 使用 animateContentSize 避免动画跳跃
-                                    if (showTimePicker == "end") {
-                                        Spacer(Modifier.height(8.dp))
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(180.dp),
-                                            horizontalArrangement = Arrangement.Center
-                                        ) {
-                                            WheelPicker(
-                                                count = 24,
-                                                initialIndex = endHour,
-                                                onItemSelected = { endHour = it },
-                                                contentColor = contentColor,
-                                                label = "时",
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            WheelPicker(
-                                                count = 60,
-                                                initialIndex = endMinute,
-                                                onItemSelected = { endMinute = it },
-                                                contentColor = contentColor,
-                                                label = "分",
-                                                modifier = Modifier.weight(1f)
-                                            )
+                                    // 结束时间 WheelPicker
+                                    AnimatedVisibility(
+                                        visible = showTimePicker == "end",
+                                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                                expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+                                        exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                                fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
+                                    ) {
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            Spacer(Modifier.height(8.dp))
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(180.dp),
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                WheelPicker(
+                                                    count = 24,
+                                                    initialIndex = endHour,
+                                                    onItemSelected = { endHour = it },
+                                                    contentColor = contentColor,
+                                                    label = "时",
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                WheelPicker(
+                                                    count = 60,
+                                                    initialIndex = endMinute,
+                                                    onItemSelected = { endMinute = it },
+                                                    contentColor = contentColor,
+                                                    label = "分",
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
                                         }
                                     }
                                 }
