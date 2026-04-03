@@ -10,5 +10,11 @@ data class TianYinWallpaperModel(
     var startTime: Int = -1,
     var endTime: Int = -1,
     var loop: Boolean = true,
-    var independentTime: Boolean = false
+    var independentTime: Boolean = false,
+    // 变换参数：缩放和位置
+    var scale: Float = 1f,
+    var offsetX: Float = 0f,
+    var offsetY: Float = 0f,
+    var brightness: Float = 0f,
+    var volume: Float = 0f
 )

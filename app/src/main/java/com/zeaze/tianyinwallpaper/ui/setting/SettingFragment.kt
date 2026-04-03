@@ -234,7 +234,7 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
-                    SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor) {
+                    SettingTextItem("壁纸最小切换时间: ${minTime}秒（仅不可见切换模式生效）", contentColor) {
                         tempMinTime = minTime
                         showMinTimeDialog = true
                     }
@@ -645,7 +645,10 @@ fun SettingRouteScreen(
                                             .clickable {
                                                 val totalSeconds = selectedDays * 24 * 3600L + selectedHours * 3600L + selectedMinutes * 60L + selectedSeconds
                                                 if (totalSeconds > 0) {
-                                                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_SECONDS, totalSeconds).apply()
+                                                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_SECONDS, totalSeconds)
+                                                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
+                                                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
+                                                    editor.apply()
                                                     autoSwitchInterval = totalSeconds
                                                     showAutoIntervalDialog = false
                                                 } else {
@@ -748,7 +751,10 @@ fun SettingRouteScreen(
                                             .background(accentColor)
                                             .clickable {
                                                 if (autoPointsInput.isNotBlank()) {
-                                                    editor.putString(TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS, autoPointsInput).apply()
+                                                    editor.putString(TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS, autoPointsInput)
+                                                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
+                                                    editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
+                                                    editor.apply()
                                                     autoSwitchPoints = autoPointsInput
                                                     showAutoPointsDialog = false
                                                 } else {
@@ -1124,7 +1130,7 @@ private fun getAboutText(): String {
     return (
         "天音壁纸是一个用来设置壁纸的软件>_<\n" +
             "点击“增加壁纸”，可以增加当前壁纸组的壁纸\n" +
-            "点击“应用本组”，会把当前壁纸组设置为手机壁纸，每次进入桌面，都会更新显示壁纸组里的下一张壁纸\n" +
+            "点击“应用本组”，会把当前壁纸组设置为手机壁纸，每次离开桌面，都会更新显示壁纸组里的下一张壁纸\n" +
             "点击右上角的齿轮，可以保存当前壁纸组\n" +
             "齿轮里的“壁纸通用设置”，可以设置通用的壁纸切换方式\n" +
             "目前支持顺序切换和随机切换，和最小切换时间\n" +
@@ -1139,4 +1145,4 @@ private fun getAboutText(): String {
 private const val DEFAULT_AUTO_SWITCH_INTERVAL_SECONDS = 3600L
 private const val DEFAULT_AUTO_SWITCH_TIME_POINTS = "12:00"
 private const val AUTO_SWITCH_MODE_NONE = 0
-private val AUTO_SWITCH_MODE_ITEMS = arrayOf("手动切换", "按固定时间间隔切换", "按每日时间点切换")
+private val AUTO_SWITCH_MODE_ITEMS = arrayOf("离开桌面切换", "按固定时间间隔切换", "按每日时间点切换")

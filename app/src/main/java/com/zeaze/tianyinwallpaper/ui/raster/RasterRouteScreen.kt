@@ -1633,7 +1633,7 @@ private fun RasterDetailScreen(
                         .wrapContentHeight()
                         .drawBackdrop(
                             backdrop = editBackdrop,
-                            shape = { RoundedRectangle(28f.dp) },
+                            shape = { RoundedRectangle(48f.dp) },
                             effects = {
                                 colorControls(
                                     brightness = if (isLightTheme) 0.2f else 0f,
@@ -2159,38 +2159,3 @@ private fun rememberTiltState(sensorWidth: Float = 4.5f, maxAngle: Float = 30f):
 
     return tilt to direction
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

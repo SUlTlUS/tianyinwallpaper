@@ -40,6 +40,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -73,6 +74,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -126,8 +128,13 @@ import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSamp
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 
-private const val WALLPAPER_TYPE_STATIC = 0
-private const val WALLPAPER_TYPE_DYNAMIC = 1
+internal const val WALLPAPER_TYPE_STATIC = 0
+internal const val WALLPAPER_TYPE_DYNAMIC = 1
+private const val SNAP_NONE = 0
+private const val SNAP_LEFT = 1
+private const val SNAP_RIGHT = 2
+private const val SNAP_TOP = 4
+private const val SNAP_BOTTOM = 8
 
 internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): Int? {
     val normalizedMime = mimeType.orEmpty().lowercase()
@@ -314,6 +321,25 @@ fun MainRouteScreen(
         editor.putString("wallpaperCache", JSON.toJSONString(wallpapers))
         editor.putString("wallpaperTvCache", groupName)
         editor.apply()
+
+        // 当 service 当前运行在播放列表模式时，同步顺序到 wallpaper.json。
+        coroutineScope.launch {
+            val activeWallpaperCount = withContext(Dispatchers.IO) {
+                runCatching {
+                    JSON.parseArray(
+                        FileUtil.loadData(context, FileUtil.wallpaperPath),
+                        TianYinWallpaperModel::class.java
+                    )?.size ?: 0
+                }.getOrDefault(0)
+            }
+            if (activeWallpaperCount > 1) {
+                withContext(Dispatchers.IO) {
+                    FileUtil.save(context, JSON.toJSONString(wallpapers), FileUtil.wallpaperPath) {
+                        sendServiceIntent(TianYinWallpaperService.ACTION_SYNC_PLAYLIST)
+                    }
+                }
+            }
+        }
     }
 
     fun takePersistableUriPermissions(uris: List<Uri>) {
@@ -688,6 +714,7 @@ fun MainRouteScreen(
             kotlinx.coroutines.delay(300) // 等待拖动稳定
             if (pendingReorderSave) {
                 saveCache()
+
                 pendingReorderSave = false
             }
         }
@@ -1303,7 +1330,11 @@ fun MainRouteScreen(
                     enableLiquidGlass = enableLiquidGlass,
                     backdrop = liquidBackdrop,
                     onDismiss = { fullScreenPreviewModel = null },
-                    onApply = { applySingleWallpaper(model) },
+                    onApply = {
+                        // 预览页“应用”始终只应用当前这张壁纸，不应用整个播放列表。
+                        val latestSingle = wallpapers.firstOrNull { it.uuid == model.uuid } ?: model
+                        applySingleWallpaper(latestSingle)
+                    },
                     onReplaceAction = { isDynamic ->
                         val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
                         if (index >= 0) {
@@ -1327,6 +1358,38 @@ fun MainRouteScreen(
                             )
                         }
                         saveCache()
+                    },
+                    onTransformAction = { newScale, newOffsetX, newOffsetY ->
+                        val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
+                        if (index >= 0) {
+                            wallpapers[index].scale = newScale
+                            wallpapers[index].offsetX = newOffsetX
+                            wallpapers[index].offsetY = newOffsetY
+                        }
+                        saveCache()
+                        // 仅同步当前渲染中的变换，避免把完整播放列表写回壁纸文件覆盖“单独应用”。
+                        context.startService(
+                            Intent(context, TianYinWallpaperService::class.java).apply {
+                                action = TianYinWallpaperService.ACTION_UPDATE_TRANSFORM
+                                putExtra(TianYinWallpaperService.EXTRA_SCALE, newScale)
+                                putExtra(TianYinWallpaperService.EXTRA_OFFSET_X, newOffsetX)
+                                putExtra(TianYinWallpaperService.EXTRA_OFFSET_Y, newOffsetY)
+                            }
+                        )
+                    },
+                    onBrightnessAction = { newBrightness ->
+                        val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
+                        if (index >= 0) {
+                            wallpapers[index].brightness = newBrightness
+                        }
+                        saveCache()
+                    },
+                    onVolumeAction = { newVolume ->
+                        val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
+                        if (index >= 0) {
+                            wallpapers[index].volume = newVolume
+                        }
+                        saveCache()
                     }
                 )
             }
@@ -1335,8 +1398,8 @@ fun MainRouteScreen(
         // Live preview overlay
         AnimatedVisibility(
             visible = showLivePreview,
-            enter = fadeIn() + scaleIn(initialScale = 0.8f),
-            exit = fadeOut() + scaleOut(targetScale = 0.8f)
+            enter = fadeIn(),
+            exit = fadeOut()
         ) {
             // 异步加载壁纸列表
             val wallpaperList by produceState<List<TianYinWallpaperModel>>(
@@ -1353,120 +1416,11 @@ fun MainRouteScreen(
             LiveSyncPreview(
                 wallpaperList = wallpaperList,
                 currentIndex = liveSyncIndex,
+                statusBarTopPaddingDp = statusBarTopPaddingDp,
                 onClose = { showLivePreview = false },
                 onPrev = { sendServiceIntent(TianYinWallpaperService.ACTION_PREV_WALLPAPER) },
                 onNext = { sendServiceIntent(TianYinWallpaperService.ACTION_NEXT_WALLPAPER) }
             )
-        }
-    }
-}
-
-@Composable
-private fun LiveSyncPreview(
-    wallpaperList: List<TianYinWallpaperModel>,
-    currentIndex: Int,
-    onClose: () -> Unit,
-    onPrev: () -> Unit,
-    onNext: () -> Unit
-) {
-    val currentModel = if (currentIndex in wallpaperList.indices) wallpaperList[currentIndex] else null
-
-    val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
-    val previewBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
-
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        if (currentModel != null) {
-            Box(modifier = Modifier.fillMaxSize().let { if (enableLiquidGlass && previewBackdrop != null) it.layerBackdrop(previewBackdrop) else it }) {
-                WallpaperThumbnail(
-                    model = currentModel,
-                    modifier = Modifier.fillMaxSize(),
-                    useClip = false
-                )
-            }
-        } else {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无播放中的壁纸", color = Color.White)
-            }
-        }
-
-        // Close detection layer
-        Box(modifier = Modifier.fillMaxSize().clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null
-        ) { onClose() })
-
-        // Bottom Controls
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp, start = 12.dp, end = 12.dp)
-                .fillMaxWidth()
-                .pointerInput(Unit) { detectTapGestures { } }, // consume taps
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val controlColor = Color.Black.copy(0.4f)
-            val textColor = Color.White
-
-            // Previous Button
-            if (enableLiquidGlass && previewBackdrop != null) {
-                LiquidButton(
-                    onClick = onPrev,
-                    backdrop = previewBackdrop,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    surfaceColor = controlColor
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        BasicText(text = "上一张", style = TextStyle(textColor, 16.sp, fontWeight = FontWeight.Medium))
-                    }
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .clickable { onPrev() },
-                    shape = Capsule(),
-                    color = controlColor,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "上一张", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-
-            // Next Button
-            if (enableLiquidGlass && previewBackdrop != null) {
-                LiquidButton(
-                    onClick = onNext,
-                    backdrop = previewBackdrop,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    surfaceColor = controlColor
-                ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        BasicText(text = "下一张", style = TextStyle(textColor, 16.sp, fontWeight = FontWeight.Medium))
-                    }
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .clickable { onNext() },
-                    shape = Capsule(),
-                    color = controlColor,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "下一张", color = textColor, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
         }
     }
 }
@@ -1500,773 +1454,3 @@ private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWall
     }
 }
 
-@Composable
-private fun WallpaperThumbnail(
-    model: TianYinWallpaperModel,
-    modifier: Modifier = Modifier,
-    useClip: Boolean = true
-) {
-    val context = LocalContext.current
-    val dialogShape = RoundedRectangle(35f.dp)
-
-    if (model.type == 1 && !model.videoUri.isNullOrEmpty()) {
-        AndroidView(
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    // 初始化播放器并存入 tag
-                    val player = MediaPlayer().apply {
-                        setVolume(0f, 0f)
-                        isLooping = true
-                    }
-                    val holder = VideoPlayerHolder(player, model.videoUri)
-                    tag = holder
-
-                    // 设置 SurfaceTextureListener
-                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                            val holder = tag as? VideoPlayerHolder ?: return
-                            val uri = holder.uri ?: return
-                            try {
-                                holder.player.reset()
-                                holder.player.isLooping = true
-                                holder.player.setVolume(0f, 0f)
-                                holder.player.setSurface(Surface(surface))
-                                holder.player.setDataSource(ctx, Uri.parse(uri))
-                                holder.player.setOnPreparedListener { mp ->
-                                    updateMatrix(mp, this@apply)
-                                    mp.start()
-                                }
-                                holder.player.prepareAsync()
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        }
-
-                        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                            (tag as? VideoPlayerHolder)?.player?.let { updateMatrix(it, this@apply) }
-                        }
-
-                        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                            val holder = tag as? VideoPlayerHolder
-                            if (holder != null) {
-                                try {
-                                    holder.player.stop()
-                                } catch (_: Exception) {}
-                                try {
-                                    holder.player.setSurface(null)
-                                } catch (_: Exception) {}
-                            }
-                            return true
-                        }
-
-                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-                    }
-                }
-            },
-            update = { textureView ->
-                // 当 model 变化时，更新 holder 中的 URI 并重新准备（如果 surface 已可用）
-                val holder = textureView.tag as? VideoPlayerHolder ?: return@AndroidView
-                val newUri = model.videoUri ?: return@AndroidView
-                holder.uri = newUri
-
-                if (textureView.isAvailable) {
-                    try {
-                        holder.player.reset()
-                        holder.player.isLooping = true
-                        holder.player.setDataSource(context, Uri.parse(newUri))
-                        holder.player.setSurface(Surface(textureView.surfaceTexture))
-                        holder.player.setOnPreparedListener { mp ->
-                            updateMatrix(mp, textureView)
-                            mp.start()
-                        }
-                        holder.player.prepareAsync()
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            },
-            onRelease = { textureView ->
-                (textureView.tag as? VideoPlayerHolder)?.player?.release()
-                textureView.tag = null
-            },
-            modifier = if (useClip) modifier.clip(dialogShape) else modifier
-        )
-    } else {
-        val request = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.Request(
-            uuid = model.uuid.orEmpty(),
-            type = model.type,
-            imgUri = model.imgUri,
-            videoUri = model.videoUri,
-            imgPath = model.imgPath
-        )
-        val bitmapState = produceState<Bitmap?>(
-            initialValue = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.getFromCache(request),
-            request
-        ) {
-            val loaded = withContext(Dispatchers.IO) {
-                com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.loadThumbnail(context, request)
-            }
-            value = loaded
-        }
-        bitmapState.value?.let { bitmap ->
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = null,
-                modifier = if (useClip) modifier.clip(dialogShape) else modifier,
-                contentScale = ContentScale.Crop
-            )
-        }
-    }
-}
-
-private fun updateMatrix(mp: MediaPlayer, view: TextureView) {
-    val vWidth = mp.videoWidth.toFloat()
-    val vHeight = mp.videoHeight.toFloat()
-    val viewWidth = view.width.toFloat()
-    val viewHeight = view.height.toFloat()
-
-    if (vWidth > 0 && vHeight > 0 && viewWidth > 0 && viewHeight > 0) {
-        val matrix = Matrix()
-        val videoRatio = vWidth / vHeight
-        val viewRatio = viewWidth / viewHeight
-
-        var scaleX = 1f
-        var scaleY = 1f
-
-        if (videoRatio > viewRatio) {
-            scaleX = videoRatio / viewRatio
-        } else {
-            scaleY = viewRatio / videoRatio
-        }
-
-        matrix.setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
-        view.setTransform(matrix)
-    }
-}
-
-private data class VideoPlayerHolder(
-    val player: MediaPlayer,
-    var uri: String?
-)
-
-@Composable
-private fun WallpaperDetailScreen(
-    model: TianYinWallpaperModel,
-    statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
-    enableLiquidGlass: Boolean,
-    backdrop: Backdrop?,
-    onDismiss: () -> Unit,
-    onApply: () -> Unit,
-    onReplaceAction: (isDynamic: Boolean) -> Unit,
-    onTimeAction: (startTime: Int, endTime: Int, loop: Boolean, independentTime: Boolean) -> Unit
-) {
-    val isLightTheme = MaterialTheme.colors.isLight
-    val pageBackground = MaterialTheme.colors.background
-    val onPage = MaterialTheme.colors.onBackground
-    val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
-    val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
-    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
-    val contentColor = if (isLightTheme) Color.Black else Color.White
-
-    val detailBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
-
-    // 时间设置dialog状态
-    var showTimeDialog by remember { mutableStateOf(false) }
-    var showReplaceDialog by remember { mutableStateOf(false) }
-    var showTimePicker by remember { mutableStateOf<String?>(null) } // null = 不显示, "start" = 开始时间, "end" = 结束时间
-    var startTime by remember { mutableStateOf(model.startTime) }
-    var endTime by remember { mutableStateOf(model.endTime) }
-    var loopEnabled by remember { mutableStateOf(model.loop) }
-    var independentTimeEnabled by remember { mutableStateOf(model.independentTime) }
-    // 开始时间的小时和分钟
-    var startHour by remember { mutableStateOf(if (startTime == -1) 0 else startTime / 60) }
-    var startMinute by remember { mutableStateOf(if (startTime == -1) 0 else startTime % 60) }
-    // 结束时间的小时和分钟
-    var endHour by remember { mutableStateOf(if (endTime == -1) 23 else endTime / 60) }
-    var endMinute by remember { mutableStateOf(if (endTime == -1) 59 else endTime % 60) }
-
-    // 定义需要采样的区域
-    val luminanceRegions = remember {
-        mapOf(
-            "cancel" to Rect(0f, 0f, 0.15f, 0.08f),
-            "apply" to Rect(0.85f, 0f, 1f, 0.08f),
-            "replace" to Rect(0.2f, 0.92f, 0.4f, 1f),
-            "time" to Rect(0.6f, 0.92f, 1f, 1f)
-        )
-    }
-
-    val luminanceSampler = if (enableLiquidGlass && detailBackdrop != null) {
-        rememberMultiRegionLuminanceSampler(
-            enabled = true,
-            sampleLayer = detailBackdrop.graphicsLayer,
-            regions = luminanceRegions,
-            sampleIntervalMs = 200L
-        )
-    } else null
-
-    val cancelLuminanceState = if (luminanceSampler != null) {
-        rememberRegionLuminanceState(luminanceSampler, "cancel")
-    } else null
-
-    val applyLuminanceState = if (luminanceSampler != null) {
-        rememberRegionLuminanceState(luminanceSampler, "apply")
-    } else null
-
-    val replaceLuminanceState = if (luminanceSampler != null) {
-        rememberRegionLuminanceState(luminanceSampler, "replace")
-    } else null
-
-    val timeLuminanceState = if (luminanceSampler != null) {
-        rememberRegionLuminanceState(luminanceSampler, "time")
-    } else null
-
-    // 时间确认函数
-    fun parseTimeText(text: String): Int? {
-        val parts = text.split(":")
-        if (parts.size != 2) return null
-        val hour = parts[0].toIntOrNull() ?: return null
-        val minute = parts[1].toIntOrNull() ?: return null
-        if (hour !in 0..23 || minute !in 0..59) return null
-        return hour * 60 + minute
-    }
-
-    fun parseAndValidateTime(text: String, label: String): Int? {
-        return if (text.isBlank()) {
-            -1
-        } else {
-            parseTimeText(text) ?: -1
-        }
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        // 捕获层
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .let { m ->
-                    if (enableLiquidGlass && detailBackdrop != null) {
-                        m.layerBackdrop(detailBackdrop)
-                    } else m
-                }
-        ) {
-            Box(Modifier.fillMaxSize().background(pageBackground))
-
-            // 全屏预览区域
-            Box(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                WallpaperThumbnail(
-                    model = model,
-                    modifier = Modifier.fillMaxSize(),
-                    useClip = false
-                )
-            }
-        }
-
-        // 顶部按钮
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = statusBarTopPaddingDp + 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (enableLiquidGlass && detailBackdrop != null) {
-                LiquidButton(
-                    onClick = onDismiss,
-                    backdrop = detailBackdrop,
-                    surfaceColor = pillBackground,
-                    luminanceState = cancelLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        "取消",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = cancelLuminanceState?.contentColor ?: onPage,
-                            fontSize = 15.sp
-                        )
-                    )
-                }
-                LiquidButton(
-                    onClick = onApply,
-                    backdrop = detailBackdrop,
-                    surfaceColor = Color(0xFF2A83FF).copy(alpha = 0.75f),
-                    tint = Color(0xFF2A83FF),
-                    luminanceState = applyLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        "应用",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(Color.White, 15.sp)
-                    )
-                }
-            } else {
-                Text(
-                    text = "取消", color = onPage,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(pillBackground)
-                        .clickable { onDismiss() }
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                )
-                Text(
-                    text = "应用", color = Color.White,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color(0x662A83FF))
-                        .clickable { onApply() }
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                )
-            }
-        }
-
-        // 底部操作栏
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (enableLiquidGlass && detailBackdrop != null) {
-                LiquidButton(
-                    onClick = { showReplaceDialog = true },
-                    backdrop = detailBackdrop,
-                    surfaceColor = pillBackground,
-                    luminanceState = replaceLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        "更换",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = replaceLuminanceState?.contentColor ?: onPage,
-                            15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    )
-                }
-                LiquidButton(
-                    onClick = { showTimeDialog = true },
-                    backdrop = detailBackdrop,
-                    surfaceColor = pillBackground,
-                    luminanceState = timeLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        "效果",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = timeLuminanceState?.contentColor ?: onPage,
-                            15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    )
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clickable { showReplaceDialog = true },
-                    shape = Capsule(),
-                    color = Color.Black.copy(0.4f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "更换", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-                Surface(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clickable { showTimeDialog = true },
-                    shape = Capsule(),
-                    color = Color.Black.copy(0.4f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "效果", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-        }
-
-        // 时间设置Dialog - 使用 AnimatedVisibility 在当前页面内显示
-        AnimatedVisibility(
-            visible = showTimeDialog,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // 返回键关闭
-            BackHandler(enabled = true) {
-                if (independentTimeEnabled) {
-                    startTime = startHour * 60 + startMinute
-                    endTime = endHour * 60 + endMinute
-                } else {
-                    startTime = -1
-                    endTime = -1
-                }
-                onTimeAction(startTime, endTime, loopEnabled, independentTimeEnabled)
-                showTimeDialog = false
-            }
-            
-            // 保存并关闭函数
-            fun saveAndClose() {
-                if (independentTimeEnabled) {
-                    startTime = startHour * 60 + startMinute
-                    endTime = endHour * 60 + endMinute
-                } else {
-                    startTime = -1
-                    endTime = -1
-                }
-                onTimeAction(startTime, endTime, loopEnabled, independentTimeEnabled)
-                showTimeDialog = false
-            }
-            
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { saveAndClose() }
-            ) {
-                val sheetBackdrop = rememberLayerBackdrop()
-                Column(
-                    Modifier
-                        .align(Alignment.Center)
-                        .padding(40.dp)
-                        .wrapContentHeight()
-                        .drawBackdrop(
-                            backdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) },
-                            shape = { RoundedRectangle(48f.dp) },
-                            effects = {
-                                colorControls(
-                                    brightness = if (isLightTheme) 0.2f else 0f,
-                                    saturation = 1.5f
-                                )
-                                blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
-                                lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
-                            },
-                            highlight = { Highlight.Plain },
-                            exportedBackdrop = sheetBackdrop,
-                            onDrawSurface = { drawRect(containerColor) }
-                        )
-                        .pointerInput(Unit) { detectTapGestures { /* consume */ } }
-                ) {
-                    Column(
-                        Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        BasicText("效果", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
-                        
-                        Spacer(Modifier.height(12.dp))
-
-                        // 循环播放开关
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("循环播放", style = TextStyle(contentColor, 16.sp))
-                            if (enableLiquidGlass && sheetBackdrop != null) {
-                                LiquidToggle(
-                                    selected = { loopEnabled },
-                                    onSelect = { loopEnabled = it },
-                                    backdrop = sheetBackdrop,
-                                    isLightTheme = isLightTheme
-                                )
-                            } else {
-                                androidx.compose.material.Switch(
-                                    checked = loopEnabled,
-                                    onCheckedChange = { loopEnabled = it }
-                                )
-                            }
-                        }
-                        
-                        Spacer(Modifier.height(12.dp))
-
-                        // 独立时间开关
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("独立时间", style = TextStyle(contentColor, 16.sp))
-                            if (enableLiquidGlass && sheetBackdrop != null) {
-                                LiquidToggle(
-                                    selected = { independentTimeEnabled },
-                                    onSelect = { independentTimeEnabled = it },
-                                    backdrop = sheetBackdrop,
-                                    isLightTheme = isLightTheme
-                                )
-                            } else {
-                                androidx.compose.material.Switch(
-                                    checked = independentTimeEnabled,
-                                    onCheckedChange = { independentTimeEnabled = it }
-                                )
-                            }
-                        }
-                        
-                        Spacer(Modifier.height(12.dp))
-
-                        // 时间选择（仅在独立时间开启时显示）
-                        AnimatedVisibility(
-                            visible = independentTimeEnabled,
-                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-                            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                    fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                        ) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                // 开始时间选择
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(Capsule())
-                                            .background(containerColor.copy(0.2f))
-                                            .clickable {
-                                                showTimePicker = if (showTimePicker == "start") null else "start"
-                                            }
-                                            .padding(horizontal = 20.dp, vertical = 12.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        BasicText("开始时间", style = TextStyle(contentColor, 16.sp))
-                                        BasicText(
-                                            "${if (startHour < 10) "0$startHour" else "$startHour"}:${if (startMinute < 10) "0$startMinute" else "$startMinute"}",
-                                            style = TextStyle(contentColor.copy(alpha = 0.8f), 16.sp)
-                                        )
-                                    }
-                                    
-                                    // 开始时间 WheelPicker
-                                    AnimatedVisibility(
-                                        visible = showTimePicker == "start",
-                                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                                expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-                                        exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                                fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                                    ) {
-                                        Column(modifier = Modifier.fillMaxWidth()) {
-                                            Spacer(Modifier.height(8.dp))
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(180.dp),
-                                                horizontalArrangement = Arrangement.Center
-                                            ) {
-                                                WheelPicker(
-                                                    count = 24,
-                                                    initialIndex = startHour,
-                                                    onItemSelected = { startHour = it },
-                                                    contentColor = contentColor,
-                                                    label = "时",
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                WheelPicker(
-                                                    count = 60,
-                                                    initialIndex = startMinute,
-                                                    onItemSelected = { startMinute = it },
-                                                    contentColor = contentColor,
-                                                    label = "分",
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                Spacer(Modifier.height(12.dp))
-                                
-                                // 结束时间选择
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(Capsule())
-                                            .background(containerColor.copy(0.2f))
-                                            .clickable {
-                                                showTimePicker = if (showTimePicker == "end") null else "end"
-                                            }
-                                            .padding(horizontal = 20.dp, vertical = 12.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        BasicText("结束时间", style = TextStyle(contentColor, 16.sp))
-                                        BasicText(
-                                            "${if (endHour < 10) "0$endHour" else "$endHour"}:${if (endMinute < 10) "0$endMinute" else "$endMinute"}",
-                                            style = TextStyle(contentColor.copy(alpha = 0.8f), 16.sp)
-                                        )
-                                    }
-                                    
-                                    // 结束时间 WheelPicker
-                                    AnimatedVisibility(
-                                        visible = showTimePicker == "end",
-                                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                                expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-                                        exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                                fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                                    ) {
-                                        Column(modifier = Modifier.fillMaxWidth()) {
-                                            Spacer(Modifier.height(8.dp))
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(180.dp),
-                                                horizontalArrangement = Arrangement.Center
-                                            ) {
-                                                WheelPicker(
-                                                    count = 24,
-                                                    initialIndex = endHour,
-                                                    onItemSelected = { endHour = it },
-                                                    contentColor = contentColor,
-                                                    label = "时",
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                WheelPicker(
-                                                    count = 60,
-                                                    initialIndex = endMinute,
-                                                    onItemSelected = { endMinute = it },
-                                                    contentColor = contentColor,
-                                                    label = "分",
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        Spacer(Modifier.height(12.dp))
-
-                        Row(
-                            Modifier
-                                .clip(Capsule())
-                                .background(containerColor.copy(0.2f))
-                                .clickable { saveAndClose() }
-                                .height(48.dp)
-                                .fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("关闭", style = TextStyle(contentColor, 16.sp))
-                        }
-                    }
-                }
-            }
-        }
-
-        // 更换壁纸Dialog
-        AnimatedVisibility(
-            visible = showReplaceDialog,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            // 返回键关闭
-            BackHandler(enabled = true) {
-                showReplaceDialog = false
-            }
-            
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { showReplaceDialog = false }
-            ) {
-                val replaceSheetBackdrop = rememberLayerBackdrop()
-                Column(
-                    Modifier
-                        .align(Alignment.Center)
-                        .padding(40.dp)
-                        .wrapContentHeight()
-                        .drawBackdrop(
-                            backdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) },
-                            shape = { RoundedRectangle(48f.dp) },
-                            effects = {
-                                colorControls(
-                                    brightness = if (isLightTheme) 0.2f else 0f,
-                                    saturation = 1.5f
-                                )
-                                blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
-                                lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
-                            },
-                            highlight = { Highlight.Plain },
-                            exportedBackdrop = replaceSheetBackdrop,
-                            onDrawSurface = { drawRect(containerColor) }
-                        )
-                        .pointerInput(Unit) { detectTapGestures { /* consume */ } }
-                ) {
-                    Column(
-                        Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        BasicText("更换壁纸", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
-
-                        // 静态壁纸选项
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(Capsule())
-                                .background(accentColor.copy(alpha = 0.75f))
-                                .clickable {
-                                    showReplaceDialog = false
-                                    onReplaceAction(false)
-                                }
-                                .padding(horizontal = 20.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("静态壁纸", style = TextStyle(Color.White, 16.sp))
-                        }
-
-                        // 动态壁纸选项
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(Capsule())
-                                .background(containerColor.copy(0.2f))
-                                .clickable {
-                                    showReplaceDialog = false
-                                    onReplaceAction(true)
-                                }
-                                .padding(horizontal = 20.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("动态壁纸", style = TextStyle(contentColor, 16.sp))
-                        }
-
-                        // 取消按钮
-                        Row(
-                            Modifier
-                                .clip(Capsule())
-                                .background(containerColor.copy(0.2f))
-                                .clickable { showReplaceDialog = false }
-                                .height(48.dp)
-                                .fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("取消", style = TextStyle(contentColor, 16.sp))
-                        }
-                    }
-                }
-            }
-        }
-
-    }
-}

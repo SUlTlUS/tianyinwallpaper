@@ -31,6 +31,9 @@ class SimpleGLRenderer {
     private var contentWidth: Int = 1
     private var contentHeight: Int = 1
     private var xOffset: Float = 0.5f
+    private var userScale: Float = 1f
+    private var userOffsetX: Float = 0f
+    private var userOffsetY: Float = 0f
     private var isVideoMode: Boolean = false
 
     // ── EGL ──
@@ -45,6 +48,7 @@ class SimpleGLRenderer {
         data class SetContentSize(val width: Int, val height: Int) : RenderMessage()
         data class SetSurfaceSize(val width: Int, val height: Int) : RenderMessage()
         data class SetXOffset(val offset: Float) : RenderMessage()
+        data class SetUserTransform(val scale: Float, val offsetX: Float, val offsetY: Float) : RenderMessage()
         data class LoadBitmap(val bitmap: Bitmap) : RenderMessage()
         data class SetVideoMode(val isVideo: Boolean) : RenderMessage()
         object Render : RenderMessage()
@@ -114,6 +118,16 @@ class SimpleGLRenderer {
     fun setXOffset(offset: Float) {
         xOffset = offset
         messageQueue.offer(RenderMessage.SetXOffset(offset))
+    }
+
+    /**
+     * 设置用户预览变换（缩放+位移）
+     */
+    fun setUserTransform(scale: Float, offsetX: Float, offsetY: Float) {
+        userScale = scale
+        userOffsetX = offsetX
+        userOffsetY = offsetY
+        messageQueue.offer(RenderMessage.SetUserTransform(scale, offsetX, offsetY))
     }
 
     /**
@@ -188,6 +202,9 @@ class SimpleGLRenderer {
         private var cW: Int = 1
         private var cH: Int = 1
         private var currentXOffset: Float = 0.5f
+        private var currentUserScale: Float = 1f
+        private var currentUserOffsetX: Float = 0f
+        private var currentUserOffsetY: Float = 0f
         private var currentIsVideo: Boolean = false
         private val videoSTMatrix = FloatArray(16)
         private val imageMatrix = FloatArray(16)
@@ -231,6 +248,11 @@ class SimpleGLRenderer {
                         }
                         is RenderMessage.SetXOffset -> {
                             currentXOffset = msg.offset
+                        }
+                        is RenderMessage.SetUserTransform -> {
+                            currentUserScale = msg.scale.coerceAtLeast(0.1f)
+                            currentUserOffsetX = msg.offsetX
+                            currentUserOffsetY = msg.offsetY
                         }
                         is RenderMessage.LoadBitmap -> {
                             uploadBitmapInternal(msg.bitmap)
@@ -406,6 +428,12 @@ class SimpleGLRenderer {
             } else {
                 Matrix.scaleM(mvp, 0, 1.0f, sAsp / cAsp, 1.0f)
             }
+
+            // 叠加预览页保存的用户变换（以像素位移映射到 NDC）。
+            Matrix.scaleM(mvp, 0, currentUserScale, currentUserScale, 1.0f)
+            val txUser = if (sW > 0) (currentUserOffsetX / sW.toFloat()) * 2f else 0f
+            val tyUser = if (sH > 0) -(currentUserOffsetY / sH.toFloat()) * 2f else 0f
+            Matrix.translateM(mvp, 0, txUser / currentUserScale, tyUser / currentUserScale, 0f)
 
             val aPos = GLES20.glGetAttribLocation(prog, "aPos")
             val aTex = GLES20.glGetAttribLocation(prog, "aTex")
