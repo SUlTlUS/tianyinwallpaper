@@ -5,10 +5,10 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
-import android.net.Uri
 import android.view.Surface
 import android.view.TextureView
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -45,6 +45,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
+import androidx.core.net.toUri
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
@@ -162,31 +164,18 @@ internal fun LiveSyncPreview(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (enableLiquidGlass && previewBackdrop != null) {
-                LiquidButton(
-                    onClick = onClose,
-                    backdrop = previewBackdrop,
-                    surfaceColor = pillBackground,
-                    luminanceState = closeLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    androidx.compose.foundation.text.BasicText(
-                        "关闭",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(closeLuminanceState?.contentColor ?: onPage, 15.sp)
-                    )
-                }
-            } else {
-                Text(
-                    text = "关闭",
-                    color = onPage,
-                    modifier = Modifier
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
-                        .background(pillBackground)
-                        .clickable { onClose() }
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                )
-            }
+            LiveSyncActionButton(
+                label = "关闭",
+                onClick = onClose,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = previewBackdrop,
+                luminanceState = closeLuminanceState,
+                surfaceColor = pillBackground,
+                textColor = closeLuminanceState?.contentColor ?: onPage,
+                modifier = Modifier.height(44.dp),
+                fallbackAsTextChip = true,
+                fallbackTextChipPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+            )
 
             val positionText = if (currentModel != null) "${currentIndex + 1}/${wallpaperList.size}" else "0/0"
             if (enableLiquidGlass && previewBackdrop != null) {
@@ -231,75 +220,93 @@ internal fun LiveSyncPreview(
             val controlColor = pillBackground
             val textColor = onPage
 
-            if (enableLiquidGlass && previewBackdrop != null) {
-                LiquidButton(
-                    onClick = onPrev,
-                    backdrop = previewBackdrop,
-                    luminanceState = prevLuminanceState,
-                    modifier = Modifier
-                        .height(44.dp),
-                    surfaceColor = controlColor
-                ) {
-                    androidx.compose.foundation.text.BasicText(
-                        "上一张",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = prevLuminanceState?.contentColor ?: textColor,
-                            15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    )
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clickable { onPrev() },
-                    shape = Capsule(),
-                    color = controlColor,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "上一张", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
+            LiveSyncActionButton(
+                label = "上一张",
+                onClick = onPrev,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = previewBackdrop,
+                luminanceState = prevLuminanceState,
+                surfaceColor = controlColor,
+                textColor = prevLuminanceState?.contentColor ?: textColor,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp),
+                fallbackBorder = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+            )
 
-            if (enableLiquidGlass && previewBackdrop != null) {
-                LiquidButton(
-                    onClick = onNext,
-                    backdrop = previewBackdrop,
-                    luminanceState = nextLuminanceState,
-                    modifier = Modifier
-                        .height(44.dp),
-                    surfaceColor = controlColor
-                ) {
-                    androidx.compose.foundation.text.BasicText(
-                        "下一张",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = prevLuminanceState?.contentColor ?: textColor,
-                            15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    )
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clickable { onNext() },
-                    shape = Capsule(),
-                    color = controlColor,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "下一张", color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
+            LiveSyncActionButton(
+                label = "下一张",
+                onClick = onNext,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = previewBackdrop,
+                luminanceState = nextLuminanceState,
+                surfaceColor = controlColor,
+                textColor = nextLuminanceState?.contentColor ?: textColor,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp),
+                fallbackBorder = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveSyncActionButton(
+    label: String,
+    onClick: () -> Unit,
+    enableLiquidGlass: Boolean,
+    backdrop: Backdrop?,
+    luminanceState: com.zeaze.tianyinwallpaper.catalog.utils.AdaptiveLuminanceGlassState?,
+    surfaceColor: Color,
+    textColor: Color,
+    modifier: Modifier = Modifier,
+    fallbackAsTextChip: Boolean = false,
+    fallbackTextChipPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+    fallbackBorder: androidx.compose.foundation.BorderStroke? = null
+) {
+    if (enableLiquidGlass && backdrop != null) {
+        LiquidButton(
+            onClick = onClick,
+            backdrop = backdrop,
+            luminanceState = luminanceState,
+            modifier = modifier,
+            surfaceColor = surfaceColor
+        ) {
+            androidx.compose.foundation.text.BasicText(
+                label,
+                modifier = Modifier.padding(horizontal = 14.dp),
+                style = TextStyle(
+                    color = textColor,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            )
+        }
+        return
+    }
+
+    if (fallbackAsTextChip) {
+        Text(
+            text = label,
+            color = textColor,
+            modifier = Modifier
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+                .background(surfaceColor)
+                .clickable(onClick = onClick)
+                .padding(fallbackTextChipPadding)
+        )
+        return
+    }
+
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = Capsule(),
+        color = surfaceColor,
+        border = fallbackBorder
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(text = label, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -343,7 +350,7 @@ private fun WallpaperThumbnail(
                                 val volume = model.volume.coerceIn(0f, 1f)
                                 videoHolder.player.setVolume(volume, volume)
                                 videoHolder.player.setSurface(Surface(surface))
-                                videoHolder.player.setDataSource(ctx, Uri.parse(uri))
+                                videoHolder.player.setDataSource(ctx, uri.toUri())
                                 videoHolder.player.setOnPreparedListener { mp ->
                                     onSourceSizeChanged?.invoke(mp.videoWidth.toFloat(), mp.videoHeight.toFloat())
                                     updateMatrix(mp, this@apply, transformScale, transformOffsetX, transformOffsetY)
@@ -394,7 +401,7 @@ private fun WallpaperThumbnail(
                             videoHolder.player.reset()
                             videoHolder.player.isLooping = true
                             videoHolder.player.setVolume(volume, volume)
-                            videoHolder.player.setDataSource(context, Uri.parse(newUri))
+                            videoHolder.player.setDataSource(context, newUri.toUri())
                             videoHolder.player.setSurface(Surface(textureView.surfaceTexture))
                             videoHolder.player.setOnPreparedListener { mp ->
                                 onSourceSizeChanged?.invoke(mp.videoWidth.toFloat(), mp.videoHeight.toFloat())
@@ -496,11 +503,275 @@ private data class VideoPlayerHolder(
 )
 
 @Composable
+private fun DetailModeButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    enableLiquidGlass: Boolean,
+    backdrop: Backdrop?,
+    luminanceState: com.zeaze.tianyinwallpaper.catalog.utils.AdaptiveLuminanceGlassState?,
+    baseSurfaceColor: Color,
+    selectedTint: Color,
+    unselectedTextColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val buttonColor = if (selected) selectedTint.copy(alpha = 0.75f) else baseSurfaceColor
+    val textColor = if (selected) Color.White else unselectedTextColor
+
+    if (enableLiquidGlass && backdrop != null) {
+        if (selected) {
+            LiquidButton(
+                onClick = onClick,
+                backdrop = backdrop,
+                surfaceColor = buttonColor,
+                tint = selectedTint,
+                luminanceState = luminanceState,
+                modifier = modifier.height(44.dp)
+            ) {
+                androidx.compose.foundation.text.BasicText(
+                    label,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    style = TextStyle(
+                        color = textColor,
+                        15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+            }
+        } else {
+            LiquidButton(
+                onClick = onClick,
+                backdrop = backdrop,
+                surfaceColor = buttonColor,
+                luminanceState = luminanceState,
+                modifier = modifier.height(44.dp)
+            ) {
+                androidx.compose.foundation.text.BasicText(
+                    label,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    style = TextStyle(
+                        color = textColor,
+                        15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+            }
+        }
+    } else {
+        Surface(
+            modifier = modifier
+                .height(44.dp)
+                .clickable(onClick = onClick),
+            shape = Capsule(),
+            color = buttonColor
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(text = label, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingToggleRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    contentColor: Color,
+    enableLiquidGlass: Boolean,
+    backdrop: Backdrop,
+    isLightTheme: Boolean
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        androidx.compose.foundation.text.BasicText(label, style = TextStyle(contentColor, 16.sp))
+        if (enableLiquidGlass) {
+            LiquidToggle(
+                selected = { checked },
+                onSelect = onCheckedChange,
+                backdrop = backdrop,
+                isLightTheme = isLightTheme
+            )
+        } else {
+            androidx.compose.material.Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailHeaderChip(
+    label: String,
+    onClick: () -> Unit,
+    enableLiquidGlass: Boolean,
+    backdrop: Backdrop?,
+    luminanceState: com.zeaze.tianyinwallpaper.catalog.utils.AdaptiveLuminanceGlassState?,
+    surfaceColor: Color,
+    textColor: Color,
+    tint: Color? = null
+) {
+    if (enableLiquidGlass && backdrop != null) {
+        if (tint != null) {
+            LiquidButton(
+                onClick = onClick,
+                backdrop = backdrop,
+                surfaceColor = surfaceColor,
+                tint = tint,
+                luminanceState = luminanceState,
+                modifier = Modifier.height(44.dp)
+            ) {
+                androidx.compose.foundation.text.BasicText(
+                    label,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    style = TextStyle(textColor, 15.sp)
+                )
+            }
+        } else {
+            LiquidButton(
+                onClick = onClick,
+                backdrop = backdrop,
+                surfaceColor = surfaceColor,
+                luminanceState = luminanceState,
+                modifier = Modifier.height(44.dp)
+            ) {
+                androidx.compose.foundation.text.BasicText(
+                    label,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    style = TextStyle(textColor, 15.sp)
+                )
+            }
+        }
+    } else {
+        Text(
+            text = label,
+            color = textColor,
+            modifier = Modifier
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+                .background(surfaceColor)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 18.dp, vertical = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun TimePickerField(
+    label: String,
+    hour: Int,
+    minute: Int,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    onHourSelected: (Int) -> Unit,
+    onMinuteSelected: (Int) -> Unit,
+    contentColor: Color,
+    containerColor: Color,
+    formatHm: (Int, Int) -> String
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(Capsule())
+                .background(containerColor.copy(0.2f))
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            androidx.compose.foundation.text.BasicText(label, style = TextStyle(contentColor, 16.sp))
+            androidx.compose.foundation.text.BasicText(
+                formatHm(hour, minute),
+                style = TextStyle(contentColor.copy(alpha = 0.8f), 16.sp)
+            )
+        }
+
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                    fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    WheelPicker(
+                        count = 24,
+                        initialIndex = hour,
+                        onItemSelected = onHourSelected,
+                        contentColor = contentColor,
+                        label = "时",
+                        modifier = Modifier.weight(1f)
+                    )
+                    WheelPicker(
+                        count = 60,
+                        initialIndex = minute,
+                        onItemSelected = onMinuteSelected,
+                        contentColor = contentColor,
+                        label = "分",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdaptiveValueSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onValueChangeFinished: () -> Unit,
+    enableLiquidGlass: Boolean,
+    backdrop: Backdrop,
+    isLightTheme: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (enableLiquidGlass) {
+        LiquidSlider(
+            value = { value },
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            visibilityThreshold = 0.001f,
+            backdrop = backdrop,
+            isLightTheme = isLightTheme,
+            onValueChangeFinished = onValueChangeFinished,
+            modifier = modifier
+        )
+    } else {
+        androidx.compose.material.Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            onValueChangeFinished = onValueChangeFinished,
+            modifier = modifier
+        )
+    }
+}
+
+private fun resolvedContentColor(
+    state: com.zeaze.tianyinwallpaper.catalog.utils.AdaptiveLuminanceGlassState?,
+    fallback: Color
+): Color = state?.contentColor ?: fallback
+
+@Composable
 internal fun WallpaperDetailScreen(
     model: TianYinWallpaperModel,
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
-    backdrop: Backdrop?,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
     onReplaceAction: (isDynamic: Boolean) -> Unit,
@@ -509,6 +780,7 @@ internal fun WallpaperDetailScreen(
     onBrightnessAction: (brightness: Float) -> Unit,
     onVolumeAction: (volume: Float) -> Unit
 ) {
+    val context = LocalContext.current
     val isLightTheme = MaterialTheme.colors.isLight
     val pageBackground = MaterialTheme.colors.background
     val onPage = MaterialTheme.colors.onBackground
@@ -554,38 +826,29 @@ internal fun WallpaperDetailScreen(
     val o0o0 = 2.0E-4f
     var magneticAssistEnabled by remember { mutableStateOf(true) }
 
-    fun getMaxOffsets(currentScale: Float): Pair<Float, Float> {
+    fun calculateDisplaySize(currentScale: Float): Pair<Float, Float>? {
         if (containerWidth <= 0f || containerHeight <= 0f || sourceWidth <= 0f || sourceHeight <= 0f) {
-            return Pair(0f, 0f)
+            return null
         }
         val axisCompensateX = (containerWidth + 1f) / containerWidth
         val axisCompensateY = (containerHeight + 1f) / containerHeight
-        // 统一规则：宽高比小于屏幕时宽度撑满，大于屏幕时高度撑满。
         val baseScale = kotlin.math.max(containerWidth / sourceWidth, containerHeight / sourceHeight)
         val displayWidth = sourceWidth * baseScale * currentScale * axisCompensateX
         val displayHeight = sourceHeight * baseScale * currentScale * axisCompensateY
-        val maxX = ((displayWidth - containerWidth) / 2f).coerceAtLeast(0f)
-        val maxY = ((displayHeight - containerHeight) / 2f).coerceAtLeast(0f)
-        return Pair(maxX, maxY)
+        return Pair(displayWidth, displayHeight)
     }
 
     // 吸附范围与边界范围不同：缩小到小于屏幕时也应有可吸附目标。
     fun getSnapRanges(currentScale: Float): Pair<Float, Float> {
-        if (containerWidth <= 0f || containerHeight <= 0f || sourceWidth <= 0f || sourceHeight <= 0f) {
-            return Pair(0f, 0f)
-        }
-        val axisCompensateX = (containerWidth + 1f) / containerWidth
-        val axisCompensateY = (containerHeight + 1f) / containerHeight
-        // 与渲染一致，吸附范围也使用同一套铺满轴规则。
-        val baseScale = kotlin.math.max(containerWidth / sourceWidth, containerHeight / sourceHeight)
-        val displayWidth = sourceWidth * baseScale * currentScale * axisCompensateX
-        val displayHeight = sourceHeight * baseScale * currentScale * axisCompensateY
+        val displaySize = calculateDisplaySize(currentScale) ?: return Pair(0f, 0f)
+        val displayWidth = displaySize.first
+        val displayHeight = displaySize.second
         val snapX = kotlin.math.abs(displayWidth - containerWidth) / 2f
         val snapY = kotlin.math.abs(displayHeight - containerHeight) / 2f
         return Pair(snapX, snapY)
     }
 
-    fun stepPhysics(maxX: Float, maxY: Float, frameScale: Float, dragging: Boolean) {
+    fun stepPhysics(frameScale: Float, dragging: Boolean) {
         var currentX = offsetX
         var currentY = offsetY
 
@@ -658,6 +921,12 @@ internal fun WallpaperDetailScreen(
     var startMinute by remember { mutableStateOf(if (startTime == -1) 0 else startTime % 60) }
     var endHour by remember { mutableStateOf(if (endTime == -1) 23 else endTime / 60) }
     var endMinute by remember { mutableStateOf(if (endTime == -1) 59 else endTime % 60) }
+
+    fun formatHm(hour: Int, minute: Int): String {
+        val h = if (hour < 10) "0$hour" else "$hour"
+        val m = if (minute < 10) "0$minute" else "$minute"
+        return "$h:$m"
+    }
 
     val luminanceRegions = remember {
         mapOf(
@@ -735,17 +1004,81 @@ internal fun WallpaperDetailScreen(
                             }
                         }
 
+                        fun beginGesture() {
+                            isDragging = true
+                            velocityX = 0f
+                            velocityY = 0f
+                        }
+
+                        fun finishGesture() {
+                            isDragging = false
+                            velocityX = 0f
+                            velocityY = 0f
+                            // 每次手势结束都立即保存一次，避免快速退出丢失。
+                            persistPreviewState()
+                        }
+
+                        fun applySinglePointer(change: androidx.compose.ui.input.pointer.PointerInputChange) {
+                            val delta = change.position - change.previousPosition
+                            offsetX += delta.x
+                            offsetY += delta.y
+                            velocityX = delta.x
+                            velocityY = delta.y
+                            lastGestureTimeMs = System.currentTimeMillis()
+                            change.consume()
+                        }
+
+                        fun applyMultiPointer(
+                            pressedChanges: List<androidx.compose.ui.input.pointer.PointerInputChange>,
+                            lastCentroid: Offset?,
+                            lastDistance: Float
+                        ): Pair<Offset, Float> {
+                            val p0 = pressedChanges[0].position
+                            val p1 = pressedChanges[1].position
+                            val centroid = Offset((p0.x + p1.x) / 2f, (p0.y + p1.y) / 2f)
+                            val dx = p0.x - p1.x
+                            val dy = p0.y - p1.y
+                            val distance = sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
+
+                            if (lastDistance > 0f) {
+                                val oldScale = scale
+                                val newScale = (oldScale * (distance / lastDistance)).coerceAtLeast(0.1f)
+                                val ratio = if (oldScale == 0f) 1f else newScale / oldScale
+                                val centerX = containerWidth / 2f
+                                val centerY = containerHeight / 2f
+                                val cx = centroid.x - centerX
+                                val cy = centroid.y - centerY
+                                offsetX = (offsetX - cx) * ratio + cx
+                                offsetY = (offsetY - cy) * ratio + cy
+                                scale = newScale
+                            }
+
+                            if (lastCentroid != null) {
+                                val pan = centroid - lastCentroid
+                                offsetX += pan.x
+                                offsetY += pan.y
+                                velocityX = pan.x
+                                velocityY = pan.y
+                                lastGestureTimeMs = System.currentTimeMillis()
+                            }
+
+                            pressedChanges.forEach { it.consume() }
+                            return Pair(centroid, distance)
+                        }
+
                         val physicsJob = transformScope.launch {
-                            var lastFrameNs = System.nanoTime()
+                            var lastFrameNs = withFrameNanos { it }
                             while (true) {
-                                delay(16)
-                                val nowNs = System.nanoTime()
+                                if (!isDragging) {
+                                    delay(100)
+                                    continue
+                                }
+                                val nowNs = withFrameNanos { it }
                                 val dt = ((nowNs - lastFrameNs) / 1_000_000_000f).coerceIn(0.008f, 0.05f)
                                 lastFrameNs = nowNs
 
-                                val (maxX, maxY) = getMaxOffsets(scale)
                                 val frameScale = dt / (1f / 60f)
-                                stepPhysics(maxX, maxY, frameScale, isDragging)
+                                stepPhysics(frameScale, isDragging)
 
                                 val idle = System.currentTimeMillis() - lastGestureTimeMs > 100
                                 if (idle && kotlin.math.abs(velocityX) < 0.02f && kotlin.math.abs(velocityY) < 0.02f) {
@@ -756,7 +1089,7 @@ internal fun WallpaperDetailScreen(
 
                         try {
                             awaitEachGesture {
-                                isDragging = true
+                                beginGesture()
                                 var lastCentroid: Offset? = null
                                 var lastDistance = 0f
 
@@ -767,55 +1100,16 @@ internal fun WallpaperDetailScreen(
 
                                     if (pressedChanges.size == 1) {
                                         val change = pressedChanges[0]
-                                        val delta = change.position - change.previousPosition
-                                        offsetX += delta.x
-                                        offsetY += delta.y
-                                        velocityX = delta.x
-                                        velocityY = delta.y
-                                        lastGestureTimeMs = System.currentTimeMillis()
+                                        applySinglePointer(change)
                                         lastCentroid = null
                                         lastDistance = 0f
-                                        change.consume()
                                     } else {
-                                        val p0 = pressedChanges[0].position
-                                        val p1 = pressedChanges[1].position
-                                        val centroid = Offset((p0.x + p1.x) / 2f, (p0.y + p1.y) / 2f)
-                                        val dx = p0.x - p1.x
-                                        val dy = p0.y - p1.y
-                                        val distance = sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
-
-                                        if (lastDistance > 0f) {
-                                            val oldScale = scale
-                                            val newScale = (oldScale * (distance / lastDistance)).coerceAtLeast(0.1f)
-                                            val ratio = if (oldScale == 0f) 1f else newScale / oldScale
-                                            val centerX = containerWidth / 2f
-                                            val centerY = containerHeight / 2f
-                                            val cx = centroid.x - centerX
-                                            val cy = centroid.y - centerY
-                                            offsetX = (offsetX - cx) * ratio + cx
-                                            offsetY = (offsetY - cy) * ratio + cy
-                                            scale = newScale
-                                        }
-
-                                        if (lastCentroid != null) {
-                                            val pan = centroid - lastCentroid
-                                            offsetX += pan.x
-                                            offsetY += pan.y
-                                            velocityX = pan.x
-                                            velocityY = pan.y
-                                            lastGestureTimeMs = System.currentTimeMillis()
-                                        }
-
-                                        lastCentroid = centroid
-                                        lastDistance = distance
-                                        pressedChanges.forEach { it.consume() }
+                                        val result = applyMultiPointer(pressedChanges, lastCentroid, lastDistance)
+                                        lastCentroid = result.first
+                                        lastDistance = result.second
                                     }
                                 }
-                                isDragging = false
-                                velocityX = 0f
-                                velocityY = 0f
-                                // 每次手势结束都立即保存一次，避免快速退出丢失。
-                                persistPreviewState()
+                                finishGesture()
                             }
                         } finally {
                             isDragging = false
@@ -888,67 +1182,31 @@ internal fun WallpaperDetailScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (enableLiquidGlass && detailBackdrop != null) {
-                LiquidButton(
-                    onClick = {
-                        persistPreviewState()
-                        onDismiss()
-                    },
-                    backdrop = detailBackdrop,
-                    surfaceColor = pillBackground,
-                    luminanceState = cancelLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    androidx.compose.foundation.text.BasicText(
-                        "取消",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = cancelLuminanceState?.contentColor ?: onPage,
-                            fontSize = 15.sp
-                        )
-                    )
-                }
-                LiquidButton(
-                    onClick = {
-                        persistPreviewState()
-                        onApply()
-                    },
-                    backdrop = detailBackdrop,
-                    surfaceColor = Color(0xFF2A83FF).copy(alpha = 0.75f),
-                    tint = Color(0xFF2A83FF),
-                    luminanceState = applyLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    androidx.compose.foundation.text.BasicText(
-                        "应用",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(Color.White, 15.sp)
-                    )
-                }
-            } else {
-                Text(
-                    text = "取消", color = onPage,
-                    modifier = Modifier
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
-                        .background(pillBackground)
-                        .clickable {
-                            persistPreviewState()
-                            onDismiss()
-                        }
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                )
-                Text(
-                    text = "应用", color = Color.White,
-                    modifier = Modifier
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
-                        .background(Color(0x662A83FF))
-                        .clickable {
-                            persistPreviewState()
-                            onApply()
-                        }
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                )
-            }
+            DetailHeaderChip(
+                label = "取消",
+                onClick = {
+                    persistPreviewState()
+                    onDismiss()
+                },
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = detailBackdrop,
+                luminanceState = cancelLuminanceState,
+                surfaceColor = pillBackground,
+                textColor = resolvedContentColor(cancelLuminanceState, onPage)
+            )
+            DetailHeaderChip(
+                label = "应用",
+                onClick = {
+                    persistPreviewState()
+                    onApply()
+                },
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = detailBackdrop,
+                luminanceState = applyLuminanceState,
+                surfaceColor = Color(0xFF2A83FF).copy(alpha = 0.75f),
+                textColor = Color.White,
+                tint = Color(0xFF2A83FF)
+            )
         }
 
         Row(
@@ -964,117 +1222,29 @@ internal fun WallpaperDetailScreen(
                 if (!isDynamicWallpaper) showImageDialog = true else onReplaceAction(false)
             }
 
-            val videoButtonColor = if (isDynamicWallpaper) Color(0xFF2A83FF).copy(alpha = 0.75f) else pillBackground
-            val videoTextColor = if (isDynamicWallpaper) Color.White else (replaceLuminanceState?.contentColor ?: onPage)
+            DetailModeButton(
+                label = "视频",
+                selected = isDynamicWallpaper,
+                onClick = onVideoButtonClick,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = detailBackdrop,
+                luminanceState = replaceLuminanceState,
+                baseSurfaceColor = pillBackground,
+                selectedTint = Color(0xFF2A83FF),
+                unselectedTextColor = resolvedContentColor(replaceLuminanceState, onPage)
+            )
 
-            if (enableLiquidGlass && detailBackdrop != null) {
-                if (isDynamicWallpaper) {
-                    LiquidButton(
-                        onClick = onVideoButtonClick,
-                        backdrop = detailBackdrop,
-                        surfaceColor = videoButtonColor,
-                        tint = Color(0xFF2A83FF),
-                        luminanceState = replaceLuminanceState,
-                        modifier = Modifier.height(44.dp)
-                    ) {
-                        androidx.compose.foundation.text.BasicText(
-                            "视频",
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            style = TextStyle(
-                                color = videoTextColor,
-                                15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        )
-                    }
-                } else {
-                    LiquidButton(
-                        onClick = onVideoButtonClick,
-                        backdrop = detailBackdrop,
-                        surfaceColor = videoButtonColor,
-                        luminanceState = replaceLuminanceState,
-                        modifier = Modifier.height(44.dp)
-                    ) {
-                        androidx.compose.foundation.text.BasicText(
-                            "视频",
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            style = TextStyle(
-                                color = videoTextColor,
-                                15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        )
-                    }
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clickable(onClick = onVideoButtonClick),
-                    shape = Capsule(),
-                    color = videoButtonColor
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "视频", color = videoTextColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-
-            val imageButtonColor = if (!isDynamicWallpaper) Color(0xFF2A83FF).copy(alpha = 0.75f) else pillBackground
-            val imageTextColor = if (!isDynamicWallpaper) Color.White else (timeLuminanceState?.contentColor ?: onPage)
-
-            if (enableLiquidGlass && detailBackdrop != null) {
-                if (!isDynamicWallpaper) {
-                    LiquidButton(
-                        onClick = onImageButtonClick,
-                        backdrop = detailBackdrop,
-                        surfaceColor = imageButtonColor,
-                        tint = Color(0xFF2A83FF),
-                        luminanceState = timeLuminanceState,
-                        modifier = Modifier.height(44.dp)
-                    ) {
-                        androidx.compose.foundation.text.BasicText(
-                            "图片",
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            style = TextStyle(
-                                color = imageTextColor,
-                                15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        )
-                    }
-                } else {
-                    LiquidButton(
-                        onClick = onImageButtonClick,
-                        backdrop = detailBackdrop,
-                        surfaceColor = imageButtonColor,
-                        luminanceState = timeLuminanceState,
-                        modifier = Modifier.height(44.dp)
-                    ) {
-                        androidx.compose.foundation.text.BasicText(
-                            "图片",
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            style = TextStyle(
-                                color = imageTextColor,
-                                15.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        )
-                    }
-                }
-            } else {
-                Surface(
-                    modifier = Modifier
-                        .height(44.dp)
-                        .clickable(onClick = onImageButtonClick),
-                    shape = Capsule(),
-                    color = imageButtonColor
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "图片", color = imageTextColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
+            DetailModeButton(
+                label = "图片",
+                selected = !isDynamicWallpaper,
+                onClick = onImageButtonClick,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = detailBackdrop,
+                luminanceState = timeLuminanceState,
+                baseSurfaceColor = pillBackground,
+                selectedTint = Color(0xFF2A83FF),
+                unselectedTextColor = resolvedContentColor(timeLuminanceState, onPage)
+            )
         }
 
         @Composable
@@ -1093,27 +1263,25 @@ internal fun WallpaperDetailScreen(
                 exit = fadeOut(),
                 modifier = Modifier.fillMaxSize()
             ) {
-                BackHandler(enabled = true) {
-                    if (independentTimeEnabled) {
-                        startTime = startHour * 60 + startMinute
-                        endTime = endHour * 60 + endMinute
-                    } else {
-                        startTime = -1
-                        endTime = -1
+                fun saveTimeSettings(): Boolean {
+                    startTime = startHour * 60 + startMinute
+                    endTime = endHour * 60 + endMinute
+                    if (independentTimeEnabled && startTime == endTime) {
+                        Toast.makeText(context, "开始时间不能与结束时间相同", Toast.LENGTH_SHORT).show()
+                        return false
                     }
                     onTimeAction(startTime, endTime, loopEnabled, independentTimeEnabled)
-                    onDismiss()
+                    return true
+                }
+
+                BackHandler(enabled = true) {
+                    if (saveTimeSettings()) {
+                        onDismiss()
+                    }
                 }
 
                 fun saveAndClose() {
-                    if (independentTimeEnabled) {
-                        startTime = startHour * 60 + startMinute
-                        endTime = endHour * 60 + endMinute
-                    } else {
-                        startTime = -1
-                        endTime = -1
-                    }
-                    onTimeAction(startTime, endTime, loopEnabled, independentTimeEnabled)
+                    if (!saveTimeSettings()) return
                     onBrightnessAction(brightness)
                     onVolumeAction(volume)
                     onDismiss()
@@ -1158,78 +1326,39 @@ internal fun WallpaperDetailScreen(
 
                             Spacer(Modifier.height(12.dp))
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                androidx.compose.foundation.text.BasicText("边缘吸附", style = TextStyle(contentColor, 16.sp))
-                                if (enableLiquidGlass) {
-                                    LiquidToggle(
-                                        selected = { magneticAssistEnabled },
-                                        onSelect = { magneticAssistEnabled = it },
-                                        backdrop = sheetBackdrop,
-                                        isLightTheme = isLightTheme
-                                    )
-                                } else {
-                                    androidx.compose.material.Switch(
-                                        checked = magneticAssistEnabled,
-                                        onCheckedChange = { magneticAssistEnabled = it }
-                                    )
-                                }
-                            }
+                            SettingToggleRow(
+                                label = "边缘吸附",
+                                checked = magneticAssistEnabled,
+                                onCheckedChange = { magneticAssistEnabled = it },
+                                contentColor = contentColor,
+                                enableLiquidGlass = enableLiquidGlass,
+                                backdrop = sheetBackdrop,
+                                isLightTheme = isLightTheme
+                            )
 
                             if (showLoopToggle) {
                                 Spacer(Modifier.height(12.dp))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    androidx.compose.foundation.text.BasicText("循环播放", style = TextStyle(contentColor, 16.sp))
-                                    if (enableLiquidGlass) {
-                                        LiquidToggle(
-                                            selected = { loopEnabled },
-                                            onSelect = { loopEnabled = it },
-                                            backdrop = sheetBackdrop,
-                                            isLightTheme = isLightTheme
-                                        )
-                                    } else {
-                                        androidx.compose.material.Switch(
-                                            checked = loopEnabled,
-                                            onCheckedChange = { loopEnabled = it }
-                                        )
-                                    }
-                                }
+                                SettingToggleRow(
+                                    label = "循环播放",
+                                    checked = loopEnabled,
+                                    onCheckedChange = { loopEnabled = it },
+                                    contentColor = contentColor,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    backdrop = sheetBackdrop,
+                                    isLightTheme = isLightTheme
+                                )
                             }
                             Spacer(Modifier.height(12.dp))
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                androidx.compose.foundation.text.BasicText("独立时间", style = TextStyle(contentColor, 16.sp))
-                                if (enableLiquidGlass) {
-                                    LiquidToggle(
-                                        selected = { independentTimeEnabled },
-                                        onSelect = { independentTimeEnabled = it },
-                                        backdrop = sheetBackdrop,
-                                        isLightTheme = isLightTheme
-                                    )
-                                } else {
-                                    androidx.compose.material.Switch(
-                                        checked = independentTimeEnabled,
-                                        onCheckedChange = { independentTimeEnabled = it }
-                                    )
-                                }
-                            }
+                            SettingToggleRow(
+                                label = "独立时间",
+                                checked = independentTimeEnabled,
+                                onCheckedChange = { independentTimeEnabled = it },
+                                contentColor = contentColor,
+                                enableLiquidGlass = enableLiquidGlass,
+                                backdrop = sheetBackdrop,
+                                isLightTheme = isLightTheme
+                            )
                             Spacer(Modifier.height(12.dp))
 
                             AnimatedVisibility(
@@ -1240,119 +1369,32 @@ internal fun WallpaperDetailScreen(
                                         fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
                             ) {
                                 Column(modifier = Modifier.fillMaxWidth()) {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(Capsule())
-                                                .background(containerColor.copy(0.2f))
-                                                .clickable {
-                                                    showTimePicker = if (showTimePicker == "start") null else "start"
-                                                }
-                                                .padding(horizontal = 20.dp, vertical = 12.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            androidx.compose.foundation.text.BasicText("开始时间", style = TextStyle(contentColor, 16.sp))
-                                            androidx.compose.foundation.text.BasicText(
-                                                "${if (startHour < 10) "0$startHour" else "$startHour"}:${if (startMinute < 10) "0$startMinute" else "$startMinute"}",
-                                                style = TextStyle(contentColor.copy(alpha = 0.8f), 16.sp)
-                                            )
-                                        }
-
-                                        AnimatedVisibility(
-                                            visible = showTimePicker == "start",
-                                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-                                            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                                    fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                                        ) {
-                                            Column(modifier = Modifier.fillMaxWidth()) {
-                                                Spacer(Modifier.height(8.dp))
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .height(180.dp),
-                                                    horizontalArrangement = Arrangement.Center
-                                                ) {
-                                                    WheelPicker(
-                                                        count = 24,
-                                                        initialIndex = startHour,
-                                                        onItemSelected = { startHour = it },
-                                                        contentColor = contentColor,
-                                                        label = "时",
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                    WheelPicker(
-                                                        count = 60,
-                                                        initialIndex = startMinute,
-                                                        onItemSelected = { startMinute = it },
-                                                        contentColor = contentColor,
-                                                        label = "分",
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
+                                    TimePickerField(
+                                        label = "开始时间",
+                                        hour = startHour,
+                                        minute = startMinute,
+                                        isExpanded = showTimePicker == "start",
+                                        onToggle = { showTimePicker = if (showTimePicker == "start") null else "start" },
+                                        onHourSelected = { startHour = it },
+                                        onMinuteSelected = { startMinute = it },
+                                        contentColor = contentColor,
+                                        containerColor = containerColor,
+                                        formatHm = ::formatHm
+                                    )
 
                                     Spacer(Modifier.height(12.dp))
-
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(Capsule())
-                                                .background(containerColor.copy(0.2f))
-                                                .clickable {
-                                                    showTimePicker = if (showTimePicker == "end") null else "end"
-                                                }
-                                                .padding(horizontal = 20.dp, vertical = 12.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            androidx.compose.foundation.text.BasicText("结束时间", style = TextStyle(contentColor, 16.sp))
-                                            androidx.compose.foundation.text.BasicText(
-                                                "${if (endHour < 10) "0$endHour" else "$endHour"}:${if (endMinute < 10) "0$endMinute" else "$endMinute"}",
-                                                style = TextStyle(contentColor.copy(alpha = 0.8f), 16.sp)
-                                            )
-                                        }
-
-                                        AnimatedVisibility(
-                                            visible = showTimePicker == "end",
-                                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-                                            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                                    fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                                        ) {
-                                            Column(modifier = Modifier.fillMaxWidth()) {
-                                                Spacer(Modifier.height(8.dp))
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .height(180.dp),
-                                                    horizontalArrangement = Arrangement.Center
-                                                ) {
-                                                    WheelPicker(
-                                                        count = 24,
-                                                        initialIndex = endHour,
-                                                        onItemSelected = { endHour = it },
-                                                        contentColor = contentColor,
-                                                        label = "时",
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                    WheelPicker(
-                                                        count = 60,
-                                                        initialIndex = endMinute,
-                                                        onItemSelected = { endMinute = it },
-                                                        contentColor = contentColor,
-                                                        label = "分",
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
+                                    TimePickerField(
+                                        label = "结束时间",
+                                        hour = endHour,
+                                        minute = endMinute,
+                                        isExpanded = showTimePicker == "end",
+                                        onToggle = { showTimePicker = if (showTimePicker == "end") null else "end" },
+                                        onHourSelected = { endHour = it },
+                                        onMinuteSelected = { endMinute = it },
+                                        contentColor = contentColor,
+                                        containerColor = containerColor,
+                                        formatHm = ::formatHm
+                                    )
                                 }
                             }
                             Spacer(Modifier.height(12.dp))
@@ -1365,30 +1407,18 @@ internal fun WallpaperDetailScreen(
 
                                 Spacer(Modifier.height(8.dp))
 
-                                if (enableLiquidGlass) {
-                                    LiquidSlider(
-                                        value = { volume },
-                                        onValueChange = { volume = it.coerceIn(0f, 1f) },
-                                        valueRange = 0f..1f,
-                                        visibilityThreshold = 0.001f,
-                                        backdrop = sheetBackdrop,
-                                        isLightTheme = isLightTheme,
-                                        onValueChangeFinished = { onVolumeAction(volume) },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 8.dp)
-                                    )
-                                } else {
-                                    androidx.compose.material.Slider(
-                                        value = volume,
-                                        onValueChange = { volume = it.coerceIn(0f, 1f) },
-                                        valueRange = 0f..1f,
-                                        onValueChangeFinished = { onVolumeAction(volume) },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 8.dp)
-                                    )
-                                }
+                                AdaptiveValueSlider(
+                                    value = volume,
+                                    onValueChange = { volume = it.coerceIn(0f, 1f) },
+                                    valueRange = 0f..1f,
+                                    onValueChangeFinished = { onVolumeAction(volume) },
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    backdrop = sheetBackdrop,
+                                    isLightTheme = isLightTheme,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp)
+                                )
 
                                 Spacer(Modifier.height(12.dp))
                             }
@@ -1400,30 +1430,18 @@ internal fun WallpaperDetailScreen(
 
                             Spacer(Modifier.height(8.dp))
 
-                            if (enableLiquidGlass) {
-                                LiquidSlider(
-                                    value = { brightness },
-                                    onValueChange = { brightness = it.coerceIn(brightnessMin, brightnessMax) },
-                                    valueRange = brightnessMin..brightnessMax,
-                                    visibilityThreshold = 0.001f,
-                                    backdrop = sheetBackdrop,
-                                    isLightTheme = isLightTheme,
-                                    onValueChangeFinished = { onBrightnessAction(brightness) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp)
-                                )
-                            } else {
-                                androidx.compose.material.Slider(
-                                    value = brightness,
-                                    onValueChange = { brightness = it.coerceIn(brightnessMin, brightnessMax) },
-                                    valueRange = brightnessMin..brightnessMax,
-                                    onValueChangeFinished = { onBrightnessAction(brightness) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp)
-                                )
-                            }
+                            AdaptiveValueSlider(
+                                value = brightness,
+                                onValueChange = { brightness = it.coerceIn(brightnessMin, brightnessMax) },
+                                valueRange = brightnessMin..brightnessMax,
+                                onValueChangeFinished = { onBrightnessAction(brightness) },
+                                enableLiquidGlass = enableLiquidGlass,
+                                backdrop = sheetBackdrop,
+                                isLightTheme = isLightTheme,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp)
+                            )
 
                             Spacer(Modifier.height(12.dp))
 

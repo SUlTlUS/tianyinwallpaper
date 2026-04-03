@@ -47,6 +47,9 @@ class TianYinWallpaperService : WallpaperService() {
         private var currentContentWidth = 1
         private var currentContentHeight = 1
         private var currentUserScale = 1f
+        private var interruptedIndexForConditional: Int? = null
+        private var activeConditionalIndex = -1
+        private var mode2TimelineIndexDuringConditional: Int? = null
         private val autoSwitchHandler = Handler(mainLooper)
         private val autoSwitchRunnable = Runnable {
             val mode = pref?.getInt(PREF_AUTO_SWITCH_MODE, 0) ?: 0
@@ -176,7 +179,29 @@ class TianYinWallpaperService : WallpaperService() {
 
         private fun hasConditionalRules(): Boolean {
             val current = list ?: return false
-            return current.any { it.startTime != -1 && it.endTime != -1 }
+            return current.any { it.independentTime && it.startTime != -1 && it.endTime != -1 }
+        }
+
+        private fun isMinuteInWindow(currentMinutes: Int, startMinutes: Int, endMinutes: Int): Boolean {
+            if (startMinutes !in 0 until 24 * 60 || endMinutes !in 0 until 24 * 60) return false
+            if (startMinutes == endMinutes) return false
+            return if (startMinutes < endMinutes) {
+                currentMinutes >= startMinutes && currentMinutes < endMinutes
+            } else {
+                // Cross-day window, e.g. 23:00-06:00
+                currentMinutes >= startMinutes || currentMinutes < endMinutes
+            }
+        }
+
+        private fun isModelAllowedAt(currentMinutes: Int, model: TianYinWallpaperModel): Boolean {
+            if (model.startTime == -1 || model.endTime == -1) return true
+            return isMinuteInWindow(currentMinutes, model.startTime, model.endTime)
+        }
+
+        private fun isIndependentTimeActive(currentMinutes: Int, model: TianYinWallpaperModel): Boolean {
+            if (!model.independentTime) return false
+            if (model.startTime == -1 || model.endTime == -1) return false
+            return isMinuteInWindow(currentMinutes, model.startTime, model.endTime)
         }
 
         private fun scheduleNextAutoSwitchCheck() {
@@ -220,7 +245,7 @@ class TianYinWallpaperService : WallpaperService() {
         private fun computeConditionalBoundaryDelayMs(now: Long): Long? {
             val current = list ?: return null
             val points = current.asSequence()
-                .filter { it.startTime != -1 && it.endTime != -1 }
+                .filter { it.independentTime && it.startTime != -1 && it.endTime != -1 }
                 .flatMap { sequenceOf(it.startTime, it.endTime) }
                 .filter { it in 0 until 24 * 60 }
                 .distinct()
@@ -316,17 +341,59 @@ class TianYinWallpaperService : WallpaperService() {
 
             // 条件切换
             val conditionalIndex = list.indexOfFirst {
-                it.startTime != -1 && it.endTime != -1 &&
-                currentMinutes >= it.startTime && currentMinutes < it.endTime
+                isIndependentTimeActive(currentMinutes, it)
             }
             if (conditionalIndex != -1) {
-                if (index != conditionalIndex && canSwitchByMinInterval()) {
+                val enteringConditional = activeConditionalIndex == -1
+                if ((mode == 0 || mode == 1) && interruptedIndexForConditional == null && index in list.indices && index != conditionalIndex) {
+                    interruptedIndexForConditional = index
+                }
+                if (mode == 2) {
+                    interruptedIndexForConditional = null
+                    if (enteringConditional) {
+                        mode2TimelineIndexDuringConditional = if (index in list.indices) index else 0
+                    }
+                    if (shouldTriggerMode2(now, lastSwitchAt, calendar, currentMinutes, pref)) {
+                        val baseIndex = mode2TimelineIndexDuringConditional ?: (if (index in list.indices) index else 0)
+                        mode2TimelineIndexDuringConditional = calculateNextIndex(baseIndex, currentMinutes, list)
+                        pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, now).apply()
+                    }
+                }
+                activeConditionalIndex = conditionalIndex
+
+                if (index != conditionalIndex) {
                     index = conditionalIndex
                     loadContent()
                     markSwitchTimestamp()
-                    pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, now).apply()
+                    pref.edit().putInt(PREF_CURRENT_INDEX, index).apply()
                 }
                 return false
+            }
+
+            if (activeConditionalIndex != -1) {
+                activeConditionalIndex = -1
+                if ((mode == 0 || mode == 1)) {
+                    val resumeIndex = interruptedIndexForConditional
+                    interruptedIndexForConditional = null
+                    if (resumeIndex != null && resumeIndex in list.indices && index != resumeIndex) {
+                        index = resumeIndex
+                        loadContent()
+                        markSwitchTimestamp()
+                        pref.edit().putInt(PREF_CURRENT_INDEX, index).apply()
+                        return false
+                    }
+                } else {
+                    interruptedIndexForConditional = null
+                    val mode2ResumeIndex = mode2TimelineIndexDuringConditional
+                    mode2TimelineIndexDuringConditional = null
+                    if (mode2ResumeIndex != null && mode2ResumeIndex in list.indices && index != mode2ResumeIndex) {
+                        index = mode2ResumeIndex
+                        loadContent()
+                        markSwitchTimestamp()
+                        pref.edit().putInt(PREF_CURRENT_INDEX, index).apply()
+                        return false
+                    }
+                }
             }
 
             // mode=0 表示不做时间驱动自动切换，避免每次可见性变化都触发 next。
@@ -344,35 +411,7 @@ class TianYinWallpaperService : WallpaperService() {
                     }
                 }
                 2 -> {
-                    val timePointsStr = pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, "") ?: ""
-                    val timePoints = timePointsStr.split(",").filter { it.isNotBlank() }
-                    if (timePoints.isNotEmpty()) {
-                        val lastSwitchCalendar = Calendar.getInstance().apply { timeInMillis = lastSwitchAt }
-                        val lastSwitchDay = lastSwitchCalendar.get(Calendar.DAY_OF_YEAR)
-                        val lastSwitchYear = lastSwitchCalendar.get(Calendar.YEAR)
-                        val lastSwitchMinutes = lastSwitchCalendar.get(Calendar.HOUR_OF_DAY) * 60 + lastSwitchCalendar.get(Calendar.MINUTE)
-
-                        val currentDay = calendar.get(Calendar.DAY_OF_YEAR)
-                        val currentYear = calendar.get(Calendar.YEAR)
-
-                        for (point in timePoints) {
-                            try {
-                                val parts = point.split(":")
-                                if (parts.size == 2) {
-                                    val pointMinutes = parts[0].trim().toInt() * 60 + parts[1].trim().toInt()
-                                    if (currentYear > lastSwitchYear || currentDay > lastSwitchDay) {
-                                        if (currentMinutes >= pointMinutes) {
-                                            shouldSwitch = true
-                                            break
-                                        }
-                                    } else if (currentMinutes >= pointMinutes && pointMinutes > lastSwitchMinutes) {
-                                        shouldSwitch = true
-                                        break
-                                    }
-                                }
-                            } catch (_: Exception) {}
-                        }
-                    }
+                    shouldSwitch = shouldTriggerMode2(now, lastSwitchAt, calendar, currentMinutes, pref)
                 }
             }
 
@@ -380,6 +419,75 @@ class TianYinWallpaperService : WallpaperService() {
                 pref.edit().putLong(PREF_AUTO_SWITCH_LAST_SWITCH_AT, now).apply()
             }
             return shouldSwitch
+        }
+
+        private fun shouldTriggerMode2(
+            now: Long,
+            lastSwitchAt: Long,
+            calendar: Calendar,
+            currentMinutes: Int,
+            pref: SharedPreferences
+        ): Boolean {
+            val timePointsStr = pref.getString(PREF_AUTO_SWITCH_TIME_POINTS, "") ?: ""
+            val timePoints = parseTimePointMinutes(timePointsStr)
+            if (timePoints.isEmpty()) return false
+
+            val lastSwitchCalendar = Calendar.getInstance().apply { timeInMillis = lastSwitchAt }
+            val lastSwitchDay = lastSwitchCalendar.get(Calendar.DAY_OF_YEAR)
+            val lastSwitchYear = lastSwitchCalendar.get(Calendar.YEAR)
+            val lastSwitchMinutes = lastSwitchCalendar.get(Calendar.HOUR_OF_DAY) * 60 + lastSwitchCalendar.get(Calendar.MINUTE)
+
+            val currentDay = calendar.get(Calendar.DAY_OF_YEAR)
+            val currentYear = calendar.get(Calendar.YEAR)
+
+            for (pointMinutes in timePoints) {
+                if (currentYear > lastSwitchYear || currentDay > lastSwitchDay) {
+                    if (currentMinutes >= pointMinutes) return true
+                } else if (currentMinutes >= pointMinutes && pointMinutes > lastSwitchMinutes) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        private fun calculateNextIndex(currentIndex: Int, currentMinutes: Int, list: List<TianYinWallpaperModel>): Int {
+            if (list.isEmpty()) return currentIndex
+            val safeCurrentIndex = if (currentIndex in list.indices) currentIndex else -1
+            val isRand = pref?.getBoolean("rand", false) == true
+            if (isRand) {
+                if (shuffledIndices.size != list.size) {
+                    shuffledIndices = list.indices.toMutableList()
+                    shuffledIndices.shuffle()
+                    shuffledPointer = -1
+                }
+                var found = -1
+                var attempts = 0
+                while (attempts < list.size) {
+                    shuffledPointer++
+                    if (shuffledPointer >= shuffledIndices.size) {
+                        shuffledIndices.shuffle()
+                        shuffledPointer = 0
+                    }
+                    val nextIdx = shuffledIndices[shuffledPointer]
+                    val m = list[nextIdx]
+                    if (isModelAllowedAt(currentMinutes, m)) {
+                        found = nextIdx
+                        break
+                    }
+                    attempts++
+                }
+                return if (found != -1) found else (safeCurrentIndex + 1).mod(list.size)
+            }
+
+            var nextIndex = (safeCurrentIndex + 1).mod(list.size)
+            var count = 0
+            while (count < list.size) {
+                val m = list[nextIndex]
+                if (isModelAllowedAt(currentMinutes, m)) break
+                nextIndex = (nextIndex + 1) % list.size
+                count++
+            }
+            return nextIndex
         }
 
         private fun canSwitchByMinInterval(): Boolean {
@@ -428,40 +536,11 @@ class TianYinWallpaperService : WallpaperService() {
 
             Log.d(TAG, "nextWallpaper: start index=$index, size=${list.size}, isRand=$isRand")
 
+            val previousIndex = index
+            index = calculateNextIndex(previousIndex, currentMinutes, list)
             if (isRand) {
-                if (shuffledIndices.size != list.size) {
-                    shuffledIndices = list.indices.toMutableList()
-                    shuffledIndices.shuffle()
-                    shuffledPointer = -1
-                }
-                var found = -1
-                var attempts = 0
-                while (attempts < list.size) {
-                    shuffledPointer++
-                    if (shuffledPointer >= shuffledIndices.size) {
-                        shuffledIndices.shuffle()
-                        shuffledPointer = 0
-                    }
-                    val nextIdx = shuffledIndices[shuffledPointer]
-                    val m = list[nextIdx]
-                    if (m.startTime == -1 || (currentMinutes >= m.startTime && currentMinutes < m.endTime)) {
-                        found = nextIdx
-                        break
-                    }
-                    attempts++
-                }
-                index = if (found != -1) found else (index + 1) % list.size
-                Log.d(TAG, "nextWallpaper: rand selected index=$index, found=$found, pointer=$shuffledPointer")
+                Log.d(TAG, "nextWallpaper: rand selected index=$index, pointer=$shuffledPointer")
             } else {
-                var nextIndex = (index + 1) % list.size
-                var count = 0
-                while (count < list.size) {
-                    val m = list[nextIndex]
-                    if (m.startTime == -1 || (currentMinutes >= m.startTime && currentMinutes < m.endTime)) break
-                    nextIndex = (nextIndex + 1) % list.size
-                    count++
-                }
-                index = nextIndex
                 Log.d(TAG, "nextWallpaper: seq selected index=$index")
             }
             Log.d(TAG, "nextWallpaper: loading index=$index, uuid=${list.getOrNull(index)?.uuid}, type=${list.getOrNull(index)?.type}")
@@ -556,7 +635,7 @@ class TianYinWallpaperService : WallpaperService() {
             var count = 0
             while (count < list.size) {
                 val m = list[nextIndex]
-                if (m.startTime == -1 || (currentMinutes >= m.startTime && currentMinutes < m.endTime)) break
+                if (isModelAllowedAt(currentMinutes, m)) break
                 nextIndex = if (nextIndex <= 0) list.size - 1 else nextIndex - 1
                 count++
             }

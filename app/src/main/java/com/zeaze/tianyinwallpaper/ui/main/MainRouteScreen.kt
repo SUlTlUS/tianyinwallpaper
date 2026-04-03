@@ -180,6 +180,29 @@ private fun getTimeString(t: Int): String {
     return s
 }
 
+private fun minuteWindowRanges(start: Int, end: Int): List<IntRange> {
+    if (start !in 0 until 24 * 60 || end !in 0 until 24 * 60) return emptyList()
+    if (start == end) return emptyList()
+    return if (start < end) {
+        listOf(start until end)
+    } else {
+        listOf(start until (24 * 60), 0 until end)
+    }
+}
+
+private fun isTimeWindowOverlap(startA: Int, endA: Int, startB: Int, endB: Int): Boolean {
+    val rangesA = minuteWindowRanges(startA, endA)
+    val rangesB = minuteWindowRanges(startB, endB)
+    if (rangesA.isEmpty() || rangesB.isEmpty()) return false
+    return rangesA.any { a ->
+        rangesB.any { b ->
+            val overlapStart = maxOf(a.first, b.first)
+            val overlapEndExclusive = minOf(a.last + 1, b.last + 1)
+            overlapStart < overlapEndExclusive
+        }
+    }
+}
+
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -332,7 +355,9 @@ fun MainRouteScreen(
                     )?.size ?: 0
                 }.getOrDefault(0)
             }
-            if (activeWallpaperCount > 1) {
+            // 预览详情页内的编辑仅更新缓存，不回写运行中的 wallpaper.json，
+            // 避免与“应用单张”并发写入产生覆盖竞争。
+            if (activeWallpaperCount > 1 && fullScreenPreviewModel == null) {
                 withContext(Dispatchers.IO) {
                     FileUtil.save(context, JSON.toJSONString(wallpapers), FileUtil.wallpaperPath) {
                         sendServiceIntent(TianYinWallpaperService.ACTION_SYNC_PLAYLIST)
@@ -405,6 +430,21 @@ fun MainRouteScreen(
 
     fun applySingleWallpaper(model: TianYinWallpaperModel) {
         performApply(listOf(model))
+    }
+
+    fun resolveLatestPreviewModel(previewModel: TianYinWallpaperModel): TianYinWallpaperModel {
+        // Prefer exact object reference; then stable identifiers as fallbacks.
+        wallpapers.firstOrNull { it === previewModel }?.let { return it }
+        previewModel.uuid?.takeIf { it.isNotBlank() }?.let { targetUuid ->
+            wallpapers.firstOrNull { it.uuid == targetUuid }?.let { return it }
+        }
+        previewModel.videoUri?.takeIf { it.isNotBlank() }?.let { targetVideoUri ->
+            wallpapers.firstOrNull { it.videoUri == targetVideoUri }?.let { return it }
+        }
+        previewModel.imgUri?.takeIf { it.isNotBlank() }?.let { targetImgUri ->
+            wallpapers.firstOrNull { it.imgUri == targetImgUri }?.let { return it }
+        }
+        return previewModel
     }
 
     fun appendMixedModels(results: List<Pair<Uri, Boolean>>, takeUriPermissions: Boolean = true) {
@@ -794,7 +834,7 @@ fun MainRouteScreen(
                                     .background(Color(0x66000000), shape = RoundedCornerShape(16.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             )
-                            if (model.startTime != -1 && model.endTime != -1) {
+                            if (model.independentTime && model.startTime != -1 && model.endTime != -1) {
                                 Text(
                                     text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
                                     color = Color.White,
@@ -1328,11 +1368,10 @@ fun MainRouteScreen(
                     model = model,
                     statusBarTopPaddingDp = statusBarTopPaddingDp,
                     enableLiquidGlass = enableLiquidGlass,
-                    backdrop = liquidBackdrop,
                     onDismiss = { fullScreenPreviewModel = null },
                     onApply = {
                         // 预览页“应用”始终只应用当前这张壁纸，不应用整个播放列表。
-                        val latestSingle = wallpapers.firstOrNull { it.uuid == model.uuid } ?: model
+                        val latestSingle = resolveLatestPreviewModel(model)
                         applySingleWallpaper(latestSingle)
                     },
                     onReplaceAction = { isDynamic ->
@@ -1350,12 +1389,33 @@ fun MainRouteScreen(
                         val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
                         if (index >= 0) {
                             // 创建新对象替换，触发 Compose 重新渲染
-                            wallpapers[index] = model.copy(
+                            wallpapers[index] = wallpapers[index].copy(
                                 startTime = newStartTime,
                                 endTime = newEndTime,
                                 loop = newLoop,
                                 independentTime = newIndependentTime
                             )
+
+                            if (newIndependentTime && newStartTime != -1 && newEndTime != -1) {
+                                var closedConflict = false
+                                wallpapers.forEachIndexed { i, item ->
+                                    if (
+                                        i != index &&
+                                        item.independentTime &&
+                                        item.startTime != -1 &&
+                                        item.endTime != -1 &&
+                                        isTimeWindowOverlap(newStartTime, newEndTime, item.startTime, item.endTime)
+                                    ) {
+                                        wallpapers[i] = item.copy(
+                                            independentTime = false
+                                        )
+                                        closedConflict = true
+                                    }
+                                }
+                                if (closedConflict) {
+                                    context.showToast("独立时间冲突，已关闭上一个冲突的独立时间")
+                                }
+                            }
                         }
                         saveCache()
                     },
