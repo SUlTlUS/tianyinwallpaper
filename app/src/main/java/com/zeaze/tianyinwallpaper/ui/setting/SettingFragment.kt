@@ -212,22 +212,11 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
-                    SettingCheckItem("不显示权限提示", hidePermissionDialog, contentColor, groupBackgroundColor, isLightTheme) {
+                    SettingCheckItem("关闭权限提示", hidePermissionDialog, contentColor, groupBackgroundColor, isLightTheme) {
                         hidePermissionDialog = it
                         editor.putBoolean("hide_permission_dialog", it).apply()
                     }
-                    SettingCheckItem("随机切换壁纸", rand, contentColor, groupBackgroundColor, isLightTheme) {
-                        rand = it
-                        editor.putBoolean("rand", it).apply()
-                    }
-                    SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, groupBackgroundColor, isLightTheme) {
-                        wallpaperScroll = it
-                        editor.putBoolean("wallpaperScroll", it).apply()
-                        if (it && pageChange) {
-                            pageChange = false
-                            editor.putBoolean("pageChange", false).apply()
-                        }
-                    }
+
                 }
 
                 // Settings Group 2: Advanced
@@ -327,6 +316,11 @@ fun SettingRouteScreen(
                             shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
                     ) {
                         Column {
+
+                            SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor) {
+                                tempMinTime = minTime
+                                showMinTimeDialog = true
+                            }
                             SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, groupBackgroundColor, isLightTheme) {
                                 pageChange = it
                                 editor.putBoolean("pageChange", it).apply()
@@ -334,10 +328,6 @@ fun SettingRouteScreen(
                                     wallpaperScroll = false
                                     editor.putBoolean("wallpaperScroll", false).apply()
                                 }
-                            }
-                            SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor.copy(0.8f)) {
-                                tempMinTime = minTime
-                                showMinTimeDialog = true
                             }
                         }
                     }
@@ -361,7 +351,7 @@ fun SettingRouteScreen(
                                 if (s > 0) append("${s}秒")
                             }
                         }
-                        SettingTextItem("自动切换间隔：$intervalText", contentColor.copy(0.8f)) {
+                        SettingTextItem("自动切换间隔：$intervalText", contentColor) {
                             showAutoIntervalDialog = true
                         }
                     }
@@ -373,12 +363,25 @@ fun SettingRouteScreen(
                         exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
                             shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
                     ) {
-                        SettingTextItem("自动切换时间点：$autoSwitchPoints", contentColor.copy(0.8f)) {
+                        SettingTextItem("自动切换时间点：$autoSwitchPoints", contentColor) {
                             autoPointsInput = autoSwitchPoints
                             showAutoPointsDialog = true
                         }
                     }
                 }
+                    SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, groupBackgroundColor, isLightTheme) {
+                        wallpaperScroll = it
+                        editor.putBoolean("wallpaperScroll", it).apply()
+                        if (it && pageChange) {
+                            pageChange = false
+                            editor.putBoolean("pageChange", false).apply()
+                        }
+                    }
+                    SettingCheckItem("随机切换壁纸", rand, contentColor, groupBackgroundColor, isLightTheme) {
+                        rand = it
+                        editor.putBoolean("rand", it).apply()
+                    }
+
                 }
 
                 // Settings Group 4: About

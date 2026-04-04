@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.widget.Toast
 import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
+import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
@@ -266,7 +267,27 @@ fun AboutRouteScreen(
             onDismiss = { pendingOverwriteGroup = null },
             onConfirm = {
                 val group = pendingOverwriteGroup ?: return@LiquidConfirmOverlay
-                RxBus.postWithCode(RxConstants.RX_TRIGGER_OVERWRITE_WALLPAPER_LIST, group)
+                val normalizedList = runCatching {
+                    JSON.parseArray(group.s, TianYinWallpaperModel::class.java)
+                }.getOrNull()
+                if (normalizedList.isNullOrEmpty()) {
+                    Toast.makeText(context, "壁纸组数据无效，覆盖失败", Toast.LENGTH_SHORT).show()
+                    pendingOverwriteGroup = null
+                    return@LiquidConfirmOverlay
+                }
+
+                val normalizedJson = JSON.toJSONString(normalizedList)
+                // Persist immediately so overwrite still works even if Main screen is not active.
+                context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("wallpaperCache", normalizedJson)
+                    .putString("wallpaperTvCache", group.name ?: "")
+                    .apply()
+
+                RxBus.postWithCode(
+                    RxConstants.RX_TRIGGER_OVERWRITE_WALLPAPER_LIST,
+                    SaveData(normalizedJson, group.name)
+                )
                 Toast.makeText(context, "已覆盖当前壁纸列表", Toast.LENGTH_SHORT).show()
                 pendingOverwriteGroup = null
             }

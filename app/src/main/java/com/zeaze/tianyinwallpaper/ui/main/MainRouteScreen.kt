@@ -38,6 +38,8 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -77,12 +79,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.documentfile.provider.DocumentFile
 import com.alibaba.fastjson.JSON
 import com.kyant.shapes.Capsule
@@ -114,6 +118,7 @@ import java.io.IOException
 import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
@@ -135,6 +140,7 @@ private const val SNAP_LEFT = 1
 private const val SNAP_RIGHT = 2
 private const val SNAP_TOP = 4
 private const val SNAP_BOTTOM = 8
+private const val HOLD_SELECT_TIMEOUT_MS = 500L
 
 internal fun wallpaperTypeByMimeOrName(mimeType: String?, fileName: String?): Int? {
     val normalizedMime = mimeType.orEmpty().lowercase()
@@ -213,6 +219,7 @@ fun MainRouteScreen(
     onBottomBarVisibleChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val isLightTheme = !useDarkTheme
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
@@ -306,10 +313,11 @@ fun MainRouteScreen(
             } else {
                 list.add(0, SaveData(currentContent, groupName))
                 withContext(Dispatchers.IO) {
-                    FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
-                        context.showToast("壁纸组已保存到列表")
-                        RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
-                    }
+                    FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) { }
+                }
+                withContext(Dispatchers.Main) {
+                    context.showToast("壁纸组已保存到列表")
+                    RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
                 }
             }
         }
@@ -330,10 +338,11 @@ fun MainRouteScreen(
                 val item = list.removeAt(index)
                 list.add(0, item)
                 withContext(Dispatchers.IO) {
-                    FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) {
-                        context.showToast("壁纸组已覆盖保存")
-                        RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
-                    }
+                    FileUtil.save(context, JSON.toJSONString(list), FileUtil.dataPath) { }
+                }
+                withContext(Dispatchers.Main) {
+                    context.showToast("壁纸组已覆盖保存")
+                    RxBus.postWithCode(RxConstants.RX_GROUPS_CHANGED, Unit)
                 }
             }
             showOverwriteDialog = false
@@ -566,6 +575,9 @@ fun MainRouteScreen(
     }
 
     fun enterSelectionMode() {
+        if (!selectionMode) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
         selectionMode = true
         selectedPositions.clear()
     }
@@ -573,6 +585,28 @@ fun MainRouteScreen(
     fun exitSelectionMode() {
         selectionMode = false
         selectedPositions.clear()
+    }
+
+    fun dismissCurrentDialog() {
+        showWallpaperTypeDialog = false
+        showPermissionDialog = false
+        showDeleteSelectedDialog = false
+        showOverwriteDialog = false
+        showSaveDialog = false
+        timeDialogIndex = null
+    }
+
+    BackHandler(enabled = currentDialogState != null) {
+        dismissCurrentDialog()
+    }
+
+    BackHandler(
+        enabled = selectionMode &&
+            currentDialogState == null &&
+            fullScreenPreviewModel == null &&
+            !showLivePreview
+    ) {
+        exitSelectionMode()
     }
 
     // 发送选择模式状态
@@ -810,6 +844,30 @@ fun MainRouteScreen(
                                 }
                                 .longPressDraggableHandle()
                                 .clip(RoundedCornerShape(16.dp))
+                                .pointerInput(index, selectionMode) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+
+                                        val touchSlop = viewConfiguration.touchSlop
+                                        val stayedStillForTimeout = withTimeoutOrNull(HOLD_SELECT_TIMEOUT_MS) {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull false
+                                                if (!change.pressed) return@withTimeoutOrNull false
+                                                if ((change.position - down.position).getDistance() > touchSlop) {
+                                                    return@withTimeoutOrNull false
+                                                }
+                                            }
+                                        } == null
+
+                                        if (stayedStillForTimeout && !selectionMode) {
+                                            enterSelectionMode()
+                                            if (!selectedPositions.contains(index)) {
+                                                selectedPositions.add(index)
+                                            }
+                                        }
+                                    }
+                                }
                                 .clickable {
                                     if (selectionMode) {
                                         if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
@@ -907,12 +965,7 @@ fun MainRouteScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        showWallpaperTypeDialog = false
-                        showPermissionDialog = false
-                        showDeleteSelectedDialog = false
-                        showOverwriteDialog = false
-                        showSaveDialog = false
-                        timeDialogIndex = null
+                        dismissCurrentDialog()
                     }
             )
         }

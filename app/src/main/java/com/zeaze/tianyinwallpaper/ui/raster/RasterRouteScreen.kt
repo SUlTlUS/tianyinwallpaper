@@ -15,6 +15,7 @@ import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import com.zeaze.tianyinwallpaper.utils.RasterPrefs
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -35,6 +36,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -98,6 +101,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -105,7 +109,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyGridState
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
@@ -145,6 +151,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.tween
@@ -153,6 +160,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
 private const val MIN_STATIC_GROUP_IMAGES = 2
+private const val HOLD_SELECT_TIMEOUT_MS = 500L
 
 private enum class StaticPickMode {
     CREATE_NEW,
@@ -174,6 +182,7 @@ fun RasterRouteScreen(
     onBottomBarVisibleChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val activity = context as? Activity
     val isLightTheme = !useDarkTheme
     val contentColor = if (isLightTheme) Color.Black else Color.White
@@ -254,6 +263,9 @@ fun RasterRouteScreen(
     }
 
     fun enterSelectionMode(initialId: String? = null) {
+        if (!selectionMode) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
         selectionMode = true
         selectedIds.clear()
         if (initialId != null) {
@@ -264,6 +276,25 @@ fun RasterRouteScreen(
     fun exitSelectionMode() {
         selectionMode = false
         selectedIds.clear()
+    }
+
+    fun dismissCurrentDialog() {
+        showTypeDialog = false
+        showDeleteDialog = false
+        showPermissionDialog = false
+    }
+
+    BackHandler(enabled = showDeleteDialog) {
+        showDeleteDialog = false
+    }
+
+    BackHandler(
+        enabled = selectionMode &&
+            !showDeleteDialog &&
+            currentDialogState == null &&
+            detailGroup == null
+    ) {
+        exitSelectionMode()
     }
 
     // 发送选择模式状态
@@ -611,18 +642,26 @@ fun RasterRouteScreen(
         width.toFloat() / height.toFloat()
     }
 
-    // 拖拽排序状态（对齐 MainRouteScreen 的拖拽排序）
     val gridState = rememberLazyGridState()
-    var draggingItemIndex by remember { mutableStateOf<Int?>(null) }
-    var draggingItemKey by remember { mutableStateOf<Any?>(null) }
-    var dragOffset by remember { mutableStateOf(Offset.Zero) }
-    var startViewportOffset by remember { mutableStateOf(0) }
-    var draggingItemInitialOffset by remember { mutableStateOf(Offset.Zero) }
+    var pendingReorderSave by remember { mutableStateOf(false) }
+    val reorderableState = rememberReorderableLazyGridState(
+        lazyGridState = gridState,
+        onMove = { from, to ->
+            if (from.index == to.index) return@rememberReorderableLazyGridState
+            val movedItem = groups.removeAt(from.index)
+            groups.add(to.index, movedItem)
+            pendingReorderSave = true
+        }
+    )
 
-    // 辅助函数：更新排序后的选中索引
-    fun updateSelectedIdsAfterMove(from: Int, to: Int) {
-        val fromId = groups.getOrNull(from)?.id ?: return
-        // selectedIds 基于 id，不需要调整索引
+    LaunchedEffect(pendingReorderSave) {
+        if (pendingReorderSave) {
+            delay(300)
+            if (pendingReorderSave) {
+                persistGroups()
+                pendingReorderSave = false
+            }
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -642,98 +681,7 @@ fun RasterRouteScreen(
                 state = gridState,
                 columns = GridCells.Fixed(3),
                 modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { offset ->
-                                dragOffset = Offset.Zero
-                                val layoutInfo = gridState.layoutInfo
-                                startViewportOffset = layoutInfo.viewportStartOffset
-
-                                val touchedItem = layoutInfo.visibleItemsInfo
-                                    .filter { it.index != -1 }
-                                    .firstOrNull { item ->
-                                        val left = item.offset.x.toFloat()
-                                        val right = (item.offset.x + item.size.width).toFloat()
-                                        val top = (item.offset.y - startViewportOffset).toFloat()
-                                        val bottom = (item.offset.y - startViewportOffset + item.size.height).toFloat()
-                                        offset.x in left..right && offset.y in top..bottom
-                                    }
-
-                                if (touchedItem != null) {
-                                    draggingItemIndex = touchedItem.index
-                                    draggingItemKey = touchedItem.key
-                                    draggingItemInitialOffset = Offset(touchedItem.offset.x.toFloat(), touchedItem.offset.y.toFloat() - startViewportOffset)
-                                } else {
-                                    layoutInfo.visibleItemsInfo
-                                        .filter { it.index != -1 }
-                                        .minByOrNull { item ->
-                                            val screenCenterX = item.offset.x + item.size.width / 2f
-                                            val screenCenterY = item.offset.y - startViewportOffset + item.size.height / 2f
-                                            (screenCenterX - offset.x) * (screenCenterX - offset.x) +
-                                                    (screenCenterY - offset.y) * (screenCenterY - offset.y)
-                                        }?.let { item ->
-                                            draggingItemIndex = item.index
-                                            draggingItemKey = item.key
-                                            draggingItemInitialOffset = Offset(item.offset.x.toFloat(), item.offset.y.toFloat() - startViewportOffset)
-                                        }
-                                }
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                dragOffset += dragAmount
-                                draggingItemKey?.let { currentKey ->
-                                    val draggingItem = gridState.layoutInfo.visibleItemsInfo.find { it.key == currentKey }
-                                    if (draggingItem != null) {
-                                        val currentIndex = draggingItem.index
-
-                                        val draggingScreenCenter = draggingItemInitialOffset + dragOffset + Offset(
-                                            draggingItem.size.width / 2f,
-                                            draggingItem.size.height / 2f
-                                        )
-
-                                        gridState.layoutInfo.visibleItemsInfo
-                                            .filter { it.key != currentKey && it.index != -1 }
-                                            .minByOrNull { item ->
-                                                val screenCenterX = item.offset.x + item.size.width / 2f
-                                                val screenCenterY = item.offset.y - startViewportOffset + item.size.height / 2f
-                                                (screenCenterX - draggingScreenCenter.x) * (screenCenterX - draggingScreenCenter.x) +
-                                                        (screenCenterY - draggingScreenCenter.y) * (screenCenterY - draggingScreenCenter.y)
-                                            }?.let { targetItem ->
-                                                val targetScreenCenter = Offset(
-                                                    targetItem.offset.x + targetItem.size.width / 2f,
-                                                    targetItem.offset.y - startViewportOffset + targetItem.size.height / 2f
-                                                )
-                                                val distSq = (targetScreenCenter.x - draggingScreenCenter.x) * (targetScreenCenter.x - draggingScreenCenter.x) +
-                                                        (targetScreenCenter.y - draggingScreenCenter.y) * (targetScreenCenter.y - draggingScreenCenter.y)
-
-                                                if (distSq < (targetItem.size.width * targetItem.size.width * 0.6f)) {
-                                                    val targetIndex = targetItem.index
-
-                                                    val movedItem = groups.removeAt(currentIndex)
-                                                    groups.add(targetIndex, movedItem)
-
-                                                    draggingItemIndex = targetIndex
-                                                }
-                                            }
-                                    }
-                                }
-                            },
-                            onDragEnd = {
-                                draggingItemIndex = null
-                                draggingItemKey = null
-                                dragOffset = Offset.Zero
-                                startViewportOffset = 0
-                                persistGroups()
-                            },
-                            onDragCancel = {
-                                draggingItemIndex = null
-                                draggingItemKey = null
-                                dragOffset = Offset.Zero
-                                startViewportOffset = 0
-                            }
-                        )
-                    },
+                    .fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 12.dp,
                     end = 12.dp,
@@ -745,44 +693,42 @@ fun RasterRouteScreen(
             ) {
                 itemsIndexed(groups, key = { _, group -> group.id }) { index, group ->
                     val selected = selectedIds.contains(group.id)
-                    val isDragging = draggingItemKey != null && draggingItemKey == group.id
+                    ReorderableItem(reorderableState, key = group.id) { isDragging ->
+                        RasterGroupCard(
+                            modifier = Modifier
+                                .longPressDraggableHandle()
+                                .pointerInput(group.id, selectionMode) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val stayedStillForTimeout = withTimeoutOrNull(HOLD_SELECT_TIMEOUT_MS) {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id }
+                                                    ?: return@withTimeoutOrNull false
+                                                if (!change.pressed) return@withTimeoutOrNull false
+                                            }
+                                        } == null
 
-                    val currentOffset = if (isDragging) {
-                        val currentItem = gridState.layoutInfo.visibleItemsInfo.find { it.key == draggingItemKey }
-                        if (currentItem != null) {
-                            val itemScreenOffset = Offset(
-                                currentItem.offset.x.toFloat(),
-                                currentItem.offset.y.toFloat() - startViewportOffset
-                            )
-                            Offset(
-                                draggingItemInitialOffset.x + dragOffset.x - itemScreenOffset.x,
-                                draggingItemInitialOffset.y + dragOffset.y - itemScreenOffset.y
-                            )
-                        } else dragOffset
-                    } else Offset.Zero
-                    RasterGroupCard(
-                        group = group,
-                        selected = selected,
-                        aspectRatio = cardAspectRatio,
-                        isDragging = isDragging,
-                        dragOffset = currentOffset,
-                        showRemoveButton = selectionMode,
-                        onRemove = { removeGroupById(group.id) },
-                        onClick = {
-                            if (selectionMode) {
-                                if (selected) selectedIds.remove(group.id) else selectedIds.add(group.id)
-                            } else {
-                                detailGroup = group.copy()
+                                        if (stayedStillForTimeout && !selectionMode) {
+                                            enterSelectionMode(group.id)
+                                        }
+                                    }
+                                },
+                            group = group,
+                            selected = selected,
+                            aspectRatio = cardAspectRatio,
+                            isDragging = isDragging,
+                            showRemoveButton = selectionMode,
+                            onRemove = { removeGroupById(group.id) },
+                            onClick = {
+                                if (selectionMode) {
+                                    if (selected) selectedIds.remove(group.id) else selectedIds.add(group.id)
+                                } else {
+                                    detailGroup = group.copy()
+                                }
                             }
-                        },
-                        onLongClick = {
-                            if (!selectionMode) {
-                                enterSelectionMode(group.id)
-                            } else if (!selected) {
-                                selectedIds.add(group.id)
-                            }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -809,9 +755,7 @@ fun RasterRouteScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        showTypeDialog = false
-                        showDeleteDialog = false
-                        showPermissionDialog = false
+                        dismissCurrentDialog()
                         staticEditorGroupId = null
                     }
             )
@@ -1214,6 +1158,7 @@ fun RasterRouteScreen(
 
 @Composable
 private fun RasterGroupCard(
+    modifier: Modifier = Modifier,
     group: RasterGroupModel,
     selected: Boolean,
     aspectRatio: Float,
@@ -1221,14 +1166,13 @@ private fun RasterGroupCard(
     dragOffset: Offset = Offset.Zero,
     showRemoveButton: Boolean = false,
     onRemove: () -> Unit = {},
-    onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onClick: () -> Unit
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val safeRatio = if (aspectRatio > 0f) aspectRatio else 9f / 16f
         val cardHeight = maxWidth / safeRatio
         Box(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxWidth()
                 .height(cardHeight)
                 .zIndex(if (isDragging) 1f else 0f)
@@ -1243,7 +1187,7 @@ private fun RasterGroupCard(
                 }
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.Black)
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .clickable(onClick = onClick)
         ) {
             RasterGroupThumbnail(group = group)
             Text(
