@@ -303,12 +303,13 @@ class TianYinWallpaperService : WallpaperService() {
             xOffsetStep: Float, yOffsetStep: Float,
             xPixelOffset: Int, yPixelOffset: Int
         ) {
+            val autoSwitchMode = pref?.getInt(PREF_AUTO_SWITCH_MODE, 0) ?: 0
             val scrollEffective = wallpaperScrollEnabled && canCurrentWallpaperScrollHorizontally()
             currentXOffset = if (scrollEffective) xOffset else 0.5f
             renderer?.setXOffset(currentXOffset)
             renderer?.requestRender()
 
-            if (pageChangeEnabled && (list?.size ?: 0) > 1 && xOffsetStep > 0 && lastXOffset != -1f) {
+            if (autoSwitchMode == 0 && pageChangeEnabled && (list?.size ?: 0) > 1 && xOffsetStep > 0 && lastXOffset != -1f) {
                 val oldPage = (lastXOffset / xOffsetStep).roundToInt()
                 val newPage = (xOffset / xOffsetStep).roundToInt()
                 if (oldPage != newPage) nextWallpaper()

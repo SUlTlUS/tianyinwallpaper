@@ -11,10 +11,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -68,6 +71,8 @@ import com.zeaze.tianyinwallpaper.backdrop.effects.lens
 import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.MainActivity
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidSegmentedOption
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidSegmentedSelector
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
@@ -79,11 +84,9 @@ import kotlinx.coroutines.launch
 
 private sealed class SettingsDialogState {
     object MinTime : SettingsDialogState()
-    object AutoMode : SettingsDialogState()
     object AutoInterval : SettingsDialogState()
     object AutoPoints : SettingsDialogState()
     object PickTime : SettingsDialogState()
-    object Theme : SettingsDialogState()
 }
 
 @OptIn(ExperimentalAnimationApi::class)
@@ -124,8 +127,6 @@ fun SettingRouteScreen(
     }
     var showMinTimeDialog by remember { mutableStateOf(false) }
     var tempMinTime by remember { mutableStateOf(minTime) }
-    var showAutoModeDialog by remember { mutableStateOf(false) }
-    var showThemeDialog by remember { mutableStateOf(false) }
 
     var showAutoIntervalDialog by remember { mutableStateOf(false) }
     var showAutoPointsDialog by remember { mutableStateOf(false) }
@@ -142,11 +143,9 @@ fun SettingRouteScreen(
 
     val currentDialogState = when {
         showMinTimeDialog -> SettingsDialogState.MinTime
-        showAutoModeDialog -> SettingsDialogState.AutoMode
         showAutoIntervalDialog -> SettingsDialogState.AutoInterval
         showAutoPointsDialog -> SettingsDialogState.AutoPoints
         showTimePickerDialog -> SettingsDialogState.PickTime
-        showThemeDialog -> SettingsDialogState.Theme
         else -> null
     }
 
@@ -155,6 +154,18 @@ fun SettingRouteScreen(
         if (isLightTheme) Color(0xFFF2F2F6)
         else Color(0xFF121212)
     val contentColor = if (isLightTheme) Color.Black else Color.White
+    val themeModeOptions = remember {
+        listOf(
+            LiquidSegmentedOption(MainActivity.THEME_MODE_FOLLOW_SYSTEM, "跟随系统"),
+            LiquidSegmentedOption(MainActivity.THEME_MODE_LIGHT, "浅色"),
+            LiquidSegmentedOption(MainActivity.THEME_MODE_DARK, "深色")
+        )
+    }
+    val autoSwitchModeOptions = remember {
+        AUTO_SWITCH_MODE_ITEMS.mapIndexed { index, label ->
+            LiquidSegmentedOption(index, label)
+        }
+    }
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
     val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF121212).copy(0.56f)
@@ -209,14 +220,6 @@ fun SettingRouteScreen(
                         rand = it
                         editor.putBoolean("rand", it).apply()
                     }
-                    SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, groupBackgroundColor, isLightTheme) {
-                        pageChange = it
-                        editor.putBoolean("pageChange", it).apply()
-                        if (it && wallpaperScroll) {
-                            wallpaperScroll = false
-                            editor.putBoolean("wallpaperScroll", false).apply()
-                        }
-                    }
                     SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, groupBackgroundColor, isLightTheme) {
                         wallpaperScroll = it
                         editor.putBoolean("wallpaperScroll", it).apply()
@@ -234,57 +237,151 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
-                    SettingTextItem("壁纸最小切换时间: ${minTime}秒（仅不可见切换模式生效）", contentColor) {
-                        tempMinTime = minTime
-                        showMinTimeDialog = true
-                    }
-                    val themeModeText = when (themeMode) {
-                        MainActivity.THEME_MODE_LIGHT -> "浅色"
-                        MainActivity.THEME_MODE_DARK -> "深色"
-                        else -> "跟随系统"
-                    }
-                    SettingTextItem("主题模式：$themeModeText", contentColor) {
-                        showThemeDialog = true
-                    }
-                    val modeText = if (autoSwitchMode >= AUTO_SWITCH_MODE_NONE && autoSwitchMode < AUTO_SWITCH_MODE_ITEMS.size) {
-                        AUTO_SWITCH_MODE_ITEMS[autoSwitchMode]
-                    } else {
-                        AUTO_SWITCH_MODE_ITEMS[AUTO_SWITCH_MODE_NONE]
-                    }
-                SettingTextItem("自动切换模式：$modeText", contentColor) {
-                    showAutoModeDialog = true
+                    Text(
+                        text = "主题模式",
+                        style = TextStyle(
+                            color = contentColor,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    )
+                    LiquidSegmentedSelector(
+                        options = themeModeOptions,
+                        selectedValue = { themeMode },
+                        onValueSelected = { mode ->
+                            if (mode != themeMode) {
+                                editor.putInt(MainActivity.PREF_THEME_MODE, mode).apply()
+                                themeMode = mode
+                                onThemeModeChange(mode)
+                            }
+                        },
+                        isLightTheme = isLightTheme,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 16.dp)
+                    )
                 }
 
-                if (autoSwitchMode != AUTO_SWITCH_MODE_NONE) {
-                    Column(Modifier.padding(vertical = 4.dp)) {
-                        if (autoSwitchMode == 1) {
-                            val intervalText = remember(autoSwitchInterval) {
-                                val d = autoSwitchInterval / (24 * 3600)
-                                val h = (autoSwitchInterval % (24 * 3600)) / 3600
-                                val m = (autoSwitchInterval % 3600) / 60
-                                val s = autoSwitchInterval % 60
-                                buildString {
-                                    if (d > 0) append("${d}天")
-                                    if (h > 0) append("${h}时")
-                                    if (m > 0 || (d == 0L && h == 0L)) append("${m}分")
-                                    if (s > 0) append("${s}秒")
+                // Settings Group 3: Switch Mode
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(groupBackgroundColor)
+                ) {
+                    Text(
+                        text = "切换模式",
+                        style = TextStyle(
+                            color = contentColor,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    )
+                    LiquidSegmentedSelector(
+                        options = autoSwitchModeOptions,
+                        selectedValue = { autoSwitchMode },
+                        onValueSelected = { index ->
+                            if (index != autoSwitchMode) {
+                                editor.putInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, index)
+                                editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
+                                editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
+                                editor.apply()
+                                autoSwitchMode = index
+                                autoSwitchInterval = pref.getLong(
+                                    TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_SECONDS,
+                                    pref.getLong("autoSwitchIntervalMinutes", 60L) * 60L
+                                )
+                                autoSwitchPoints = pref.getString(
+                                    TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS,
+                                    DEFAULT_AUTO_SWITCH_TIME_POINTS
+                                ).takeUnless { TextUtils.isEmpty(it) } ?: DEFAULT_AUTO_SWITCH_TIME_POINTS
+                            }
+                        },
+                        isLightTheme = isLightTheme,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 12.dp)
+                    )
+
+                val autoModeDetailSpacer by animateDpAsState(
+                    targetValue = 4.dp,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "AutoModeDetailSpacer"
+                )
+                Spacer(Modifier.height(autoModeDetailSpacer))
+
+                Column(Modifier.fillMaxWidth()) {
+                    AnimatedVisibility(
+                        visible = autoSwitchMode == AUTO_SWITCH_MODE_NONE,
+                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                    ) {
+                        Column {
+                            SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, groupBackgroundColor, isLightTheme) {
+                                pageChange = it
+                                editor.putBoolean("pageChange", it).apply()
+                                if (it && wallpaperScroll) {
+                                    wallpaperScroll = false
+                                    editor.putBoolean("wallpaperScroll", false).apply()
                                 }
                             }
-                            SettingTextItem("自动切换间隔：$intervalText", contentColor.copy(0.8f)) {
-                                showAutoIntervalDialog = true
+                            SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor.copy(0.8f)) {
+                                tempMinTime = minTime
+                                showMinTimeDialog = true
                             }
                         }
-                        if (autoSwitchMode == 2) {
-                            SettingTextItem("自动切换时间点：$autoSwitchPoints", contentColor.copy(0.8f)) {
-                                autoPointsInput = autoSwitchPoints
-                                showAutoPointsDialog = true
+                    }
+
+                    AnimatedVisibility(
+                        visible = autoSwitchMode == 1,
+                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                    ) {
+                        val intervalText = remember(autoSwitchInterval) {
+                            val d = autoSwitchInterval / (24 * 3600)
+                            val h = (autoSwitchInterval % (24 * 3600)) / 3600
+                            val m = (autoSwitchInterval % 3600) / 60
+                            val s = autoSwitchInterval % 60
+                            buildString {
+                                if (d > 0) append("${d}天")
+                                if (h > 0) append("${h}时")
+                                if (m > 0 || (d == 0L && h == 0L)) append("${m}分")
+                                if (s > 0) append("${s}秒")
                             }
+                        }
+                        SettingTextItem("自动切换间隔：$intervalText", contentColor.copy(0.8f)) {
+                            showAutoIntervalDialog = true
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = autoSwitchMode == 2,
+                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                    ) {
+                        SettingTextItem("自动切换时间点：$autoSwitchPoints", contentColor.copy(0.8f)) {
+                            autoPointsInput = autoSwitchPoints
+                            showAutoPointsDialog = true
                         }
                     }
                 }
                 }
 
-                // Settings Group 3: About
+                // Settings Group 4: About
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -412,11 +509,9 @@ fun SettingRouteScreen(
                         indication = null
                     ) {
                         showMinTimeDialog = false
-                        showAutoModeDialog = false
                         showAutoIntervalDialog = false
                         showAutoPointsDialog = false
                         showTimePickerDialog = false
-                        showThemeDialog = false
                     }
             )
         }
@@ -523,61 +618,6 @@ fun SettingRouteScreen(
                                     ) {
                                         BasicText("取消", style = TextStyle(contentColor, 16.sp))
                                     }
-                                }
-                            }
-                        }
-                        SettingsDialogState.AutoMode -> {
-                            Column(
-                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                BasicText("选择自动切换模式", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
-                                Spacer(Modifier.height(8.dp))
-                                AUTO_SWITCH_MODE_ITEMS.forEachIndexed { index, mode ->
-                                    val isSelected = autoSwitchMode == index
-                                    Row(
-                                        Modifier
-                                            .clip(Capsule())
-                                            .background(if (isSelected) accentColor else containerColor.copy(0.2f))
-                                            .clickable {
-                                                editor.putInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, index)
-                                                editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_ANCHOR_AT, System.currentTimeMillis())
-                                                editor.putLong(TianYinWallpaperService.PREF_AUTO_SWITCH_LAST_SWITCH_AT, 0L)
-                                                editor.apply()
-                                                autoSwitchMode = index
-                                                autoSwitchInterval = pref.getLong(
-                                                    TianYinWallpaperService.PREF_AUTO_SWITCH_INTERVAL_SECONDS,
-                                                    pref.getLong("autoSwitchIntervalMinutes", 60L) * 60L
-                                                )
-                                                autoSwitchPoints = pref.getString(
-                                                    TianYinWallpaperService.PREF_AUTO_SWITCH_TIME_POINTS,
-                                                    DEFAULT_AUTO_SWITCH_TIME_POINTS
-                                                ).takeUnless { TextUtils.isEmpty(it) } ?: DEFAULT_AUTO_SWITCH_TIME_POINTS
-                                                showAutoModeDialog = false
-                                            }
-                                            .height(48.dp)
-                                            .fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        BasicText(
-                                            if (isSelected) "✓ $mode" else mode,
-                                            style = TextStyle(if (isSelected) Color.White else contentColor, 16.sp)
-                                        )
-                                    }
-                                }
-                                Row(
-                                    Modifier
-                                        .clip(Capsule())
-                                        .background(containerColor.copy(0.2f))
-                                        .clickable { showAutoModeDialog = false }
-                                        .height(48.dp)
-                                        .fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    BasicText("取消", style = TextStyle(contentColor, 16.sp))
                                 }
                             }
                         }
@@ -857,56 +897,6 @@ fun SettingRouteScreen(
                                 }
                             }
                         }
-                        SettingsDialogState.Theme -> {
-                            val themeOptions = listOf(
-                                MainActivity.THEME_MODE_FOLLOW_SYSTEM to "跟随系统",
-                                MainActivity.THEME_MODE_LIGHT to "浅色",
-                                MainActivity.THEME_MODE_DARK to "深色"
-                            )
-                            Column(
-                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                BasicText("选择主题模式", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
-                                Spacer(Modifier.height(8.dp))
-                                themeOptions.forEach { (mode, label) ->
-                                    val isSelected = themeMode == mode
-                                    Row(
-                                        Modifier
-                                            .clip(Capsule())
-                                            .background(if (isSelected) accentColor else containerColor.copy(0.2f))
-                                            .clickable {
-                                                editor.putInt(MainActivity.PREF_THEME_MODE, mode).apply()
-                                                themeMode = mode
-                                                onThemeModeChange(mode)
-                                                showThemeDialog = false
-                                            }
-                                            .height(48.dp)
-                                            .fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        BasicText(
-                                            if (isSelected) "✓ $label" else label,
-                                            style = TextStyle(if (isSelected) Color.White else contentColor, 16.sp)
-                                        )
-                                    }
-                                }
-                                Row(
-                                    Modifier
-                                        .clip(Capsule())
-                                        .background(containerColor.copy(0.2f))
-                                        .clickable { showThemeDialog = false }
-                                        .height(48.dp)
-                                        .fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    BasicText("取消", style = TextStyle(contentColor, 16.sp))
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -1145,4 +1135,4 @@ private fun getAboutText(): String {
 private const val DEFAULT_AUTO_SWITCH_INTERVAL_SECONDS = 3600L
 private const val DEFAULT_AUTO_SWITCH_TIME_POINTS = "12:00"
 private const val AUTO_SWITCH_MODE_NONE = 0
-private val AUTO_SWITCH_MODE_ITEMS = arrayOf("离开桌面切换", "按固定时间间隔切换", "按每日时间点切换")
+private val AUTO_SWITCH_MODE_ITEMS = arrayOf("离开桌面", "时间间隔", "时间点")

@@ -2,10 +2,7 @@ package com.zeaze.tianyinwallpaper.ui.about
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.Build
-import android.util.Log
-import android.util.LruCache
 import android.widget.Toast
 import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
@@ -13,11 +10,6 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
-import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
-import com.zeaze.tianyinwallpaper.backdrop.effects.blur
-import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
-import com.zeaze.tianyinwallpaper.backdrop.effects.lens
-import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidConfirmOverlay
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
@@ -37,8 +29,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material.MaterialTheme
@@ -50,6 +45,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,18 +58,29 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.alibaba.fastjson.JSON
 import com.kyant.shapes.Capsule
-import com.kyant.shapes.RoundedRectangle
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 
+private data class AboutGroupUiModel(
+    val saveData: SaveData,
+    val wallpapers: List<TianYinWallpaperModel>
+)
+
+@OptIn(FlowPreview::class)
 @Composable
 fun AboutRouteScreen(
     useDarkTheme: Boolean,
@@ -87,15 +94,24 @@ fun AboutRouteScreen(
         if (id > 0) context.resources.getDimensionPixelSize(id) else 0
     }
     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
-    val saveDataList = remember { mutableStateListOf<SaveData>() }
+    val groupUiList = remember { mutableStateListOf<AboutGroupUiModel>() }
     val selectedPositions = remember { mutableStateListOf<Int>() }
+    val listState = rememberLazyListState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var loadGroupsJob by remember { mutableStateOf<Job?>(null) }
+    var lastGroupsJson by remember { mutableStateOf<String?>(null) }
+    var groupsVersion by remember { mutableStateOf(0) }
     var selectionMode by remember { mutableStateOf(false) }
     var pendingOverwriteGroup by remember { mutableStateOf<SaveData?>(null) }
+    val isLightTheme = !useDarkTheme
     val enableLiquidGlass = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
-    val backgroundColor = MaterialTheme.colors.background
+    val backgroundColor = if (isLightTheme) Color(0xFFF2F2F6) else Color(0xFF121212)
     val canvasBackdrop = rememberCanvasBackdrop { drawRect(backgroundColor) }
     val dialogBackdrop = liquidBackdrop ?: canvasBackdrop
+    val groupBackgroundColor = if (isLightTheme) Color.White else Color(0xFF1E1E1E)
+    val groupLabelColor = if (isLightTheme) Color(0xFF1A1A1F) else Color(0xFFF5F5FA)
+    val selectedIndicatorColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF4DA3FF)
 
     fun enterSelectionMode() {
         selectionMode = true
@@ -108,15 +124,26 @@ fun AboutRouteScreen(
     }
 
     fun loadGroups() {
-        Thread {
+        loadGroupsJob?.cancel()
+        loadGroupsJob = scope.launch(Dispatchers.IO) {
             val data = FileUtil.loadData(context, FileUtil.dataPath)
+            if (data == lastGroupsJson) return@launch
             val list = JSON.parseArray(data, SaveData::class.java) ?: emptyList()
-            (context as? android.app.Activity)?.runOnUiThread {
-                saveDataList.clear()
-                saveDataList.addAll(list)
-                selectedPositions.clear()
+            val uiModels = list.map { saveData ->
+                AboutGroupUiModel(
+                    saveData = saveData,
+                    wallpapers = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java) ?: emptyList()
+                )
             }
-        }.start()
+            withContext(Dispatchers.Main) {
+                if (data == lastGroupsJson) return@withContext
+                lastGroupsJson = data
+                groupUiList.clear()
+                groupUiList.addAll(uiModels)
+                selectedPositions.clear()
+                groupsVersion++
+            }
+        }
     }
 
     fun deleteSelectedGroups() {
@@ -125,11 +152,14 @@ fun AboutRouteScreen(
             return
         }
         val selectedSet = selectedPositions.toSet()
-        val remained = saveDataList.filterIndexed { index, _ -> index !in selectedSet }
-        FileUtil.save(context, JSON.toJSONString(remained), FileUtil.dataPath) {
-            (context as? android.app.Activity)?.runOnUiThread {
-                saveDataList.clear()
-                saveDataList.addAll(remained)
+        val remained = groupUiList.filterIndexed { index, _ -> index !in selectedSet }
+        val remainedJson = JSON.toJSONString(remained.map { it.saveData })
+        FileUtil.save(context, remainedJson, FileUtil.dataPath) {
+            scope.launch {
+                lastGroupsJson = remainedJson
+                groupUiList.clear()
+                groupUiList.addAll(remained)
+                groupsVersion++
                 exitSelectionMode()
                 Toast.makeText(context, "已删除选中壁纸组", Toast.LENGTH_SHORT).show()
             }
@@ -137,6 +167,27 @@ fun AboutRouteScreen(
     }
 
     LaunchedEffect(Unit) { loadGroups() }
+    val preloadRequests = remember(groupsVersion) { buildPreloadRequests(groupUiList) }
+    LaunchedEffect(listState, groupsVersion) {
+        if (preloadRequests.isEmpty()) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow {
+            val visibleItems = listState.layoutInfo.visibleItemsInfo
+            val start = visibleItems.firstOrNull()?.index ?: 0
+            val end = visibleItems.lastOrNull()?.index ?: start
+            start to end
+        }
+            .debounce(120)
+            .distinctUntilChanged()
+            .collectLatest { (start, end) ->
+                ThumbnailUtils.preloadVisibleRange(
+                    context = context,
+                    requests = preloadRequests,
+                    visibleStart = start,
+                    visibleEnd = end,
+                    preloadOffset = PRELOAD_RANGE_OFFSET
+                )
+            }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -153,6 +204,7 @@ fun AboutRouteScreen(
             .subscribe { loadGroups() }
 
         onDispose {
+            loadGroupsJob?.cancel()
             optionsDisposable.dispose()
             groupsChangedDisposable.dispose()
             lifecycleOwner.lifecycle.removeObserver(observer)
@@ -168,8 +220,9 @@ fun AboutRouteScreen(
                     if (enableLiquidGlass && liquidBackdrop != null) m.layerBackdrop(liquidBackdrop) else m
                 }
         ) {
-            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colors.background))
+            Box(modifier = Modifier.fillMaxSize().background(backgroundColor))
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 12.dp),
@@ -180,19 +233,24 @@ fun AboutRouteScreen(
                 )
             ) {
                 itemsIndexed(
-                    saveDataList,
-                    key = { _, item -> "${item.name ?: ""}\u0000${item.s ?: ""}" }
-                ) { index, data ->
+                    groupUiList,
+                    key = { _, item -> "${item.saveData.name ?: ""}\u0000${item.saveData.s ?: ""}" }
+                ) { index, group ->
                     val selected = selectedPositions.contains(index)
                     AboutGroupItem(
+                        modifier = Modifier.fillMaxWidth(),
                         context = context,
-                        data = data,
+                        data = group.saveData,
+                        wallpapers = group.wallpapers,
+                        labelColor = groupLabelColor,
+                        selectedIndicatorColor = selectedIndicatorColor,
+                        containerColor = groupBackgroundColor,
                         selected = selected,
                         onClick = {
                             if (selectionMode) {
                                 if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
                             } else {
-                                pendingOverwriteGroup = data
+                                pendingOverwriteGroup = group.saveData
                             }
                         }
                     )
@@ -215,7 +273,7 @@ fun AboutRouteScreen(
         )
 
         if (selectionMode) {
-            val isAllSelected = selectedPositions.size == saveDataList.size && saveDataList.isNotEmpty()
+            val isAllSelected = selectedPositions.size == groupUiList.size && groupUiList.isNotEmpty()
             com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
                 enableLiquidGlass = enableLiquidGlass,
@@ -229,7 +287,7 @@ fun AboutRouteScreen(
                         selectedPositions.clear()
                     } else {
                         selectedPositions.clear()
-                        saveDataList.indices.forEach { selectedPositions.add(it) }
+                        groupUiList.indices.forEach { selectedPositions.add(it) }
                     }
                 }
             )
@@ -245,61 +303,25 @@ fun AboutRouteScreen(
                 val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
                 val textColor = if (isDark) Color.White else Color.Black
 
-                if (enableLiquidGlass && liquidBackdrop != null) {
-                    LiquidButton(
-                        onClick = onBack,
-                        backdrop = liquidBackdrop,
-                        surfaceColor = adaptiveSurfaceColor,
-                        modifier = Modifier.height(48.dp)
-                    ) {
-                        BasicText(
-                            text = "返回",
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            style = TextStyle(textColor, 15.sp)
-                        )
-                    }
-                } else {
-                    Surface(
-                        modifier = Modifier
-                            .height(48.dp)
-                             .clickable { onBack() },
-                        shape = Capsule(),
-                        color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-                        border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                            Text(text = "返回", color = textColor, fontSize = 15.sp)
-                        }
-                    }
-                }
+                AboutTopActionButton(
+                    text = "返回",
+                    onClick = onBack,
+                    enableLiquidGlass = enableLiquidGlass,
+                    liquidBackdrop = liquidBackdrop,
+                    surfaceColor = adaptiveSurfaceColor,
+                    isDark = isDark,
+                    textColor = textColor
+                )
 
-                if (enableLiquidGlass && liquidBackdrop != null) {
-                    LiquidButton(
-                        onClick = { enterSelectionMode() },
-                        backdrop = liquidBackdrop,
-                        surfaceColor = adaptiveSurfaceColor,
-                        modifier = Modifier.height(48.dp)
-                    ) {
-                        BasicText(
-                            text = "多选",
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            style = TextStyle(textColor, 15.sp)
-                        )
-                    }
-                } else {
-                    Surface(
-                        modifier = Modifier
-                            .height(48.dp)
-                             .clickable { enterSelectionMode() },
-                        shape = Capsule(),
-                        color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-                        border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                            Text(text = "多选", color = textColor, fontSize = 15.sp)
-                        }
-                    }
-                }
+                AboutTopActionButton(
+                    text = "多选",
+                    onClick = { enterSelectionMode() },
+                    enableLiquidGlass = enableLiquidGlass,
+                    liquidBackdrop = liquidBackdrop,
+                    surfaceColor = adaptiveSurfaceColor,
+                    isDark = isDark,
+                    textColor = textColor
+                )
             }
         }
     }
@@ -310,28 +332,63 @@ fun AboutRouteScreen(
 }
 
 @Composable
+private fun AboutTopActionButton(
+    text: String,
+    onClick: () -> Unit,
+    enableLiquidGlass: Boolean,
+    liquidBackdrop: LayerBackdrop?,
+    surfaceColor: Color,
+    isDark: Boolean,
+    textColor: Color
+) {
+    if (enableLiquidGlass && liquidBackdrop != null) {
+        LiquidButton(
+            onClick = onClick,
+            backdrop = liquidBackdrop,
+            surfaceColor = surfaceColor,
+            modifier = Modifier.height(48.dp)
+        ) {
+            BasicText(
+                text = text,
+                modifier = Modifier.padding(horizontal = 16.dp),
+                style = TextStyle(textColor, 15.sp)
+            )
+        }
+    } else {
+        Surface(
+            modifier = Modifier
+                .height(48.dp)
+                .clickable { onClick() },
+            shape = Capsule(),
+            color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+            border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                Text(text = text, color = textColor, fontSize = 15.sp)
+            }
+        }
+    }
+}
+
+@Composable
 private fun AboutGroupItem(
+    modifier: Modifier = Modifier,
     context: Context,
     data: SaveData,
+    wallpapers: List<TianYinWallpaperModel>,
+    labelColor: Color,
+    selectedIndicatorColor: Color,
+    containerColor: Color,
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    val wallpapers = remember(data.s) {
-        JSON.parseArray(data.s, TianYinWallpaperModel::class.java) ?: emptyList()
-    }
-    val cardShape = RoundedCornerShape(16.dp)
+    val cardShape = RoundedCornerShape(28.dp)
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
+        modifier = modifier
+            .clip(cardShape)
             .clickable { onClick() },
         shape = cardShape,
-        elevation = 4.dp,
-        color = MaterialTheme.colors.surface,
-        border = BorderStroke(
-            if (selected) 1.2.dp else 0.5.dp,
-            if (selected) Color(0xFF2A83FF) else MaterialTheme.colors.onSurface.copy(alpha = 0.1f)
-        )
+        color = containerColor,
     ) {
         Box(
             modifier = Modifier
@@ -343,7 +400,11 @@ private fun AboutGroupItem(
                     .fillMaxWidth()
                     .padding(10.dp)
             ) {
-                Text(text = data.name ?: "未命名壁纸组")
+                Text(
+                    text = data.name ?: "未命名壁纸组",
+                    color = labelColor,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
                 Spacer(modifier = Modifier.height(ITEM_PREVIEW_TOP_MARGIN_DP.dp))
                 Row(
                     modifier = Modifier
@@ -366,9 +427,24 @@ private fun AboutGroupItem(
             if (selected) {
                 Box(
                     modifier = Modifier
-                         .fillMaxSize()
-                         .background(Color(0x33000000))
+                        .fillMaxSize()
+                        .clip(cardShape)
+                        .background(Color(0x33000000))
                 )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(selectedIndicatorColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    BasicText(
+                        text = "✓",
+                        style = TextStyle(color = Color.White, fontSize = 12.sp)
+                    )
+                }
             }
         }
     }
@@ -376,15 +452,14 @@ private fun AboutGroupItem(
 
 @Composable
 private fun PreviewImage(context: Context, model: TianYinWallpaperModel?, modifier: Modifier) {
-    var bitmap by remember(model) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(model) {
-        bitmap = loadPreviewBitmap(context, model)
+    val bitmap by produceState<Bitmap?>(initialValue = null, model) {
+        value = loadPreviewBitmap(context, model)
     }
     bitmap?.let {
         Image(
             bitmap = it.asImageBitmap(),
             contentDescription = "Wallpaper preview",
-            modifier = modifier.clip(RoundedCornerShape(8.dp)),
+            modifier = modifier.clip(RoundedCornerShape(20.dp)),
             contentScale = ContentScale.Crop
         )
     } ?: Spacer(modifier = modifier
@@ -392,97 +467,39 @@ private fun PreviewImage(context: Context, model: TianYinWallpaperModel?, modifi
         .background(MaterialTheme.colors.background))
 }
 
-private val BITMAP_CACHE = object : LruCache<String, Bitmap>(
-    (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt()
-) {
-    override fun sizeOf(key: String, value: Bitmap): Int {
-        return value.byteCount / 1024
-    }
-}
-
 private suspend fun loadPreviewBitmap(context: Context, model: TianYinWallpaperModel?): Bitmap? {
     if (model == null) return null
-    val cacheKey = model.uuid ?: (model.imgPath ?: model.imgUri ?: model.videoUri ?: "")
-    if (cacheKey.isNotEmpty()) {
-        BITMAP_CACHE.get(cacheKey)?.let { return it }
-    }
     return withContext(Dispatchers.IO) {
-        try {
-            val path = when {
-                model.type == 1 && !model.videoUri.isNullOrEmpty() -> model.videoUri
-                !model.imgUri.isNullOrEmpty() -> model.imgUri
-                else -> model.imgPath
-            }
-            if (path.isNullOrEmpty()) {
-                null
-            } else {
-                val bitmap = if (model.type == 1) {
-                    ThumbnailUtils.getVideoFrame(
-                        context = context,
-                        videoUriString = path,
-                        targetWidth = VIDEO_PREVIEW_WIDTH,
-                        targetHeight = VIDEO_PREVIEW_HEIGHT
-                    )
-                } else {
-                    decodeSampledBitmap(context, path)
-                }
-                bitmap?.let {
-                    if (cacheKey.isNotEmpty()) {
-                        BITMAP_CACHE.put(cacheKey, it)
-                    }
-                }
-                bitmap
-            }
-        } catch (e: Exception) {
-            Log.w("AboutFragment", "Failed to load preview bitmap", e)
-            null
-        }
+        ThumbnailUtils.loadThumbnail(context, model.toThumbnailRequest())
     }
 }
 
-private fun decodeSampledBitmap(context: Context, path: String): Bitmap? {
-    val options = BitmapFactory.Options().apply {
-        inJustDecodeBounds = true
-    }
-
-    val uri = android.net.Uri.parse(path)
-    if (path.startsWith("content://")) {
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, options)
+private fun buildPreloadRequests(groups: List<AboutGroupUiModel>): List<ThumbnailUtils.Request> {
+    val requests = ArrayList<ThumbnailUtils.Request>(groups.size * PREVIEW_COUNT)
+    groups.forEach { group ->
+        group.wallpapers.take(PREVIEW_COUNT).forEach { model ->
+            requests.add(model.toThumbnailRequest(priority = ThumbnailUtils.Request.PRIORITY_HIGH))
         }
-    } else {
-        BitmapFactory.decodeFile(path, options)
     }
-
-    options.inSampleSize = calculateInSampleSize(options, VIDEO_PREVIEW_WIDTH, VIDEO_PREVIEW_HEIGHT)
-    options.inJustDecodeBounds = false
-
-    return if (path.startsWith("content://")) {
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, options)
-        }
-    } else {
-        BitmapFactory.decodeFile(path, options)
-    }
+    return requests.distinctBy { it.cacheKey }
 }
 
-private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-    val (height: Int, width: Int) = options.run { outHeight to outWidth }
-    var inSampleSize = 1
-
-    if (height > reqHeight || width > reqWidth) {
-        val halfHeight: Int = height / 2
-        val halfWidth: Int = width / 2
-        while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-            inSampleSize *= 2
-        }
-    }
-    return inSampleSize
+private fun TianYinWallpaperModel.toThumbnailRequest(
+    priority: Int = ThumbnailUtils.Request.PRIORITY_NORMAL
+): ThumbnailUtils.Request {
+    val fallbackId = imgUri ?: videoUri ?: imgPath ?: "unknown"
+    return ThumbnailUtils.Request(
+        uuid = uuid ?: fallbackId,
+        type = type,
+        imgUri = imgUri,
+        videoUri = videoUri,
+        imgPath = imgPath,
+        priority = priority
+    )
 }
 
 private const val ITEM_PREVIEW_HEIGHT_DP = 100
 private const val ITEM_PREVIEW_TOP_MARGIN_DP = 8
 private const val ITEM_PREVIEW_SPACING_DP = 6
 private const val PREVIEW_COUNT = 5
-private const val VIDEO_PREVIEW_WIDTH = 360
-private const val VIDEO_PREVIEW_HEIGHT = 240
+private const val PRELOAD_RANGE_OFFSET = 6
