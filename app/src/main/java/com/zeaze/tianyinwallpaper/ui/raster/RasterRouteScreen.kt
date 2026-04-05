@@ -707,6 +707,9 @@ fun RasterRouteScreen(
                                                 val change = event.changes.firstOrNull { it.id == down.id }
                                                     ?: return@withTimeoutOrNull false
                                                 if (!change.pressed) return@withTimeoutOrNull false
+                                                if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                                    return@withTimeoutOrNull false
+                                                }
                                             }
                                         } == null
 
