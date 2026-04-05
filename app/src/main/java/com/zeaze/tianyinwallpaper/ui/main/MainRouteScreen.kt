@@ -963,7 +963,11 @@ fun MainRouteScreen(
             modifier = Modifier.fillMaxSize()
         ) { state ->
             if (state != null) {
-                val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
+                Box(
+                    modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { dismissCurrentDialog() } },
+                    contentAlignment = Alignment.Center
+                ) {
+                    val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
                 val sheetBackdrop = rememberLayerBackdrop()  // 为 LiquidToggle 导出
                 Column(
                     Modifier
@@ -1371,6 +1375,7 @@ fun MainRouteScreen(
                             }
                         }
                     }
+                }
                 }
             }
         }

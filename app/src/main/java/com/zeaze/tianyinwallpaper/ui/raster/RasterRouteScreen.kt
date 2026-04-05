@@ -778,6 +778,10 @@ fun RasterRouteScreen(
             modifier = Modifier.fillMaxSize()
         ) { state ->
             if (state != null) {
+                Box(
+                    modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { dismissCurrentDialog() } },
+                    contentAlignment = Alignment.Center
+                ) {
                 val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
                 when (state) {
                     RasterDialogState.Type -> {
@@ -995,6 +999,7 @@ fun RasterRouteScreen(
                         }
                     }
 
+                }
                 }
             }
         }
