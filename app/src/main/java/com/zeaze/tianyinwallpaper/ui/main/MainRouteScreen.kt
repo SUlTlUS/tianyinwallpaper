@@ -104,6 +104,7 @@ import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
+import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
@@ -248,28 +249,6 @@ fun MainRouteScreen(
     var replaceIndex by remember { mutableStateOf<Int?>(null) }
     var fullScreenPreviewModel by remember { mutableStateOf<TianYinWallpaperModel?>(null) }
     var showLivePreview by remember { mutableStateOf(false) }
-
-    // Observe current index from SharedPreferences
-    var liveSyncIndex by remember { mutableStateOf(pref.getInt(TianYinWallpaperService.PREF_CURRENT_INDEX, 0)) }
-    val preferenceListener = remember {
-        android.content.SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
-            if (key == TianYinWallpaperService.PREF_CURRENT_INDEX) {
-                val newIndex = p.getInt(key, 0)
-                Log.d("MainRouteScreen", "Live sync index updated: $newIndex")
-                liveSyncIndex = newIndex
-            }
-        }
-    }
-    DisposableEffect(showLivePreview) {
-        if (showLivePreview) {
-            pref.registerOnSharedPreferenceChangeListener(preferenceListener)
-            // Sync current index immediately when opening
-            liveSyncIndex = pref.getInt(TianYinWallpaperService.PREF_CURRENT_INDEX, 0)
-            onDispose { pref.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
-        } else {
-            onDispose { }
-        }
-    }
 
     val currentDialogState = when {
         showWallpaperTypeDialog -> DialogState.Type
@@ -943,6 +922,14 @@ fun MainRouteScreen(
             }
         }
 
+        ProgressiveBlurContent(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .zIndex(2f),
+            backdrop = liquidBackdrop
+        )
+
         if (!selectionMode && wallpapers.isEmpty()) {
             androidx.compose.material.Text(
                 text = "点击顶部 + 添加壁纸",
@@ -1508,33 +1495,11 @@ fun MainRouteScreen(
             }
         }
 
-        // Live preview overlay
-        AnimatedVisibility(
+        MainPreviewOverlayHost(
             visible = showLivePreview,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            // 异步加载壁纸列表
-            val wallpaperList by produceState<List<TianYinWallpaperModel>>(
-                initialValue = emptyList(),
-                showLivePreview
-            ) {
-                if (showLivePreview) {
-                    value = withContext(Dispatchers.IO) {
-                        val listData = FileUtil.loadData(context, FileUtil.wallpaperPath)
-                        JSON.parseArray(listData, TianYinWallpaperModel::class.java) ?: emptyList()
-                    }
-                }
-            }
-            LiveSyncPreview(
-                wallpaperList = wallpaperList,
-                currentIndex = liveSyncIndex,
-                statusBarTopPaddingDp = statusBarTopPaddingDp,
-                onClose = { showLivePreview = false },
-                onPrev = { sendServiceIntent(TianYinWallpaperService.ACTION_PREV_WALLPAPER) },
-                onNext = { sendServiceIntent(TianYinWallpaperService.ACTION_NEXT_WALLPAPER) }
-            )
-        }
+            statusBarTopPaddingDp = statusBarTopPaddingDp,
+            onClose = { showLivePreview = false }
+        )
     }
 }
 

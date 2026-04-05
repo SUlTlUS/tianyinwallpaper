@@ -153,6 +153,7 @@ fun MainTopBar(
 
 @Composable
 fun SelectionTopBar(
+    modifier: Modifier = Modifier,
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
     backdrop: LayerBackdrop?,
@@ -168,7 +169,7 @@ fun SelectionTopBar(
     val textColor = if (isDark) Color.White else Color.Black
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(top = statusBarTopPaddingDp + 10.dp, start = 12.dp, end = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,

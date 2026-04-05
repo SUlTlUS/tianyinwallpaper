@@ -137,6 +137,7 @@ import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.VideoRasterWallpaperService
 import com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService
+import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
 import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
 import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import com.zeaze.tianyinwallpaper.utils.FileUtil
@@ -732,6 +733,14 @@ fun RasterRouteScreen(
                 }
             }
         }
+
+        ProgressiveBlurContent(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .zIndex(2f),
+            backdrop = liquidBackdrop
+        )
 
         if (!selectionMode && groups.isEmpty()) {
             Text(

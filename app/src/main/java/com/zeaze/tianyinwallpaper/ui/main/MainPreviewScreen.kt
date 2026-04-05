@@ -1,6 +1,8 @@
 package com.zeaze.tianyinwallpaper.ui.main
 
 import android.app.WallpaperManager
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
@@ -25,6 +27,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,6 +42,7 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -65,10 +69,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.core.net.toUri
+import com.alibaba.fastjson.JSON
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
+import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
@@ -84,15 +91,110 @@ import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSamp
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
+import com.zeaze.tianyinwallpaper.utils.FileUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.runtime.rememberUpdatedState
+
+@Composable
+internal fun MainPreviewOverlayHost(
+    visible: Boolean,
+    statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
+
+    var liveSyncIndex by remember { mutableStateOf(pref.getInt(TianYinWallpaperService.PREF_CURRENT_INDEX, 0)) }
+    val preferenceListener = remember {
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
+            if (key == TianYinWallpaperService.PREF_CURRENT_INDEX) {
+                liveSyncIndex = p.getInt(key, 0)
+            }
+        }
+    }
+
+    DisposableEffect(visible) {
+        if (visible) {
+            pref.registerOnSharedPreferenceChangeListener(preferenceListener)
+            liveSyncIndex = pref.getInt(TianYinWallpaperService.PREF_CURRENT_INDEX, 0)
+            onDispose { pref.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+        } else {
+            onDispose { }
+        }
+    }
+
+    var isListLoaded by remember(visible) { mutableStateOf(false) }
+
+    if (visible) {
+        val wallpaperList by produceState<List<TianYinWallpaperModel>>(
+            initialValue = emptyList(),
+            visible
+        ) {
+            if (visible) {
+                isListLoaded = false
+                value = withContext(Dispatchers.IO) {
+                    val listData = FileUtil.loadData(context, FileUtil.wallpaperPath)
+                    JSON.parseArray(listData, TianYinWallpaperModel::class.java) ?: emptyList()
+                }
+                isListLoaded = true
+            }
+        }
+
+        Dialog(
+            onDismissRequest = onClose,
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            LiveSyncPreview(
+                wallpaperList = wallpaperList,
+                isListLoaded = isListLoaded,
+                currentIndex = liveSyncIndex,
+                statusBarTopPaddingDp = statusBarTopPaddingDp,
+                onClose = onClose,
+                onPrev = {
+                    context.startService(Intent(context, TianYinWallpaperService::class.java).apply {
+                        action = TianYinWallpaperService.ACTION_PREV_WALLPAPER
+                    })
+                },
+                onNext = {
+                    context.startService(Intent(context, TianYinWallpaperService::class.java).apply {
+                        action = TianYinWallpaperService.ACTION_NEXT_WALLPAPER
+                    })
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun WallpaperPreviewStage(
+    enableLiquidGlass: Boolean,
+    backdrop: LayerBackdrop?,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .let { m ->
+                if (enableLiquidGlass && backdrop != null) m.layerBackdrop(backdrop) else m
+            },
+        content = content
+    )
+}
 
 @Composable
 internal fun LiveSyncPreview(
     wallpaperList: List<TianYinWallpaperModel>,
+    isListLoaded: Boolean,
     currentIndex: Int,
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     onClose: () -> Unit,
@@ -100,13 +202,22 @@ internal fun LiveSyncPreview(
     onNext: () -> Unit
 ) {
     val context = LocalContext.current
-    val isWallpaperApplied = run {
+
+    val isWallpaperApplied = remember {
         val info = WallpaperManager.getInstance(context).wallpaperInfo
-        info?.packageName == context.packageName && info.serviceName == TianYinWallpaperService::class.java.name
+        info?.packageName == context.packageName &&
+                info.serviceName == TianYinWallpaperService::class.java.name
     }
-    val currentModel = if (isWallpaperApplied && currentIndex in wallpaperList.indices) wallpaperList[currentIndex] else null
+    val currentModel = when {
+        !isListLoaded -> null
+        !isWallpaperApplied -> null
+        currentIndex !in wallpaperList.indices -> null
+        else -> wallpaperList[currentIndex]
+    }
 
     val isLightTheme = MaterialTheme.colors.isLight
+    val contentColor = if (isLightTheme) Color.Black else Color.White
+    val pageBackground = MaterialTheme.colors.background
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val previewBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
     val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
@@ -136,27 +247,31 @@ internal fun LiveSyncPreview(
     BackHandler(enabled = true) { onClose() }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .let { m ->
-                    if (enableLiquidGlass && previewBackdrop != null) m.layerBackdrop(previewBackdrop) else m
-                }
+        // Stage：套 layerBackdrop，内部先铺黑色实底，
+        // 使 previewBackdrop 采样到的永远是壁纸像素而非主页内容
+        WallpaperPreviewStage(
+            enableLiquidGlass = enableLiquidGlass,
+            backdrop = previewBackdrop
         ) {
-            Box(Modifier.fillMaxSize().background(Color.Black))
+            // ── 实色底层，阻断主页内容穿透 ──────────────────────────
+            Box(Modifier.fillMaxSize().background(pageBackground))
+
+            // ── 壁纸内容 ────────────────────────────────────────────
             if (currentModel != null) {
-                WallpaperThumbnail(
+                WallpaperPreviewRenderer(
                     model = currentModel,
                     modifier = Modifier.fillMaxSize(),
-                    useClip = false
+                    useClip = false,
+                    backgroundColor = Color.Black
                 )
-            } else {
+            } else if (isListLoaded && !isWallpaperApplied) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("当前未播放", color = Color.White)
+                    Text("当前未播放", color = contentColor)
                 }
             }
         }
 
+        // ── 顶部：关闭 + 序号 ────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -174,7 +289,10 @@ internal fun LiveSyncPreview(
                 textColor = closeLuminanceState?.contentColor ?: onPage,
                 modifier = Modifier.height(44.dp),
                 fallbackAsTextChip = true,
-                fallbackTextChipPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp, vertical = 8.dp)
+                fallbackTextChipPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = 18.dp,
+                    vertical = 8.dp
+                )
             )
 
             val positionText = if (currentModel != null) "${currentIndex + 1}/${wallpaperList.size}" else "0/0"
@@ -210,6 +328,7 @@ internal fun LiveSyncPreview(
             }
         }
 
+        // ── 底部：上一张 / 下一张 ────────────────────────────────────
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -217,40 +336,35 @@ internal fun LiveSyncPreview(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val controlColor = pillBackground
-            val textColor = onPage
-
             LiveSyncActionButton(
                 label = "上一张",
                 onClick = onPrev,
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = previewBackdrop,
                 luminanceState = prevLuminanceState,
-                surfaceColor = controlColor,
-                textColor = prevLuminanceState?.contentColor ?: textColor,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp),
-                fallbackBorder = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                surfaceColor = pillBackground,
+                textColor = prevLuminanceState?.contentColor ?: onPage,
+                modifier = Modifier.height(44.dp),
+                fallbackBorder = androidx.compose.foundation.BorderStroke(
+                    1.dp, Color.White.copy(alpha = 0.2f)
+                )
             )
-
             LiveSyncActionButton(
                 label = "下一张",
                 onClick = onNext,
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = previewBackdrop,
                 luminanceState = nextLuminanceState,
-                surfaceColor = controlColor,
-                textColor = nextLuminanceState?.contentColor ?: textColor,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp),
-                fallbackBorder = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                surfaceColor = pillBackground,
+                textColor = nextLuminanceState?.contentColor ?: onPage,
+                modifier = Modifier.height(44.dp),
+                fallbackBorder = androidx.compose.foundation.BorderStroke(
+                    1.dp, Color.White.copy(alpha = 0.2f)
+                )
             )
         }
     }
 }
-
 @Composable
 private fun LiveSyncActionButton(
     label: String,
@@ -307,6 +421,82 @@ private fun LiveSyncActionButton(
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(text = label, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun WallpaperPreviewRenderer(
+    model: TianYinWallpaperModel,
+    modifier: Modifier,
+    useClip: Boolean,
+    transformScale: Float = 1f,
+    transformOffsetX: Float = 0f,
+    transformOffsetY: Float = 0f,
+    containerWidth: Float = 0f,
+    containerHeight: Float = 0f,
+    sourceWidth: Float = 0f,
+    sourceHeight: Float = 0f,
+    brightness: Float = 0f,
+    backgroundColor: Color,
+    onSourceSizeChanged: ((width: Float, height: Float) -> Unit)? = null
+) {
+    Box(modifier = modifier.background(backgroundColor)) {
+        val isDynamicWallpaper = model.type == WALLPAPER_TYPE_DYNAMIC
+        if (isDynamicWallpaper) {
+            WallpaperThumbnail(
+                model = model,
+                modifier = Modifier.fillMaxSize(),
+                useClip = useClip,
+                transformScale = transformScale,
+                transformOffsetX = transformOffsetX,
+                transformOffsetY = transformOffsetY,
+                onSourceSizeChanged = onSourceSizeChanged
+            )
+        } else {
+            if (containerWidth <= 0f || containerHeight <= 0f) {
+                WallpaperThumbnail(
+                    model = model,
+                    modifier = Modifier.fillMaxSize(),
+                    useClip = useClip,
+                    onSourceSizeChanged = onSourceSizeChanged
+                )
+            } else {
+                val density = LocalDensity.current
+                val baseScale = if (sourceWidth > 0f && sourceHeight > 0f) {
+                    kotlin.math.max(containerWidth / sourceWidth, containerHeight / sourceHeight)
+                } else 1f
+                val baseDisplayWidth = if (sourceWidth > 0f) sourceWidth * baseScale else containerWidth
+                val baseDisplayHeight = if (sourceHeight > 0f) sourceHeight * baseScale else containerHeight
+
+                WallpaperThumbnail(
+                    model = model,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .requiredWidth(with(density) { baseDisplayWidth.toDp() })
+                        .requiredHeight(with(density) { baseDisplayHeight.toDp() })
+                        .graphicsLayer {
+                            val epsilonX = if (containerWidth > 0f) (containerWidth + 1f) / containerWidth else 1f
+                            val epsilonY = if (containerHeight > 0f) (containerHeight + 1f) / containerHeight else 1f
+                            scaleX = transformScale * epsilonX
+                            scaleY = transformScale * epsilonY
+                            translationX = transformOffsetX
+                            translationY = transformOffsetY
+                        },
+                    useClip = useClip,
+                    onSourceSizeChanged = onSourceSizeChanged
+                )
+            }
+        }
+
+        if (kotlin.math.abs(brightness) > 0.001f) {
+            val overlayColor = if (brightness > 0f) Color.White else Color.Black
+            val overlayAlpha = kotlin.math.abs(brightness).coerceIn(0f, 0.6f)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(overlayColor.copy(alpha = overlayAlpha))
+            )
         }
     }
 }
@@ -415,9 +605,7 @@ private fun WallpaperThumbnail(
                     } else {
                         videoHolder.player.let { mp ->
                             mp.setVolume(volume, volume)
-                            if (mp.isPlaying) {
-                                updateMatrix(mp, textureView, transformScale, transformOffsetX, transformOffsetY)
-                            }
+                            updateMatrix(mp, textureView, transformScale, transformOffsetX, transformOffsetY)
                         }
                     }
                 }
@@ -582,6 +770,9 @@ private fun SettingToggleRow(
     backdrop: Backdrop,
     isLightTheme: Boolean
 ) {
+    val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
+    val currentChecked by rememberUpdatedState(checked)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -592,8 +783,8 @@ private fun SettingToggleRow(
         androidx.compose.foundation.text.BasicText(label, style = TextStyle(contentColor, 16.sp))
         if (enableLiquidGlass) {
             LiquidToggle(
-                selected = { checked },
-                onSelect = onCheckedChange,
+                selected = { currentChecked },
+                onSelect = { currentOnCheckedChange(it) },
                 backdrop = backdrop,
                 isLightTheme = isLightTheme
             )
@@ -740,15 +931,19 @@ private fun AdaptiveValueSlider(
     isLightTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
+    val currentValue by rememberUpdatedState(value)
+
     if (enableLiquidGlass) {
         LiquidSlider(
-            value = { value },
-            onValueChange = onValueChange,
+            value = { currentValue },
+            onValueChange = { currentOnValueChange(it) },
             valueRange = valueRange,
             visibilityThreshold = 0.001f,
             backdrop = backdrop,
             isLightTheme = isLightTheme,
-            onValueChangeFinished = onValueChangeFinished,
+            onValueChangeFinished = { currentOnValueChangeFinished() },
             modifier = modifier
         )
     } else {
@@ -975,14 +1170,9 @@ internal fun WallpaperDetailScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .let { m ->
-                    if (enableLiquidGlass && detailBackdrop != null) {
-                        m.layerBackdrop(detailBackdrop)
-                    } else m
-                }
+        WallpaperPreviewStage(
+            enableLiquidGlass = enableLiquidGlass,
+            backdrop = detailBackdrop
         ) {
             Box(Modifier.fillMaxSize().background(pageBackground))
 
@@ -1118,60 +1308,26 @@ internal fun WallpaperDetailScreen(
                             physicsJob.cancel()
                         }
                     }
+            
             ) {
-                if (isDynamicWallpaper) {
-                    WallpaperThumbnail(
-                        model = model,
-                        modifier = Modifier.fillMaxSize(),
-                        useClip = false,
-                        transformScale = scale,
-                        transformOffsetX = offsetX,
-                        transformOffsetY = offsetY,
-                        onSourceSizeChanged = { w, h ->
-                            sourceWidth = w
-                            sourceHeight = h
-                        }
-                    )
-                } else {
-                    val density = LocalDensity.current
-                    val baseScale = if (containerWidth > 0f && containerHeight > 0f && sourceWidth > 0f && sourceHeight > 0f) {
-                        kotlin.math.max(containerWidth / sourceWidth, containerHeight / sourceHeight)
-                    } else 1f
-                    val baseDisplayWidth = if (sourceWidth > 0f) sourceWidth * baseScale else containerWidth
-                    val baseDisplayHeight = if (sourceHeight > 0f) sourceHeight * baseScale else containerHeight
-
-                    WallpaperThumbnail(
-                        model = model,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .requiredWidth(with(density) { baseDisplayWidth.toDp() })
-                            .requiredHeight(with(density) { baseDisplayHeight.toDp() })
-                            .graphicsLayer {
-                                val epsilonX = if (containerWidth > 0f) (containerWidth + 1f) / containerWidth else 1f
-                                val epsilonY = if (containerHeight > 0f) (containerHeight + 1f) / containerHeight else 1f
-                                scaleX = scale * epsilonX
-                                scaleY = scale * epsilonY
-                                translationX = offsetX
-                                translationY = offsetY
-                            },
-                        useClip = false,
-                        onSourceSizeChanged = { w, h ->
-                            sourceWidth = w
-                            sourceHeight = h
-                        }
-                    )
-                }
-
-                // 统一亮度层，作用于图片和视频预览。
-                if (kotlin.math.abs(brightness) > 0.001f) {
-                    val overlayColor = if (brightness > 0f) Color.White else Color.Black
-                    val overlayAlpha = kotlin.math.abs(brightness).coerceIn(0f, 0.6f)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(overlayColor.copy(alpha = overlayAlpha))
-                    )
-                }
+                WallpaperPreviewRenderer(
+                    model = model,
+                    modifier = Modifier.fillMaxSize(),
+                    useClip = false,
+                    transformScale = scale,
+                    transformOffsetX = offsetX,
+                    transformOffsetY = offsetY,
+                    containerWidth = containerWidth,
+                    containerHeight = containerHeight,
+                    sourceWidth = sourceWidth,
+                    sourceHeight = sourceHeight,
+                    brightness = brightness,
+                    backgroundColor = pageBackground,
+                    onSourceSizeChanged = { w, h ->
+                        sourceWidth = w
+                        sourceHeight = h
+                    }
+                )
             }
         }
 
@@ -1529,4 +1685,3 @@ internal fun WallpaperDetailScreen(
         )
     }
 }
-
