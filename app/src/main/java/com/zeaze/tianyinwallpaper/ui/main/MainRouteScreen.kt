@@ -1459,12 +1459,13 @@ fun MainRouteScreen(
                         }
                         saveCache()
                     },
-                    onTransformAction = { newScale, newOffsetX, newOffsetY ->
+                    onTransformAction = { newScale, newOffsetX, newOffsetY, newRotation ->
                         val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
                         if (index >= 0) {
                             wallpapers[index].scale = newScale
                             wallpapers[index].offsetX = newOffsetX
                             wallpapers[index].offsetY = newOffsetY
+                            wallpapers[index].rotation = newRotation
                         }
                         saveCache()
                         // 仅同步当前渲染中的变换，避免把完整播放列表写回壁纸文件覆盖“单独应用”。
@@ -1474,6 +1475,7 @@ fun MainRouteScreen(
                                 putExtra(TianYinWallpaperService.EXTRA_SCALE, newScale)
                                 putExtra(TianYinWallpaperService.EXTRA_OFFSET_X, newOffsetX)
                                 putExtra(TianYinWallpaperService.EXTRA_OFFSET_Y, newOffsetY)
+                                putExtra(TianYinWallpaperService.EXTRA_ROTATION, newRotation)
                             }
                         )
                     },
@@ -1483,6 +1485,12 @@ fun MainRouteScreen(
                             wallpapers[index].brightness = newBrightness
                         }
                         saveCache()
+                        context.startService(
+                            Intent(context, TianYinWallpaperService::class.java).apply {
+                                action = TianYinWallpaperService.ACTION_UPDATE_BRIGHTNESS
+                                putExtra(TianYinWallpaperService.EXTRA_BRIGHTNESS, newBrightness)
+                            }
+                        )
                     },
                     onVolumeAction = { newVolume ->
                         val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
@@ -1490,6 +1498,12 @@ fun MainRouteScreen(
                             wallpapers[index].volume = newVolume
                         }
                         saveCache()
+                        context.startService(
+                            Intent(context, TianYinWallpaperService::class.java).apply {
+                                action = TianYinWallpaperService.ACTION_UPDATE_VOLUME
+                                putExtra(TianYinWallpaperService.EXTRA_VOLUME, newVolume)
+                            }
+                        )
                     }
                 )
             }

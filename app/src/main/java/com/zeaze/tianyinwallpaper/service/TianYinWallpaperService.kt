@@ -605,16 +605,33 @@ class TianYinWallpaperService : WallpaperService() {
             }
         }
 
-        fun updateCurrentTransform(scale: Float, offsetX: Float, offsetY: Float) {
+        fun updateCurrentTransform(scale: Float, offsetX: Float, offsetY: Float, rotation: Float = 0f) {
             currentUserScale = scale
-            renderer?.setUserTransform(scale, offsetX, offsetY)
+            renderer?.setUserTransform(scale, offsetX, offsetY, rotation)
             val currentList = list
             if (currentList != null && index in currentList.indices) {
                 currentList[index].scale = scale
                 currentList[index].offsetX = offsetX
                 currentList[index].offsetY = offsetY
+                currentList[index].rotation = rotation
             }
             renderer?.requestRender()
+        }
+
+        fun updateCurrentBrightness(brightness: Float) {
+            val currentList = list
+            if (currentList != null && index in currentList.indices) {
+                currentList[index].brightness = brightness
+            }
+            renderer?.setBrightness(brightness)
+        }
+
+        fun updateCurrentVolume(volume: Float) {
+            val currentList = list
+            if (currentList != null && index in currentList.indices) {
+                currentList[index].volume = volume
+            }
+            mediaPlayer?.setVolume(volume, volume)
         }
 
         private fun prevWallpaper(ignoreMinInterval: Boolean = false) {
@@ -651,7 +668,8 @@ class TianYinWallpaperService : WallpaperService() {
             val model = list!![index]
 
             currentUserScale = model.scale
-            renderer?.setUserTransform(model.scale, model.offsetX, model.offsetY)
+            renderer?.setUserTransform(model.scale, model.offsetX, model.offsetY, model.rotation)
+            renderer?.setBrightness(model.brightness)
 
             if (mediaPlayer != null) {
                 mediaPlayer!!.reset()
@@ -675,7 +693,7 @@ class TianYinWallpaperService : WallpaperService() {
                 if (mediaPlayer == null) mediaPlayer = MediaPlayer()
                 mediaPlayer!!.reset()
                 mediaPlayer!!.setDataSource(applicationContext, Uri.parse(model.videoUri))
-                renderer?.setUserTransform(model.scale, model.offsetX, model.offsetY)
+                renderer?.setUserTransform(model.scale, model.offsetX, model.offsetY, model.rotation)
 
                 val videoST = renderer?.videoSurfaceTexture
                 if (videoST == null) {
@@ -751,7 +769,7 @@ class TianYinWallpaperService : WallpaperService() {
             }
             renderer?.setOnFrameAvailableListener(null)
             renderer?.setVideoMode(false)
-            renderer?.setUserTransform(model.scale, model.offsetX, model.offsetY)
+            renderer?.setUserTransform(model.scale, model.offsetX, model.offsetY, model.rotation)
             try {
                 val `is`: InputStream? = applicationContext.contentResolver.openInputStream(Uri.parse(model.imgUri))
                 val bitmap = BitmapFactory.decodeStream(`is`)
@@ -804,7 +822,16 @@ class TianYinWallpaperService : WallpaperService() {
                 val scale = intent.getFloatExtra(EXTRA_SCALE, 1f)
                 val offsetX = intent.getFloatExtra(EXTRA_OFFSET_X, 0f)
                 val offsetY = intent.getFloatExtra(EXTRA_OFFSET_Y, 0f)
-                activeEngine?.updateCurrentTransform(scale, offsetX, offsetY)
+                val rotation = intent.getFloatExtra(EXTRA_ROTATION, 0f)
+                activeEngine?.updateCurrentTransform(scale, offsetX, offsetY, rotation)
+            }
+            ACTION_UPDATE_BRIGHTNESS -> {
+                val brightness = intent.getFloatExtra(EXTRA_BRIGHTNESS, 0f)
+                activeEngine?.updateCurrentBrightness(brightness)
+            }
+            ACTION_UPDATE_VOLUME -> {
+                val volume = intent.getFloatExtra(EXTRA_VOLUME, 0f)
+                activeEngine?.updateCurrentVolume(volume)
             }
             ACTION_UPDATE_INDEX -> {
                 val idx = intent.getIntExtra(EXTRA_INDEX, -1)
@@ -820,11 +847,16 @@ class TianYinWallpaperService : WallpaperService() {
         const val ACTION_REFRESH_CURRENT = "com.zeaze.tianyinwallpaper.REFRESH_CURRENT"
         const val ACTION_SYNC_PLAYLIST = "com.zeaze.tianyinwallpaper.SYNC_PLAYLIST"
         const val ACTION_UPDATE_TRANSFORM = "com.zeaze.tianyinwallpaper.UPDATE_TRANSFORM"
+        const val ACTION_UPDATE_BRIGHTNESS = "com.zeaze.tianyinwallpaper.UPDATE_BRIGHTNESS"
+        const val ACTION_UPDATE_VOLUME = "com.zeaze.tianyinwallpaper.UPDATE_VOLUME"
         const val ACTION_UPDATE_INDEX = "com.zeaze.tianyinwallpaper.UPDATE_INDEX"
         const val EXTRA_INDEX = "extra_index"
+        const val EXTRA_BRIGHTNESS = "extra_brightness"
+        const val EXTRA_VOLUME = "extra_volume"
         const val EXTRA_SCALE = "extra_scale"
         const val EXTRA_OFFSET_X = "extra_offset_x"
         const val EXTRA_OFFSET_Y = "extra_offset_y"
+        const val EXTRA_ROTATION = "extra_rotation"
         const val PREF_CURRENT_INDEX = "current_wallpaper_index"
 
         private var activeEngine: TianYinSolaEngine? = null

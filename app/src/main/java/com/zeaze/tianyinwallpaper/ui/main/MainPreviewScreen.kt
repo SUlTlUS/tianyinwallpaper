@@ -437,7 +437,9 @@ private fun WallpaperPreviewRenderer(
     containerHeight: Float = 0f,
     sourceWidth: Float = 0f,
     sourceHeight: Float = 0f,
+    rotation: Float = 0f,
     brightness: Float = 0f,
+    volume: Float? = null,
     backgroundColor: Color,
     onSourceSizeChanged: ((width: Float, height: Float) -> Unit)? = null
 ) {
@@ -451,6 +453,8 @@ private fun WallpaperPreviewRenderer(
                 transformScale = transformScale,
                 transformOffsetX = transformOffsetX,
                 transformOffsetY = transformOffsetY,
+                rotation = rotation,
+                volume = volume,
                 onSourceSizeChanged = onSourceSizeChanged
             )
         } else {
@@ -459,6 +463,8 @@ private fun WallpaperPreviewRenderer(
                     model = model,
                     modifier = Modifier.fillMaxSize(),
                     useClip = useClip,
+                    rotation = rotation,
+                    volume = volume,
                     onSourceSizeChanged = onSourceSizeChanged
                 )
             } else {
@@ -482,8 +488,11 @@ private fun WallpaperPreviewRenderer(
                             scaleY = transformScale * epsilonY
                             translationX = transformOffsetX
                             translationY = transformOffsetY
+                            rotationZ = rotation
                         },
                     useClip = useClip,
+                    rotation = rotation,
+                    volume = volume,
                     onSourceSizeChanged = onSourceSizeChanged
                 )
             }
@@ -509,6 +518,8 @@ private fun WallpaperThumbnail(
     transformScale: Float = 1f,
     transformOffsetX: Float = 0f,
     transformOffsetY: Float = 0f,
+    rotation: Float = 0f,
+    volume: Float? = null,
     onSourceSizeChanged: ((width: Float, height: Float) -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -523,8 +534,8 @@ private fun WallpaperThumbnail(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     val player = MediaPlayer().apply {
-                        val volume = model.volume.coerceIn(0f, 1f)
-                        setVolume(volume, volume)
+                        val currentVol = volume ?: model.volume.coerceIn(0f, 1f)
+                        setVolume(currentVol, currentVol)
                         isLooping = true
                     }
                     val holder = VideoPlayerHolder(player, model.videoUri)
@@ -537,13 +548,13 @@ private fun WallpaperThumbnail(
                             try {
                                 videoHolder.player.reset()
                                 videoHolder.player.isLooping = true
-                                val volume = model.volume.coerceIn(0f, 1f)
-                                videoHolder.player.setVolume(volume, volume)
+                                val currentVol = volume ?: model.volume.coerceIn(0f, 1f)
+                                videoHolder.player.setVolume(currentVol, currentVol)
                                 videoHolder.player.setSurface(Surface(surface))
                                 videoHolder.player.setDataSource(ctx, uri.toUri())
                                 videoHolder.player.setOnPreparedListener { mp ->
                                     onSourceSizeChanged?.invoke(mp.videoWidth.toFloat(), mp.videoHeight.toFloat())
-                                    updateMatrix(mp, this@apply, transformScale, transformOffsetX, transformOffsetY)
+                                    updateMatrix(mp, this@apply, transformScale, transformOffsetX, transformOffsetY, rotation)
                                     mp.start()
                                 }
                                 videoHolder.player.prepareAsync()
@@ -554,7 +565,7 @@ private fun WallpaperThumbnail(
 
                         override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
                             (tag as? VideoPlayerHolder)?.player?.let {
-                                updateMatrix(it, this@apply, transformScale, transformOffsetX, transformOffsetY)
+                                updateMatrix(it, this@apply, transformScale, transformOffsetX, transformOffsetY, rotation)
                             }
                         }
 
@@ -585,17 +596,18 @@ private fun WallpaperThumbnail(
                 videoHolder.uri = newUri
 
                 if (textureView.isAvailable) {
-                    val volume = model.volume.coerceIn(0f, 1f)
+                    val currentVol = volume ?: model.volume.coerceIn(0f, 1f)
+                    val currentRot = rotation
                     if (uriChanged) {
                         try {
                             videoHolder.player.reset()
                             videoHolder.player.isLooping = true
-                            videoHolder.player.setVolume(volume, volume)
+                            videoHolder.player.setVolume(currentVol, currentVol)
                             videoHolder.player.setDataSource(context, newUri.toUri())
                             videoHolder.player.setSurface(Surface(textureView.surfaceTexture))
                             videoHolder.player.setOnPreparedListener { mp ->
                                 onSourceSizeChanged?.invoke(mp.videoWidth.toFloat(), mp.videoHeight.toFloat())
-                                updateMatrix(mp, textureView, transformScale, transformOffsetX, transformOffsetY)
+                                updateMatrix(mp, textureView, transformScale, transformOffsetX, transformOffsetY, currentRot)
                                 mp.start()
                             }
                             videoHolder.player.prepareAsync()
@@ -604,8 +616,8 @@ private fun WallpaperThumbnail(
                         }
                     } else {
                         videoHolder.player.let { mp ->
-                            mp.setVolume(volume, volume)
-                            updateMatrix(mp, textureView, transformScale, transformOffsetX, transformOffsetY)
+                            mp.setVolume(currentVol, currentVol)
+                            updateMatrix(mp, textureView, transformScale, transformOffsetX, transformOffsetY, currentRot)
                         }
                     }
                 }
@@ -650,7 +662,8 @@ private fun updateMatrix(
     view: TextureView,
     scale: Float = 1f,
     offsetX: Float = 0f,
-    offsetY: Float = 0f
+    offsetY: Float = 0f,
+    rotation: Float = 0f
 ) {
     val vWidth = mp.videoWidth.toFloat()
     val vHeight = mp.videoHeight.toFloat()
@@ -680,6 +693,7 @@ private fun updateMatrix(
         matrix.postTranslate(-viewWidth / 2f, -viewHeight / 2f)
         matrix.postScale(finalScaleX, finalScaleY)
         matrix.postTranslate(viewWidth / 2f + offsetX, viewHeight / 2f + offsetY)
+        matrix.postRotate(rotation, viewWidth / 2f + offsetX, viewHeight / 2f + offsetY)
 
         view.setTransform(matrix)
     }
@@ -971,7 +985,7 @@ internal fun WallpaperDetailScreen(
     onApply: () -> Unit,
     onReplaceAction: (isDynamic: Boolean) -> Unit,
     onTimeAction: (startTime: Int, endTime: Int, loop: Boolean, independentTime: Boolean) -> Unit,
-    onTransformAction: (scale: Float, offsetX: Float, offsetY: Float) -> Unit,
+    onTransformAction: (scale: Float, offsetX: Float, offsetY: Float, rotation: Float) -> Unit,
     onBrightnessAction: (brightness: Float) -> Unit,
     onVolumeAction: (volume: Float) -> Unit
 ) {
@@ -997,6 +1011,7 @@ internal fun WallpaperDetailScreen(
     var scale by remember { mutableStateOf(model.scale) }
     var offsetX by remember { mutableStateOf(model.offsetX) }
     var offsetY by remember { mutableStateOf(model.offsetY) }
+    var rotation by remember { mutableStateOf(model.rotation) }
     val brightnessMin = -0.5f
     val brightnessMax = 0f
     var brightness by remember { mutableStateOf(model.brightness.coerceIn(brightnessMin, brightnessMax)) }
@@ -1158,7 +1173,7 @@ internal fun WallpaperDetailScreen(
     } else null
 
     fun persistPreviewState() {
-        onTransformAction(scale, offsetX, offsetY)
+        onTransformAction(scale, offsetX, offsetY, rotation)
         onBrightnessAction(brightness)
         onVolumeAction(volume)
     }
@@ -1190,7 +1205,7 @@ internal fun WallpaperDetailScreen(
                             snapJob?.cancel()
                             snapJob = transformScope.launch {
                                 delay(120)
-                                onTransformAction(scale, offsetX, offsetY)
+                                onTransformAction(scale, offsetX, offsetY, rotation)
                             }
                         }
 
@@ -1321,7 +1336,9 @@ internal fun WallpaperDetailScreen(
                     containerHeight = containerHeight,
                     sourceWidth = sourceWidth,
                     sourceHeight = sourceHeight,
+                    rotation = rotation,
                     brightness = brightness,
+                    volume = volume,
                     backgroundColor = pageBackground,
                     onSourceSizeChanged = { w, h ->
                         sourceWidth = w
@@ -1601,6 +1618,30 @@ internal fun WallpaperDetailScreen(
 
                             Spacer(Modifier.height(12.dp))
 
+                            if (false) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "旋转 ${(rotation).toInt()}°",
+                                    style = TextStyle(contentColor, 14.sp)
+                                )
+
+                                Spacer(Modifier.height(8.dp))
+
+                                AdaptiveValueSlider(
+                                    value = rotation,
+                                    onValueChange = { rotation = it.coerceIn(-180f, 180f) },
+                                    valueRange = -180f..180f,
+                                    onValueChangeFinished = { onTransformAction(scale, offsetX, offsetY, rotation) },
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    backdrop = sheetBackdrop,
+                                    isLightTheme = isLightTheme,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp)
+                                )
+
+                                Spacer(Modifier.height(12.dp))
+                            }
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1632,7 +1673,7 @@ internal fun WallpaperDetailScreen(
                                             offsetY = 0f
                                             velocityX = 0f
                                             velocityY = 0f
-                                            onTransformAction(scale, offsetX, offsetY)
+                                            onTransformAction(scale, offsetX, offsetY, rotation)
                                         }
                                         .padding(horizontal = 12.dp, vertical = 12.dp),
                                     horizontalArrangement = Arrangement.Center,

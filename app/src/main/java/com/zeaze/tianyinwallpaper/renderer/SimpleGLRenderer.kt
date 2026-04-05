@@ -34,9 +34,10 @@ class SimpleGLRenderer {
     private var userScale: Float = 1f
     private var userOffsetX: Float = 0f
     private var userOffsetY: Float = 0f
+    private var userRotation: Float = 0f
     private var isVideoMode: Boolean = false
 
-    // ── EGL ──
+    private var brightness = 0f
     private var eglThread: EglRenderThread? = null
     private val isRunning = AtomicBoolean(false)
     private val isSurfaceValid = AtomicBoolean(false)
@@ -48,9 +49,10 @@ class SimpleGLRenderer {
         data class SetContentSize(val width: Int, val height: Int) : RenderMessage()
         data class SetSurfaceSize(val width: Int, val height: Int) : RenderMessage()
         data class SetXOffset(val offset: Float) : RenderMessage()
-        data class SetUserTransform(val scale: Float, val offsetX: Float, val offsetY: Float) : RenderMessage()
+        data class SetUserTransform(val scale: Float, val offsetX: Float, val offsetY: Float, val rotation: Float = 0f) : RenderMessage()
         data class LoadBitmap(val bitmap: Bitmap) : RenderMessage()
         data class SetVideoMode(val isVideo: Boolean) : RenderMessage()
+        data class SetBrightness(val brightness: Float) : RenderMessage()
         object Render : RenderMessage()
         object UpdateVideoFrame : RenderMessage()
     }
@@ -121,13 +123,14 @@ class SimpleGLRenderer {
     }
 
     /**
-     * 设置用户预览变换（缩放+位移）
+     * 设置用户预览变换（缩放、位移、旋转）
      */
-    fun setUserTransform(scale: Float, offsetX: Float, offsetY: Float) {
+    fun setUserTransform(scale: Float, offsetX: Float, offsetY: Float, rotation: Float = 0f) {
         userScale = scale
         userOffsetX = offsetX
         userOffsetY = offsetY
-        messageQueue.offer(RenderMessage.SetUserTransform(scale, offsetX, offsetY))
+        userRotation = rotation
+        messageQueue.offer(RenderMessage.SetUserTransform(scale, offsetX, offsetY, rotation))
     }
 
     /**
@@ -145,6 +148,14 @@ class SimpleGLRenderer {
     fun setVideoMode(isVideo: Boolean) {
         isVideoMode = isVideo
         messageQueue.offer(RenderMessage.SetVideoMode(isVideo))
+    }
+
+    /**
+     * 设置亮度
+     */
+    fun setBrightness(b: Float) {
+        messageQueue.offer(RenderMessage.SetBrightness(b))
+        messageQueue.offer(RenderMessage.Render)
     }
 
     /**
@@ -205,10 +216,12 @@ class SimpleGLRenderer {
         private var currentUserScale: Float = 1f
         private var currentUserOffsetX: Float = 0f
         private var currentUserOffsetY: Float = 0f
+        private var currentUserRotation: Float = 0f
         private var currentIsVideo: Boolean = false
         private val videoSTMatrix = FloatArray(16)
         private val imageMatrix = FloatArray(16)
         private var frameAvailable = false
+        private var currentBrightness: Float = 0f
 
         init {
             val vData = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
@@ -253,6 +266,7 @@ class SimpleGLRenderer {
                             currentUserScale = msg.scale.coerceAtLeast(0.1f)
                             currentUserOffsetX = msg.offsetX
                             currentUserOffsetY = msg.offsetY
+                            currentUserRotation = msg.rotation
                         }
                         is RenderMessage.LoadBitmap -> {
                             uploadBitmapInternal(msg.bitmap)
@@ -260,6 +274,9 @@ class SimpleGLRenderer {
                         }
                         is RenderMessage.SetVideoMode -> {
                             currentIsVideo = msg.isVideo
+                        }
+                        is RenderMessage.SetBrightness -> {
+                            currentBrightness = msg.brightness
                         }
                         is RenderMessage.UpdateVideoFrame -> {
                             frameAvailable = true
@@ -341,8 +358,8 @@ class SimpleGLRenderer {
         private fun initGL() {
             // 视频着色器 (OES 外部纹理)
             val vs = "attribute vec4 aPos; attribute vec2 aTex; varying vec2 vTex; uniform mat4 uMVP; uniform mat4 uST; void main(){ gl_Position = uMVP * aPos; vTex = (uST * vec4(aTex,0,1)).xy; }"
-            val fsV = "#extension GL_OES_EGL_image_external : require\n precision mediump float; varying vec2 vTex; uniform samplerExternalOES sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }"
-            val fsI = "precision mediump float; varying vec2 vTex; uniform sampler2D sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }"
+            val fsV = "#extension GL_OES_EGL_image_external : require\n precision mediump float; varying vec2 vTex; uniform samplerExternalOES sTex; uniform float uBrightness; void main(){ vec4 c = texture2D(sTex, vTex); float a = min(max(abs(uBrightness), 0.0), 0.6); vec3 target = uBrightness > 0.0 ? vec3(1.0) : vec3(0.0); vec3 rgb = mix(c.rgb, target, a); gl_FragColor = vec4(rgb, c.a); }"
+            val fsI = "precision mediump float; varying vec2 vTex; uniform sampler2D sTex; uniform float uBrightness; void main(){ vec4 c = texture2D(sTex, vTex); float a = min(max(abs(uBrightness), 0.0), 0.6); vec3 target = uBrightness > 0.0 ? vec3(1.0) : vec3(0.0); vec3 rgb = mix(c.rgb, target, a); gl_FragColor = vec4(rgb, c.a); }"
 
             vProg = createProg(vs, fsV)
             iProg = createProg(vs, fsI)
@@ -434,6 +451,7 @@ class SimpleGLRenderer {
             val txUser = if (sW > 0) (currentUserOffsetX / sW.toFloat()) * 2f else 0f
             val tyUser = if (sH > 0) -(currentUserOffsetY / sH.toFloat()) * 2f else 0f
             Matrix.translateM(mvp, 0, txUser / currentUserScale, tyUser / currentUserScale, 0f)
+            Matrix.rotateM(mvp, 0, currentUserRotation, 0f, 0f, 1f)
 
             val aPos = GLES20.glGetAttribLocation(prog, "aPos")
             val aTex = GLES20.glGetAttribLocation(prog, "aTex")
@@ -444,6 +462,7 @@ class SimpleGLRenderer {
 
             GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uMVP"), 1, false, mvp, 0)
             GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uST"), 1, false, stMat, 0)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uBrightness"), currentBrightness)
 
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(
