@@ -1,10 +1,10 @@
 {
-  "code": 34,
-  "name": "3.4",
+  "code": 35,
+  "name": "3.5",
   "filename": "app-release.apk",
-  "url": "https://github.com/SUlTlUS/tianyinwallpaper/releases/download/v3.4/app-release.apk",
-  "time": 1774813281880,
-  "des": "fix: 完善更新日志和下载验证逻辑",
-  "size": 12281569,
-  "md5": "f94965deffd408ddabe5fba4c20130d8"
+  "url": "https://github.com/SUlTlUS/tianyinwallpaper/releases/download/v3.5/app-release.apk",
+  "time": 1775384826305,
+  "des": "添加应用内更新 添加图集光栅排序 添加常规壁纸自定义位置,亮度,音量 优化ui视觉效果",
+  "size": 12417007,
+  "md5": "0f99d3b48adde3ec9aaa2794f8ab6f0b"
 }
