@@ -13,12 +13,15 @@ import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidConfirmOverlay
+import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +60,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
@@ -69,12 +73,19 @@ import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 
 private data class AboutGroupUiModel(
     val saveData: SaveData,
@@ -90,6 +101,7 @@ fun AboutRouteScreen(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
     val statusBarTopPadding = remember(context) {
         val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
         if (id > 0) context.resources.getDimensionPixelSize(id) else 0
@@ -113,6 +125,31 @@ fun AboutRouteScreen(
     val groupBackgroundColor = if (isLightTheme) Color.White else Color(0xFF1E1E1E)
     val groupLabelColor = if (isLightTheme) Color(0xFF1A1A1F) else Color(0xFFF5F5FA)
     val selectedIndicatorColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF4DA3FF)
+
+    fun updateSelectedIndices(from: Int, to: Int) {
+        val currentSelected = selectedPositions.toList()
+        selectedPositions.clear()
+        currentSelected.forEach { index ->
+            when {
+                index == from -> selectedPositions.add(to)
+                from < to && index in (from + 1)..to -> selectedPositions.add(index - 1)
+                from > to && index in to..<from -> selectedPositions.add(index + 1)
+                else -> selectedPositions.add(index)
+            }
+        }
+    }
+
+    var pendingReorderSave by remember { mutableStateOf(false) }
+
+    val reorderableState = rememberReorderableLazyListState(
+        lazyListState = listState,
+        onMove = { from, to ->
+            updateSelectedIndices(from.index, to.index)
+            val movedItem = groupUiList.removeAt(from.index)
+            groupUiList.add(to.index, movedItem)
+            pendingReorderSave = true
+        }
+    )
 
     fun enterSelectionMode() {
         selectionMode = true
@@ -238,26 +275,80 @@ fun AboutRouteScreen(
                     key = { _, item -> "${item.saveData.name ?: ""}\u0000${item.saveData.s ?: ""}" }
                 ) { index, group ->
                     val selected = selectedPositions.contains(index)
-                    AboutGroupItem(
-                        modifier = Modifier.fillMaxWidth(),
-                        context = context,
-                        data = group.saveData,
-                        wallpapers = group.wallpapers,
-                        labelColor = groupLabelColor,
-                        selectedIndicatorColor = selectedIndicatorColor,
-                        containerColor = groupBackgroundColor,
-                        selected = selected,
-                        onClick = {
-                            if (selectionMode) {
-                                if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
-                            } else {
-                                pendingOverwriteGroup = group.saveData
+                    val key = "${group.saveData.name ?: ""}\u0000${group.saveData.s ?: ""}"
+
+                    ReorderableItem(reorderableState, key = key) { isDragging ->
+                        AboutGroupItem(
+                            modifier = Modifier.fillMaxWidth()
+                                .graphicsLayer {
+                                    scaleX = if (isDragging) 1.05f else 1f
+                                    scaleY = if (isDragging) 1.05f else 1f
+                                    shadowElevation = if (isDragging) 8.dp.toPx() else 0f
+                                    shape = RoundedCornerShape(28.dp)
+                                    clip = true
+                                }
+                                .longPressDraggableHandle(
+                                    onDragStopped = {
+                                        if (pendingReorderSave) {
+                                            val newJson = JSON.toJSONString(groupUiList.map { it.saveData })
+                                            FileUtil.save(context, newJson, FileUtil.dataPath) {
+                                                lastGroupsJson = newJson
+                                                groupsVersion++
+                                            }
+                                            pendingReorderSave = false
+                                        }
+                                    }
+                                )
+                                .pointerInput(key, selectionMode) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val touchSlop = viewConfiguration.touchSlop
+                                        val stayedStillForTimeout = withTimeoutOrNull(400L) {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull false
+                                                if (!change.pressed) return@withTimeoutOrNull false
+                                                if ((change.position - down.position).getDistance() > touchSlop) {
+                                                    return@withTimeoutOrNull false
+                                                }
+                                            }
+                                        } == null
+                                        if (stayedStillForTimeout && !selectionMode) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            enterSelectionMode()
+                                            if (!selectedPositions.contains(index)) {
+                                                selectedPositions.add(index)
+                                            }
+                                        }
+                                    }
+                                },
+                            context = context,
+                            data = group.saveData,
+                            wallpapers = group.wallpapers,
+                            labelColor = groupLabelColor,
+                            selectedIndicatorColor = selectedIndicatorColor,
+                            containerColor = groupBackgroundColor,
+                            selected = selected,
+                            onClick = {
+                                if (selectionMode) {
+                                    if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
+                                } else {
+                                    pendingOverwriteGroup = group.saveData
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
+
+        ProgressiveBlurContent(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .zIndex(2f),
+            backdrop = liquidBackdrop
+        )
 
         LiquidConfirmOverlay(
             visible = pendingOverwriteGroup != null,
@@ -296,6 +387,7 @@ fun AboutRouteScreen(
         if (selectionMode) {
             val isAllSelected = selectedPositions.size == groupUiList.size && groupUiList.isNotEmpty()
             com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar(
+                modifier = Modifier.zIndex(3f),
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = liquidBackdrop,
@@ -303,6 +395,7 @@ fun AboutRouteScreen(
                 isLightTheme = !useDarkTheme,
                 onCancelSelect = { exitSelectionMode() },
                 onDelete = { deleteSelectedGroups() },
+
                 onToggleSelectAll = {
                     if (isAllSelected) {
                         selectedPositions.clear()
@@ -315,6 +408,7 @@ fun AboutRouteScreen(
         } else {
             Row(
                 modifier = Modifier
+                    .zIndex(3f)
                     .fillMaxWidth()
                     .padding(top = statusBarTopPaddingDp + 10.dp, start = 12.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
