@@ -303,7 +303,6 @@ internal fun LiveSyncPreview(
                             backdrop = previewBackdrop,
                             shape = { Capsule() },
                             effects = {
-                                blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
                                 lens(12f.dp.toPx(), 20f.dp.toPx(), depthEffect = true)
                             },
                             highlight = { Highlight.Plain },

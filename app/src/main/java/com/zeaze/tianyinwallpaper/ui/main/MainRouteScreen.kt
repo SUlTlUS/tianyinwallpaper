@@ -938,26 +938,7 @@ fun MainRouteScreen(
             )
         }
 
-        // 1. Background dimming layer
-        AnimatedVisibility(
-            visible = currentDialogState != null,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(dimColor)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        dismissCurrentDialog()
-                    }
-            )
-        }
-
-        // 2. Custom Liquid Glass Dialog
+        // 1. Custom Liquid Glass Dialog
         AnimatedContent(
             targetState = currentDialogState,
             transitionSpec = {

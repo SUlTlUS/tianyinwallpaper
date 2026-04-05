@@ -239,6 +239,7 @@ fun SettingRouteScreen(
                     )
                     LiquidSegmentedSelector(
                         options = themeModeOptions,
+                        enableLiquidGlass = enableLiquidGlass,
                         selectedValue = { themeMode },
                         onValueSelected = { mode ->
                             if (mode != themeMode) {
@@ -274,6 +275,7 @@ fun SettingRouteScreen(
                             .padding(horizontal = 24.dp, vertical = 16.dp)
                     )
                     LiquidSegmentedSelector(
+                        enableLiquidGlass = enableLiquidGlass,
                         options = autoSwitchModeOptions,
                         selectedValue = { autoSwitchMode },
                         onValueSelected = { index ->

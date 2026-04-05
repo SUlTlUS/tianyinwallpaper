@@ -753,28 +753,7 @@ fun RasterRouteScreen(
             )
         }
 
-        // 1. 背景遮罩层（对齐 MainRouteScreen 的 dimColor 动画遮罩）
-        AnimatedVisibility(
-            visible = currentDialogState != null,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(dimColor)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        dismissCurrentDialog()
-                        staticEditorGroupId = null
-                    }
-            )
-        }
-
-        // 2. 自定义 Liquid Glass 对话框（对齐 MainRouteScreen 的 AnimatedContent + drawBackdrop 模式）
-        // 2. Liquid Glass 对话框
+        // 1. 自定义 Liquid Glass 对话框（对齐 MainRouteScreen 的 AnimatedContent + drawBackdrop 模式）
         AnimatedContent(
             targetState = currentDialogState,
             transitionSpec = {
@@ -1534,23 +1513,7 @@ private fun RasterDetailScreen(
             }
         }
 
-        // ✅ StaticEdit 覆盖层：在二级页面内部，与捕获层是兄弟关系
-        // 遮罩
-        AnimatedVisibility(
-            visible = showStaticEditor,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(dimColor)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onStaticEditorDismiss() }
-            )
-        }
+
 
         // 编辑面板
         AnimatedContent(
