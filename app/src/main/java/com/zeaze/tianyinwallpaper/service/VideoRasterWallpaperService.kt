@@ -19,156 +19,154 @@ import android.os.HandlerThread
 import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.SurfaceHolder
-import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
+import com.zeaze.tianyinwallpaper.service.raster.KeyframeTranscoder
 import com.zeaze.tianyinwallpaper.service.raster.RVEffectPreCtrl
 import com.zeaze.tianyinwallpaper.service.raster.RasterVideoPreRenderParamBean
 import com.zeaze.tianyinwallpaper.utils.RasterPrefs
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /**
  * 视频光栅壁纸服务
- * 参考 vivo GLRasterWallpaperPrePlugin 架构重构
+ *
+ * 核心逻辑：
+ *   陀螺仪角度 → 绝对值映射为帧索引 → seekToFrame → OpenGL 渲染到壁纸 Surface
+ *   水平(0°) = 第0帧，向任一方向倾斜45° = 最后一帧
+ *
+ * 线程模型：
+ *   主线程      - 生命周期回调（onCreate/onVisibilityChanged 等）
+ *   传感器线程  - AngleSensor 回调，结果 post 到 EGL 线程
+ *   EGL 线程    - 所有 effectCtrl / 播放状态 / 渲染操作
  */
 class VideoRasterWallpaperService : WallpaperService() {
+
     private var activeEngine: VideoRasterEngine? = null
 
     override fun onCreateEngine(): Engine = VideoRasterEngine()
 
+    // -------------------------------------------------------------------------
+    // AngleSensor
+    // -------------------------------------------------------------------------
+
     inner class AngleSensor : SensorEventListener {
+
         private var sensorManager: SensorManager? = null
         private var gyroSensor: Sensor? = null
 
         var mCurAngleSensorValue: Float = 0f
             private set
 
-        private var lastTimestamp: Long = 0L
-        private var accumulatedAngle: Float = 0f  // 累积角度（弧度）
-        private var filteredAngle: Float = 0f
+        private var lastTimestamp = 0L
+        private var accumulatedAngle = 0f
+        private var filteredVelocity = 0f
 
-        // 参考 vivo 配置
-        private val FILTER_ALPHA = 0.15f
-        private val MAX_ANGLE_DEG = 45.0  // 最大角度（度）
-        private val MAX_ANGLE_RAD = Math.toRadians(MAX_ANGLE_DEG).toFloat()
-        private val DEAD_ZONE_DEG = 1.5   // 死区角度（度）
-        private val DEAD_ZONE_RAD = Math.toRadians(DEAD_ZONE_DEG).toFloat()
+        private val FILTER_ALPHA  = 0.4f
+        private val MAX_ANGLE_RAD = Math.toRadians(45.0).toFloat()
+
+        // 死区迟滞（仅用于稳定中心位置，阈值较小）
+        private val DEAD_ZONE_EXIT_RAD  = Math.toRadians(1.5).toFloat()
+        private val DEAD_ZONE_ENTER_RAD = Math.toRadians(0.5).toFloat()
+        private var inDeadZone = true
 
         var onAngleChanged: ((Float) -> Unit)? = null
 
         fun registerSensor(context: Context) {
             sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-            gyroSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-
-            val hasSensor = gyroSensor != null
-            Log.d(TAG, "AngleSensor: registerSensor, hasGyroSensor=$hasSensor")
-
-            gyroSensor?.let {
-                sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-            }
-
+            gyroSensor    = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+            Log.d(TAG, "AngleSensor.register: hasGyro=${gyroSensor != null}")
+            gyroSensor?.let { sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
             reset()
         }
 
         fun unregisterSensor() {
-            Log.d(TAG, "AngleSensor: unregisterSensor")
+            Log.d(TAG, "AngleSensor.unregister")
             sensorManager?.unregisterListener(this)
             reset()
         }
 
         fun reset() {
-            lastTimestamp = 0L
+            lastTimestamp    = 0L
             accumulatedAngle = 0f
-            filteredAngle = 0f
+            filteredVelocity = 0f
+            inDeadZone       = true
             mCurAngleSensorValue = 0f
         }
 
         override fun onSensorChanged(event: SensorEvent?) {
             val e = event ?: return
             if (e.sensor.type != Sensor.TYPE_GYROSCOPE) return
-            processGyroscopeEvent(e)
-        }
 
-        private fun processGyroscopeEvent(event: SensorEvent) {
-            if (lastTimestamp == 0L) {
-                lastTimestamp = event.timestamp
-                return
-            }
+            if (lastTimestamp == 0L) { lastTimestamp = e.timestamp; return }
 
-            val dt = (event.timestamp - lastTimestamp) / 1_000_000_000f
-            lastTimestamp = event.timestamp
+            val dt = (e.timestamp - lastTimestamp) / 1_000_000_000f
+            lastTimestamp = e.timestamp
+            if (dt <= 0f || dt > 0.5f) return
 
-            if (dt <= 0 || dt > 0.5f) return
+            filteredVelocity  = FILTER_ALPHA * e.values[1] + (1f - FILTER_ALPHA) * filteredVelocity
+            accumulatedAngle += filteredVelocity * dt
+            accumulatedAngle  = accumulatedAngle.coerceIn(-MAX_ANGLE_RAD, MAX_ANGLE_RAD)
 
-            // 参考 vivo: 使用 values[1]（Y轴角速度）计算角度变化
-            val angularVelocity = event.values[1]
-            accumulatedAngle += angularVelocity * dt
-            accumulatedAngle = accumulatedAngle.coerceIn(-MAX_ANGLE_RAD, MAX_ANGLE_RAD)
-
-            // 低通滤波平滑
-            filteredAngle = FILTER_ALPHA * accumulatedAngle + (1 - FILTER_ALPHA) * filteredAngle
-
-            // 死区处理
-            val angleWithDeadZone = if (abs(filteredAngle) < DEAD_ZONE_RAD) {
-                0f
+            inDeadZone = if (inDeadZone) {
+                abs(accumulatedAngle) < DEAD_ZONE_EXIT_RAD
             } else {
-                filteredAngle
+                abs(accumulatedAngle) < DEAD_ZONE_ENTER_RAD
             }
-
-            mCurAngleSensorValue = angleWithDeadZone
+            mCurAngleSensorValue = if (inDeadZone) 0f else accumulatedAngle
             onAngleChanged?.invoke(mCurAngleSensorValue)
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
     }
 
+    // -------------------------------------------------------------------------
+    // VideoRasterEngine
+    // -------------------------------------------------------------------------
+
     inner class VideoRasterEngine : Engine() {
 
-        init {
-            activeEngine = this
-        }
+        init { activeEngine = this }
 
+        private var pendingFrame = 0
         private var group: RasterGroupModel? = null
         private var isVisible = false
-
         private val angleSensor = AngleSensor()
 
+        // ── 播放状态（全部在 EGL 线程读写）──
+        // ★ 绝对值映射：currentPlaybackPosition [0, 1] 对应帧 [0, totalFrames-1]
+        //   0.0 = 第0帧（水平），1.0 = 最后一帧（任一方向倾斜45°）
         private var currentPlaybackPosition = 0f
-        private var lastUpdateTime = System.currentTimeMillis()
-
-        // 初始偏离方向：null=未确定, true=右倾初始, false=左倾初始
-        private var initialTiltDirection: Boolean? = null
-        private var currentFrameIndex = 0  // 当前播放帧索引
-        private var baseFrameOnDirection: Int = 0  // 确定初始方向时的基准帧
-
-        private var eglHandler: Handler? = null
-        private var isWaitingForSurface = false
+        private var lastFrameIndex = -1
+        private var frameStableCount = 0   // 帧稳定计数，用于在用户停止倾斜后暂停播放器
 
         private var eglThread: EglThread? = null
-        private val updateSurface = AtomicBoolean(false)
-
+        private var eglHandler: Handler? = null
+        private var isWaitingForSurface = false
         private var pref: SharedPreferences? = null
-
-        private var frameCount = 0L
-
-        // 新架构：使用 RVEffectPreCtrl
         private var effectCtrl: RVEffectPreCtrl? = null
+
+        private var playbackRunnable: Runnable? = null
+        private val PLAYBACK_INTERVAL_MS = 32L   // ~30fps，匹配视频帧率，减少 seek 压力
+
+        // ── 对外接口 ──────────────────────────────────────────────────────────
 
         fun reload() {
             loadActiveGroup()
             eglThread?.post { loadContent() }
         }
 
+        // ── 生命周期 ──────────────────────────────────────────────────────────
+
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
-            Log.w(TAG, "onCreate: VideoRasterEngine created")
+            Log.w(TAG, "onCreate")
             surfaceHolder.setFormat(PixelFormat.RGBX_8888)
-
             pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE)
 
-            angleSensor.onAngleChanged = { angleValue ->
-                doSensorChangeEvent(angleValue)
+            angleSensor.onAngleChanged = { angle ->
+                eglHandler?.post { doSensorChangeEvent(angle) }
             }
 
             loadActiveGroup()
@@ -189,15 +187,13 @@ class VideoRasterWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             super.onVisibilityChanged(visible)
             isVisible = visible
-            Log.d(TAG, "onVisibilityChanged: visible=$visible")
-
+            Log.d(TAG, "onVisibilityChanged: $visible")
             if (visible) {
                 angleSensor.registerSensor(applicationContext)
                 checkGroupChange()
             } else {
-                // 离开桌面时（锁屏、打开应用）重置初始方向
-                initialTiltDirection = null
                 angleSensor.unregisterSensor()
+                eglHandler?.post { effectCtrl?.ensurePaused() }
             }
         }
 
@@ -205,252 +201,227 @@ class VideoRasterWallpaperService : WallpaperService() {
             super.onDestroy()
             if (activeEngine == this) activeEngine = null
             angleSensor.unregisterSensor()
-            
-            // 在 EGL 线程上同步释放资源
-            val latch = java.util.concurrent.CountDownLatch(1)
+
+            val latch = CountDownLatch(1)
             eglThread?.post {
-                try {
-                    effectCtrl?.release()
-                } catch (e: Exception) {
-                    Log.e(TAG, "release error: ${e.message}")
-                } finally {
-                    latch.countDown()
-                }
+                try { effectCtrl?.release() }
+                catch (e: Exception) { Log.e(TAG, "release error: ${e.message}") }
+                finally { latch.countDown() }
             }
-            latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
-            
+            latch.await(2, TimeUnit.SECONDS)
             eglThread?.finish()
         }
 
+        // ── 内容管理 ─────────────────────────────────────────────────────────
+
+        private fun loadActiveGroup() {
+            group = pref?.let { RasterPrefs.loadActiveGroup(it) }
+            Log.w(TAG, "loadActiveGroup: $group")
+        }
+
         private fun checkGroupChange() {
-            val newGroupId = pref?.getString(RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID, null)
-            if (newGroupId != group?.id) {
+            val newId = pref?.getString(RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID, null)
+            if (newId != group?.id) {
                 loadActiveGroup()
                 eglThread?.post { loadContent() }
             }
         }
 
-        private fun doSensorChangeEvent(sensorValue: Float) {
-            if (effectCtrl?.isPrepared() != true) return
+        private var isTranscoding = false
 
-            val maxAngle = Math.toRadians(45.0).toFloat()
-            val deadZone = Math.toRadians(1.0).toFloat()
-
-            val isTilting = abs(sensorValue) > deadZone
-
-            if (!isTilting) {
-                // 回到初始位置：重置方向判断，进度归零（自动倒回第一帧）
-                initialTiltDirection = null
-                currentPlaybackPosition = 0f
-                Log.d(TAG, "Sensor: at center, reset direction, progress=0")
-                return
-            }
-
-            // 第一次偏离中心：确定初始方向
-            if (initialTiltDirection == null) {
-                initialTiltDirection = sensorValue > 0 // true=右倾先行, false=左倾先行
-                Log.w(TAG, "Initial direction: ${if (initialTiltDirection == true) "RIGHT" else "LEFT"}")
-            }
-
-            // 根据初始方向将传感器值映射为 0~1 的正向进度
-            // 初始右倾：右(正值)=进度增加，左(负值)=进度为0（不倒退超过起点）
-            // 初始左倾：左(负值)=进度增加，右(正值)=进度为0
-            val rawProgress = sensorValue / maxAngle
-            currentPlaybackPosition = if (initialTiltDirection == true) {
-                rawProgress.coerceIn(0f, 1f)   // 右倾为正方向
-            } else {
-                (-rawProgress).coerceIn(0f, 1f) // 左倾为正方向
-            }
-
-            Log.d(TAG, "Sensor: angle=${String.format("%.1f", Math.toDegrees(sensorValue.toDouble()))}°, " +
-                    "dir=${if (initialTiltDirection == true) "R" else "L"}, progress=${"%.3f".format(currentPlaybackPosition)}")
-        }
-
-        private fun loadActiveGroup() {
-            group = pref?.let { RasterPrefs.loadActiveGroup(it) }
-            Log.w(TAG, "loadActiveGroup: loaded group=$group")
-        }
-
+        /**
+         * 加载视频内容（EGL 线程）
+         *
+         * 流程：
+         *   1. 检查是否已有全关键帧转码缓存
+         *   2. 有 → 直接加载转码后的视频（seek 零延迟）
+         *   3. 无 → 后台线程转码，完成后回 EGL 线程加载
+         */
         private fun loadContent() {
-            Log.w(TAG, "loadContent: group=$group, type=${group?.type}")
+            Log.w(TAG, "loadContent: group=$group")
             val g = group ?: return
             if (g.type != RasterGroupModel.TYPE_DYNAMIC) {
-                Log.w(TAG, "loadContent: not dynamic type, skipping")
+                Log.w(TAG, "loadContent: not dynamic, skip")
                 return
             }
-
-            isWaitingForSurface = false
-
-            // 初始化效果控制器
-            initEffectCtrl()
-
-            // 加载视频
             val videoUri = g.videoUri
             if (videoUri.isNullOrEmpty()) {
-                Log.e(TAG, "Video URI is empty")
+                Log.e(TAG, "loadContent: videoUri empty")
                 return
             }
 
-            // ✅ 检查 EGL/SurfaceTexture 是否已就绪
+            initEffectCtrl()
+
             val texId = effectCtrl?.getTextureId() ?: 0
             if (texId == 0) {
-                Log.w(TAG, "loadContent: SurfaceTexture not ready, will retry on available")
-                isWaitingForSurface = true  // ✅ 标记等待，等回调触发重试
+                Log.w(TAG, "loadContent: texture not ready, waiting...")
+                isWaitingForSurface = true
                 return
             }
 
-            val params = RasterVideoPreRenderParamBean(
-                videoPath = videoUri,
-                videoFrameRate = 30
-            )
-            Log.w(TAG, "loadContent: calling loadSourceFromParams, videoUri=$videoUri")
-            effectCtrl?.loadSourceFromParams(params)
+            // ★ 全关键帧转码：检查缓存 / 启动转码
+            val transcoder = KeyframeTranscoder(applicationContext)
+            val cachedPath = transcoder.getCachedPath(videoUri)
 
-            Log.w(TAG, "loadContent: completed")
+            if (cachedPath != null) {
+                Log.w(TAG, "loadContent: using cached keyframe video: $cachedPath")
+                doLoadVideo(cachedPath)
+            } else if (!isTranscoding) {
+                isTranscoding = true
+                Log.w(TAG, "loadContent: starting keyframe transcode...")
+                transcoder.transcodeAsync(videoUri, object : KeyframeTranscoder.Listener {
+                    override fun onProgress(progress: Float) {
+                        if ((progress * 100).toInt() % 10 == 0) {
+                            Log.d(TAG, "transcode progress: ${(progress * 100).toInt()}%")
+                        }
+                    }
+
+                    override fun onComplete(outputPath: String) {
+                        Log.w(TAG, "transcode complete: $outputPath")
+                        isTranscoding = false
+                        eglHandler?.post { doLoadVideo(outputPath) }
+                    }
+
+                    override fun onError(message: String) {
+                        Log.e(TAG, "transcode failed: $message, falling back to original")
+                        isTranscoding = false
+                        eglHandler?.post { doLoadVideo(videoUri) }
+                    }
+                })
+            }
         }
 
-        private fun initEffectCtrl() {
-            Log.w(TAG, "initEffectCtrl: starting...")
-            effectCtrl?.release()
-            
-            effectCtrl = RVEffectPreCtrl(applicationContext, object : RVEffectPreCtrl.Callback {
-                override fun onPrepared(frameCount: Int, duration: Long) {
-                    Log.w(TAG, "EffectCtrl onPrepared: frames=$frameCount, duration=$duration, thread=${Thread.currentThread().name}")
-                    lastUpdateTime = System.currentTimeMillis()
-                    currentPlaybackPosition = 0f
-                    lastFrameIndex = -1
-                    initialTiltDirection = null
-                    
-                    // 初始帧在中间位置，并实际 seek 到该帧
-                    val midFrame = frameCount / 2
-                    effectCtrl?.seekToFrame(midFrame)
-                    currentFrameIndex = midFrame
-                    baseFrameOnDirection = midFrame
-                    
-                    startPlaybackLoop()
-                }
-
-                override fun onFrameReady() {
-                    Log.d(TAG, "EffectCtrl onFrameReady: frame ready callback")
-                    updateSurface.set(true)
-                    eglThread?.requestRender()
-                }
-
-                override fun onError(message: String) {
-                    Log.e(TAG, "EffectCtrl onError: $message")
-                }
-            })
-            
-            Log.w(TAG, "initEffectCtrl: calling init()")
-            effectCtrl?.init()
-            Log.w(TAG, "initEffectCtrl: init() completed, textureId=${effectCtrl?.getTextureId()}")
+        /** 实际加载视频到播放器（EGL 线程） */
+        private fun doLoadVideo(videoPath: String) {
+            Log.w(TAG, "doLoadVideo: $videoPath")
+            effectCtrl?.loadSourceFromParams(
+                RasterVideoPreRenderParamBean(videoPath = videoPath, videoFrameRate = 30)
+            )
         }
 
         fun onSurfaceTextureAvailable() {
-            if (isWaitingForSurface && group?.type == RasterGroupModel.TYPE_DYNAMIC) {
-                Log.w(TAG, "SurfaceTexture available, retrying loadContent...")
-                isWaitingForSurface = false  // ✅ 防止重复触发
-                loadContent()
+            if (!isWaitingForSurface) return
+            isWaitingForSurface = false
+
+            val videoUri = group?.videoUri
+            if (videoUri.isNullOrEmpty()) return
+
+            val texId = effectCtrl?.getTextureId() ?: 0
+            if (texId == 0) {
+                Log.e(TAG, "onSurfaceTextureAvailable: still no texture, abort")
+                return
             }
+
+            // 复用 loadContent 的转码逻辑
+            Log.w(TAG, "onSurfaceTextureAvailable: retrying load")
+            val transcoder = KeyframeTranscoder(applicationContext)
+            val cachedPath = transcoder.getCachedPath(videoUri)
+            doLoadVideo(cachedPath ?: videoUri)
         }
 
-        private var playbackRunnable: Runnable? = null
-        private val PLAYBACK_INTERVAL_MS = 16L
+        private fun initEffectCtrl() {
+            stopPlaybackLoop()
+            effectCtrl?.release()
 
-        private var lastFrameIndex = -1  // 记录上次播放的帧索引
+            effectCtrl = RVEffectPreCtrl(applicationContext, object : RVEffectPreCtrl.Callback {
+                override fun onPrepared(frameCount: Int, duration: Long) {
+                    Log.w(TAG, "onPrepared: frames=$frameCount, duration=$duration")
+                    eglHandler?.post {
+                        lastFrameIndex = -1
+                        currentPlaybackPosition = 0f   // 初始位于第0帧
+                        effectCtrl?.seekToFrame(0)
+                        startPlaybackLoop()
+                    }
+                }
+
+                override fun onFrameReady() {
+                    eglThread?.requestRender()
+                }
+
+                override fun onSeekComplete() {
+                    // ★ 不再用 isSeeking 门控，仅触发渲染
+                    eglHandler?.post { eglThread?.requestRender() }
+                }
+
+                override fun onError(message: String) {
+                    Log.e(TAG, "onError: $message")
+                }
+            })
+
+            effectCtrl?.init()
+            Log.w(TAG, "initEffectCtrl: done, textureId=${effectCtrl?.getTextureId()}")
+        }
+
+        // ── 传感器 → 帧控制（EGL 线程）────────────────────────────────────────
+
+        /**
+         * ★ 绝对值映射：陀螺仪倾斜角度的绝对值映射为帧位置
+         *
+         * angle =   0° → position = 0.0 → 第0帧（水平）
+         * angle = ±45° → position = 1.0 → 最后一帧
+         *
+         * 左倾和右倾效果相同，连续无跳变
+         */
+        private fun doSensorChangeEvent(sensorValue: Float) {
+            if (effectCtrl?.isPrepared() != true) return
+            val maxAngle = Math.toRadians(45.0).toFloat()
+
+            val normalized = (sensorValue / maxAngle).coerceIn(-1f, 1f)
+            currentPlaybackPosition = abs(normalized)   // [0, 1]
+        }
+
+        // ── 播放循环（EGL 线程）───────────────────────────────────────────────
 
         private fun startPlaybackLoop() {
-            Log.w(TAG, "startPlaybackLoop")
             stopPlaybackLoop()
-            lastUpdateTime = System.currentTimeMillis()
-            lastFrameIndex = -1
-            initialTiltDirection = null
-            // 基准帧在 doSensorChangeEvent 中动态设置
+            Log.w(TAG, "startPlaybackLoop")
 
             playbackRunnable = object : Runnable {
                 override fun run() {
-                    val prepared = effectCtrl?.isPrepared() ?: false
-                    if (!prepared) {
-                        Log.w(TAG, "playbackLoop: not prepared yet, retrying...")
-                        eglHandler?.postDelayed(this, PLAYBACK_INTERVAL_MS)
-                        return
+                    if (effectCtrl?.isPrepared() == true) {
+                        updateFrame()
+                        eglThread?.requestRender()
                     }
-
-                    // 【vivo 方案】角度直接映射到帧索引
-                    updatePlaybackVivoStyle()
-
-                    // 请求渲染
-                    eglThread?.requestRender()
-
                     eglHandler?.postDelayed(this, PLAYBACK_INTERVAL_MS)
                 }
             }
-
             eglHandler?.post(playbackRunnable!!)
         }
 
         private fun stopPlaybackLoop() {
-            Log.d(TAG, "stopPlaybackLoop")
-            playbackRunnable?.let {
-                eglHandler?.removeCallbacks(it)
-            }
+            playbackRunnable?.let { eglHandler?.removeCallbacks(it) }
             playbackRunnable = null
         }
 
         /**
-         * 播放逻辑：
-         * - 初始右倾：右倾正放（帧增加），左倾倒放（帧减少）
-         * - 初始左倾：左倾正放（帧增加），右倾倒放（帧减少）
-         * - 静止时保持在当前帧
+         * ★ 根据当前位置计算目标帧并同步解码
+         *
+         * seekToFrame 现在是同步的（MediaCodec 直接解码），
+         * 前向 1~5 帧耗时 ~1~5ms，大跳转在 28ms 预算内解码尽可能多的帧。
          */
-        private fun updatePlaybackVivoStyle() {
-            val totalFrames = effectCtrl?.getFrameCount() ?: 0
-            if (totalFrames < 1) {
-                Log.w(TAG, "updatePlaybackVivoStyle: totalFrames=$totalFrames, skipping")
+        private fun updateFrame() {
+            val totalFrames = effectCtrl?.getFrameCount() ?: return
+
+            pendingFrame = (currentPlaybackPosition * (totalFrames - 1)).toInt()
+                .coerceIn(0, totalFrames - 1)
+
+            if (pendingFrame == lastFrameIndex) {
+                // 帧稳定 → 暂停播放器防止自动前进
+                if (frameStableCount++ > 3) {
+                    effectCtrl?.ensurePaused()
+                }
                 return
             }
 
-            // 从 RVRes 获取真实的当前帧
-            val actualCurrentFrame = effectCtrl?.getCurrentFrame() ?: 0
-
-            // 根据初始方向和带符号的进度计算帧索引
-            val targetFrameIndex = if (initialTiltDirection == null) {
-                // 未确定初始方向（在水平位置），保持当前帧不变
-                actualCurrentFrame
-            } else {
-                // 使用确定方向时的基准帧
-                val frameOffset = (currentPlaybackPosition * totalFrames).toInt()
-                val initialDir = initialTiltDirection!!
-
-                // 核心逻辑：
-                // 初始右倾(true)：右倾(progress>0)正放，左倾(progress<0)倒放
-                // 初始左倾(false)：左倾(progress<0)正放，右倾(progress>0)倒放
-                if (initialDir) {
-                    // 初始右倾：直接使用带符号偏移
-                    baseFrameOnDirection + frameOffset
-                } else {
-                    // 初始左倾：反转偏移方向
-                    baseFrameOnDirection - frameOffset
-                }
-            }
-
-            // 限制帧范围
-            val finalFrameIndex = targetFrameIndex.coerceIn(0, totalFrames - 1)
-
-            // 只有帧变化时才 seek
-            if (finalFrameIndex != lastFrameIndex) {
-                Log.w(TAG, "updatePlayback: frame $lastFrameIndex → $finalFrameIndex, initialDir=${initialTiltDirection}, baseFrame=$baseFrameOnDirection, progress=${String.format("%.3f", currentPlaybackPosition)}")
-                effectCtrl?.seekToFrame(finalFrameIndex)
-                lastFrameIndex = finalFrameIndex
-
-                frameCount++
-                if (frameCount % 30 == 0L) {
-                    Log.d(TAG, "Playback: frame=$finalFrameIndex / $totalFrames")
-                }
-            }
+            frameStableCount = 0
+            effectCtrl?.seekToFrame(pendingFrame)
+            lastFrameIndex = pendingFrame
         }
 
+        // ── EglThread ─────────────────────────────────────────────────────────
+
         private inner class EglThread(private val holder: SurfaceHolder) : HandlerThread("VideoRasterEGL") {
+
             private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
             private var context: EGLContext = EGL14.EGL_NO_CONTEXT
             private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
@@ -459,32 +430,65 @@ class VideoRasterWallpaperService : WallpaperService() {
             private var sW = 0
             private var sH = 0
             private var isEglReady = false
+            private var drawCounter = 0L
+
+            private fun drawDebugBar() {
+                val totalFrames = effectCtrl?.getFrameCount() ?: 0
+                if (totalFrames == 0 || sW <= 0 || sH <= 0) return
+
+                val barH    = 8
+                val barY    = 0
+                val posW    = (currentPlaybackPosition * sW).toInt()
+                val frameW  = (lastFrameIndex.coerceAtLeast(0).toFloat() / (totalFrames - 1) * sW).toInt()
+
+                GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+
+                // 背景条（深灰）
+                GLES20.glScissor(0, barY, sW, barH)
+                GLES20.glClearColor(0.2f, 0.2f, 0.2f, 0.8f)
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
+                // 帧位置（白色）
+                if (frameW > 0) {
+                    GLES20.glScissor(0, barY, frameW, barH)
+                    GLES20.glClearColor(1f, 1f, 1f, 1f)
+                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+                }
+
+                // 倾斜位置（青色）
+                if (posW > 0) {
+                    GLES20.glScissor(0, barY, posW, barH / 2)
+                    GLES20.glClearColor(0f, 0.8f, 0.8f, 1f)
+                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+                }
+
+                GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
+            }
 
             fun onSizeChanged(w: Int, h: Int) {
-                sW = w
-                sH = h
-                effectCtrl?.setDesignSize(w, h)
-                requestRender()
+                sW = w; sH = h
+                post {
+                    effectCtrl?.setDesignSize(w, h)
+                    requestRender()
+                }
             }
 
             fun post(r: () -> Unit) { handler?.post(r) }
 
             override fun onLooperPrepared() {
-                Log.w(TAG, "EglThread.onLooperPrepared: starting...")
+                Log.w(TAG, "EglThread.onLooperPrepared")
                 if (!initEGL()) {
-                    Log.e(TAG, "EglThread.onLooperPrepared: initEGL failed!")
+                    Log.e(TAG, "initEGL failed!")
                     return
                 }
-                handler = Handler(looper)
+                handler    = Handler(looper)
                 eglHandler = handler
                 isEglReady = true
-                Log.w(TAG, "EglThread.onLooperPrepared: EGL initialized, posting loadContent...")
-                
-                handler?.post {
-                    this@VideoRasterEngine.onSurfaceTextureAvailable()
+
+                post {
+                    loadContent()
+                    onSurfaceTextureAvailable()
                 }
-                
-                post { loadContent() }
             }
 
             private fun initEGL(): Boolean {
@@ -500,8 +504,7 @@ class VideoRasterWallpaperService : WallpaperService() {
                     EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
                     EGL14.EGL_NONE
                 )
-
-                val configs = arrayOfNulls<EGLConfig>(1)
+                val configs    = arrayOfNulls<EGLConfig>(1)
                 val numConfigs = IntArray(1)
                 EGL14.eglChooseConfig(display, attr, 0, configs, 0, 1, numConfigs, 0)
 
@@ -509,12 +512,10 @@ class VideoRasterWallpaperService : WallpaperService() {
                     display, configs[0], EGL14.EGL_NO_CONTEXT,
                     intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0
                 )
-
                 eglSurface = EGL14.eglCreateWindowSurface(
                     display, configs[0], holder.surface,
                     intArrayOf(EGL14.EGL_NONE), 0
                 )
-
                 return EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
             }
 
@@ -524,59 +525,34 @@ class VideoRasterWallpaperService : WallpaperService() {
             }
 
             private val drawRunnable = Runnable { draw() }
-            
-            private var drawCounter = 0L
 
             private fun draw() {
                 drawCounter++
-                
-                if (!isEglReady || eglSurface == EGL14.EGL_NO_SURFACE) {
-                    if (drawCounter % 60 == 0L) {
-                        Log.w(TAG, "draw: skipped, isEglReady=$isEglReady, surface valid=${eglSurface != EGL14.EGL_NO_SURFACE}")
-                    }
-                    return
-                }
-                
-                if (sW <= 0 || sH <= 0) {
-                    Log.w(TAG, "draw: skipped, invalid size: ${sW}x$sH")
-                    return
-                }
-                
-                val prepared = effectCtrl?.isPrepared() ?: false
-                if (!prepared) {
-                    // 还没准备好，绘制黑色背景
-                    EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
+                if (!isEglReady || eglSurface == EGL14.EGL_NO_SURFACE || sW <= 0 || sH <= 0) return
+
+                EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
+
+                if (effectCtrl?.isPrepared() != true) {
                     GLES20.glViewport(0, 0, sW, sH)
                     GLES20.glClearColor(0f, 0f, 0f, 1f)
                     GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
                     EGL14.eglSwapBuffers(display, eglSurface)
-                    if (drawCounter % 60 == 0L) {
-                        Log.w(TAG, "draw: not prepared, drew black background")
-                    }
                     return
                 }
-                
-                EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
 
-                // 更新动画数据（进度、透明度等）
-                effectCtrl?.setProcess(currentPlaybackPosition)
-                effectCtrl?.onUpdateAnimationData()
-
-                // 使用 RVEffectPreCtrl 进行渲染
                 effectCtrl?.onDrawFrame(sW, sH)
-
+                drawDebugBar()
                 if (!EGL14.eglSwapBuffers(display, eglSurface)) {
-                    Log.e(TAG, "SwapBuffers failed, error: ${EGL14.eglGetError()}")
+                    Log.e(TAG, "eglSwapBuffers failed: ${EGL14.eglGetError()}")
                 }
-                
-                if (drawCounter % 60 == 0L) {
-                    Log.d(TAG, "draw: completed frame $drawCounter")
+
+                if (drawCounter % 300 == 0L) {
+                    Log.d(TAG, "draw: frame $drawCounter, pos=${"%.2f".format(currentPlaybackPosition)}, vidFrame=$lastFrameIndex")
                 }
             }
 
             fun finish() {
-                // 在 EGL 线程上销毁 EGL 资源
-                val destroyLatch = java.util.concurrent.CountDownLatch(1)
+                val latch = CountDownLatch(1)
                 handler?.post {
                     try {
                         if (display != EGL14.EGL_NO_DISPLAY) {
@@ -589,14 +565,18 @@ class VideoRasterWallpaperService : WallpaperService() {
                         Log.e(TAG, "EGL destroy error: ${e.message}")
                     } finally {
                         isEglReady = false
-                        destroyLatch.countDown()
+                        latch.countDown()
                     }
                 }
-                destroyLatch.await(1, java.util.concurrent.TimeUnit.SECONDS)
+                latch.await(1, TimeUnit.SECONDS)
                 quitSafely()
             }
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Service
+    // -------------------------------------------------------------------------
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -607,6 +587,6 @@ class VideoRasterWallpaperService : WallpaperService() {
 
     companion object {
         const val ACTION_RELOAD = "com.zeaze.tianyinwallpaper.VIDEO_RASTER_RELOAD"
-        private const val TAG = "VideoRasterGL"
+        private const val TAG   = "VideoRasterGL"
     }
 }

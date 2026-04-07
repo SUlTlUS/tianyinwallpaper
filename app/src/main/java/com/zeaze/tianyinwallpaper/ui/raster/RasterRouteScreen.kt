@@ -136,6 +136,7 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.VideoRasterWallpaperService
+import com.zeaze.tianyinwallpaper.service.raster.KeyframeTranscoder
 import com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService
 import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
 import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
@@ -208,6 +209,17 @@ fun RasterRouteScreen(
     //  新增：替换单张图片的状态
     var singleReplaceTargetId by remember { mutableStateOf<String?>(null) }
     var singleReplaceIndex by remember { mutableStateOf(-1) }
+
+    // ★ 保存视频光栅缓存开关
+    var keepVideoCache by remember {
+        mutableStateOf(pref.getBoolean(RasterPrefs.PREF_KEEP_VIDEO_CACHE, false))
+    }
+    // 是否有待清理标记（关闭开关后、重启前不立刻删缓存）
+    val pendingClearVideoCache = remember {
+        pref.getBoolean(RasterPrefs.PREF_PENDING_CLEAR_VIDEO_CACHE, false)
+    }
+    // 记录上一次预览的视频 URI，用于「不保存缓存」模式下切换时删除旧缓存
+    var lastPreviewedVideoUri by remember { mutableStateOf<String?>(null) }
 
     // 统一对话框状态（对齐 MainRouteScreen 的 currentDialogState 模式）
     val currentDialogState = when {
@@ -308,6 +320,12 @@ fun RasterRouteScreen(
         val removeIndex = groups.indexOfFirst { it.id == groupId }
         if (removeIndex < 0) return
 
+        // ★ 删除视频光栅时同时删除转码缓存
+        val removedGroup = groups[removeIndex]
+        if (removedGroup.type == RasterGroupModel.TYPE_DYNAMIC && !removedGroup.videoUri.isNullOrEmpty()) {
+            KeyframeTranscoder(context).deleteCacheFor(removedGroup.videoUri!!)
+        }
+
         groups.removeAt(removeIndex)
         selectedIds.remove(groupId)
 
@@ -353,11 +371,6 @@ fun RasterRouteScreen(
         val models = toWallpaperModels(group)
         if (models.isEmpty()) {
             context.showToast("当前光栅组合内容为空")
-            return
-        }
-        // 视频光栅壁纸正在开发中
-        if (group.type == RasterGroupModel.TYPE_DYNAMIC) {
-            context.showToast("视频光栅壁纸正在开发中，敬请期待")
             return
         }
         coroutineScope.launch {
@@ -409,11 +422,6 @@ fun RasterRouteScreen(
 
         pref.edit().putString(RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID, target.id).apply()
 
-        // 视频光栅壁纸正在开发中
-        if (target.type == RasterGroupModel.TYPE_DYNAMIC) {
-            context.showToast("视频光栅壁纸正在开发中，敬请期待")
-            return
-        }
 
         val hostActivity = activity ?: return
         val wallpaperManager = WallpaperManager.getInstance(hostActivity)
@@ -728,6 +736,16 @@ fun RasterRouteScreen(
                                 if (selectionMode) {
                                     if (selected) selectedIds.remove(group.id) else selectedIds.add(group.id)
                                 } else {
+                                    // ★ 切换视频光栅预览时，根据缓存开关决定是否删除旧缓存
+                                    // pendingClearVideoCache 为 true 时跳过（重启后统一清理）
+                                    if (group.type == RasterGroupModel.TYPE_DYNAMIC && !group.videoUri.isNullOrEmpty()) {
+                                        val newUri = group.videoUri!!
+                                        if (!keepVideoCache && !pendingClearVideoCache && lastPreviewedVideoUri != null
+                                            && lastPreviewedVideoUri != newUri) {
+                                            KeyframeTranscoder(context).deleteCacheFor(lastPreviewedVideoUri!!)
+                                        }
+                                        lastPreviewedVideoUri = newUri
+                                    }
                                     detailGroup = group.copy()
                                 }
                             }
@@ -839,7 +857,7 @@ fun RasterRouteScreen(
                                         .background(accentColor)
                                         .clickable {
                                             showTypeDialog = false
-                                            context.showToast("视频光栅壁纸正在开发中，敬请期待")
+                                            pickDynamicLauncher.launch(arrayOf("video/*"))
                                         }
                                         .height(48.dp)
                                         .fillMaxWidth(),
@@ -902,6 +920,13 @@ fun RasterRouteScreen(
                                             .clip(Capsule())
                                             .background(Color(0xFFFF4D4F).copy(alpha = 0.75f))
                                             .clickable {
+                                                // ★ 批量删除时清理视频光栅转码缓存
+                                                val transcoder = KeyframeTranscoder(context)
+                                                groups.filter { selectedIds.contains(it.id) }.forEach { g ->
+                                                    if (g.type == RasterGroupModel.TYPE_DYNAMIC && !g.videoUri.isNullOrEmpty()) {
+                                                        transcoder.deleteCacheFor(g.videoUri!!)
+                                                    }
+                                                }
                                                 groups.removeAll { selectedIds.contains(it.id) }
                                                 selectedIds.clear()
                                                 selectionMode = false
@@ -1143,7 +1168,8 @@ fun RasterRouteScreen(
                     persistGroups()
                 },
                 onVideoAction = {
-                    context.showToast("视频光栅壁纸正在开发中，敬请期待")
+                    dynamicPickTargetId = detailGroup?.id
+                    pickDynamicLauncher.launch(arrayOf("video/*"))
                 }
             )
         }
@@ -1312,6 +1338,10 @@ private fun RasterDetailScreen(
     val detailBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
     val context = LocalContext.current
+
+    // 视频光栅加载状态（转码中 / 准备中）
+    var videoLoading by remember { mutableStateOf(group.type == RasterGroupModel.TYPE_DYNAMIC) }
+
     val screenAspectRatio = remember(context) {
         val w = FileUtil.width.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels
         val h = FileUtil.height.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels
@@ -1381,10 +1411,10 @@ private fun RasterDetailScreen(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    GyroDynamicRasterPreview(
+                    VideoRasterPreviewView(
                         group = group,
-                        sensorWidth = group.sensorWidth,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        onLoadingChanged = { videoLoading = it }
                     )
                 }
             }
@@ -1418,17 +1448,23 @@ private fun RasterDetailScreen(
                 }
                 // 应用按钮 - 蓝色按钮也联动 luminance
                 LiquidButton(
-                    onClick = onApply,
+                    onClick = { if (!videoLoading) onApply() },
                     backdrop = detailBackdrop,
-                    surfaceColor = Color(0xFF2A83FF).copy(alpha = 0.75f),
-                    tint = Color(0xFF2A83FF),
+                    surfaceColor = if (videoLoading) Color.Gray.copy(alpha = 0.5f)
+                    else Color(0xFF2A83FF).copy(alpha = 0.75f),
+                    tint = if (videoLoading) Color.Unspecified else Color(0xFF2A83FF),
                     luminanceState = applyLuminanceState,
-                    modifier = Modifier.height(44.dp)
+                    modifier = Modifier.height(44.dp).graphicsLayer {
+                        alpha = if (videoLoading) 0.5f else 1f
+                    }
                 ) {
                     BasicText(
                         "应用",
                         modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(Color.White, 15.sp)
+                        style = TextStyle(
+                            if (videoLoading) Color.White.copy(alpha = 0.5f) else Color.White,
+                            15.sp
+                        )
                     )
                 }
             } else {
@@ -1441,11 +1477,12 @@ private fun RasterDetailScreen(
                         .padding(horizontal = 18.dp, vertical = 8.dp)
                 )
                 Text(
-                    text = "应用", color = Color.White,
+                    text = "应用",
+                    color = if (videoLoading) Color.White.copy(alpha = 0.5f) else Color.White,
                     modifier = Modifier
                         .clip(RoundedCornerShape(18.dp))
-                        .background(Color(0x662A83FF))
-                        .combinedClickable(onClick = onApply)
+                        .background(if (videoLoading) Color.Gray.copy(alpha = 0.3f) else Color(0x662A83FF))
+                        .combinedClickable(onClick = { if (!videoLoading) onApply() })
                         .padding(horizontal = 18.dp, vertical = 8.dp)
                 )
             }
@@ -2000,7 +2037,9 @@ private fun GyroDynamicRasterPreview(
     }
     
     // 根据 tilt 选择对应的帧
-    val frameIndex = (tilt * (cachedFrames.size - 1)).roundToInt().coerceIn(0, cachedFrames.lastIndex)
+
+    val frameIndex = if (cachedFrames.isEmpty()) -1
+    else (tilt * (cachedFrames.size - 1)).roundToInt().coerceIn(0, cachedFrames.lastIndex)
     val currentFrame = cachedFrames.getOrNull(frameIndex)
 
     Box(modifier = modifier) {

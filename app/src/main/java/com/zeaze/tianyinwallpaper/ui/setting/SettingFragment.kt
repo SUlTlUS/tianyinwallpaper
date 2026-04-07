@@ -80,6 +80,7 @@ import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.update.AppUpdateManager
 import com.zeaze.tianyinwallpaper.update.UpdateDialog
 import com.zeaze.tianyinwallpaper.update.UpdateDialogState
+import com.zeaze.tianyinwallpaper.utils.RasterPrefs
 import kotlinx.coroutines.launch
 
 private sealed class SettingsDialogState {
@@ -102,6 +103,7 @@ fun SettingRouteScreen(
 
     var hidePermissionDialog by remember { mutableStateOf(pref.getBoolean("hide_permission_dialog", false)) }
     var rand by remember { mutableStateOf(pref.getBoolean("rand", false)) }
+    var keepVideoCache by remember { mutableStateOf(pref.getBoolean(RasterPrefs.PREF_KEEP_VIDEO_CACHE, false)) }
     var pageChange by remember { mutableStateOf(pref.getBoolean("pageChange", false)) }
     var wallpaperScroll by remember { mutableStateOf(pref.getBoolean("wallpaperScroll", false)) }
     var minTime by remember { mutableStateOf(pref.getInt("minTime", 1)) }
@@ -215,6 +217,22 @@ fun SettingRouteScreen(
                     SettingCheckItem("关闭权限提示", hidePermissionDialog, contentColor, groupBackgroundColor, isLightTheme) {
                         hidePermissionDialog = it
                         editor.putBoolean("hide_permission_dialog", it).apply()
+                    }
+                    SettingCheckItemWithSubtitle(
+                        label = "保存视频光栅缓存",
+                        subtitle = "占用更多存储空间，提高视频光栅加载速度",
+                        checked = keepVideoCache,
+                        contentColor = contentColor,
+                        backgroundColor = groupBackgroundColor,
+                        isLightTheme = isLightTheme
+                    ) {
+                        keepVideoCache = it
+                        editor.putBoolean(RasterPrefs.PREF_KEEP_VIDEO_CACHE, it)
+                        if (!it) {
+                            // 关闭时不立刻清缓存，标记待清理，重启应用再清
+                            editor.putBoolean(RasterPrefs.PREF_PENDING_CLEAR_VIDEO_CACHE, true)
+                        }
+                        editor.apply()
                     }
 
                 }
@@ -1071,6 +1089,54 @@ private fun SettingCheckItem(
             ),
             modifier = Modifier.weight(1f)
         )
+        LiquidToggle(
+            selected = { checked },
+            onSelect = onCheckedChange,
+            backdrop = rememberCanvasBackdrop { drawRect(backgroundColor) },
+            isLightTheme = isLightTheme
+        )
+    }
+}
+
+@Composable
+private fun SettingCheckItemWithSubtitle(
+    label: String,
+    subtitle: String,
+    checked: Boolean,
+    contentColor: Color,
+    backgroundColor: Color,
+    isLightTheme: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                onCheckedChange(!checked)
+            }
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = TextStyle(
+                    color = contentColor,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            )
+            Text(
+                text = subtitle,
+                style = TextStyle(
+                    color = contentColor.copy(alpha = 0.5f),
+                    fontSize = 12.sp
+                )
+            )
+        }
         LiquidToggle(
             selected = { checked },
             onSelect = onCheckedChange,

@@ -2,18 +2,14 @@ package com.zeaze.tianyinwallpaper.service.raster
 
 import android.content.Context
 import android.graphics.SurfaceTexture
+import android.media.MediaCodec
+import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
-import android.os.Handler
-import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
-import net.protyposis.android.mediaplayer.FileSource
-import net.protyposis.android.mediaplayer.MediaPlayer
-import net.protyposis.android.mediaplayer.MediaSource
-import net.protyposis.android.mediaplayer.UriSource
-import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -21,8 +17,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 视频资源管理器
- * 使用 MediaPlayer-Extended 实现帧精确 seek
- * 支持本地文件和 content:// URI
+ * 使用 MediaExtractor + MediaCodec 实现同步帧精确解码
+ *
+ * 核心优势（相比 MediaPlayer seekTo）：
+ *   - 前向顺序解码：目标在前方 1~5 帧时只需 1~5ms
+ *   - 仅在回退或大跳转时才 seek 关键帧
+ *   - 时间预算：每次 seekToFrame 最多 28ms，超时渲染最近已解码帧
+ *   - 零 start/pause 开销
  */
 class RVRes(
     private val context: Context,
@@ -30,59 +31,60 @@ class RVRes(
 ) {
     companion object {
         private const val TAG = "RVRes"
+        /** 每次 seekToFrame() 调用的最大解码时间（ms） */
+        private const val DECODE_BUDGET_MS = 28L
+        /** 超过此帧距，使用 extractor.seekTo 而非顺序解码 */
+        private const val FORWARD_THRESHOLD = 90
     }
 
     interface Callback {
         fun onVideoFrameReady(frameIndex: Int, textureId: Int, transformMatrix: FloatArray)
         fun onVideoPrepared(frameCount: Int, duration: Long, width: Int, height: Int)
         fun onVideoError(message: String)
+        fun onSeekComplete()
     }
 
-    // MediaPlayer-Extended 实例
-    private var mediaPlayer: MediaPlayer? = null
-    
-    // Surface 相关
+    // ── 解码器 ───────────────────────────────────────────────────────────────
+    private var extractor: MediaExtractor? = null
+    private var codec: MediaCodec? = null
+    private var codecInputEos = false
+    private var videoTrackIndex = -1
+
+    // ── Surface / 纹理 ──────────────────────────────────────────────────────
     private var surfaceTexture: SurfaceTexture? = null
-    private var surface: Surface? = null
+    private var codecSurface: Surface? = null
     private var textureId: Int = 0
 
-    // 状态
+    // ── 状态 ────────────────────────────────────────────────────────────────
     private var isPrepared = false
-    private var hasNotifiedPrepared = false
 
-    // 视频信息
+    // ── 视频信息 ────────────────────────────────────────────────────────────
     private var videoPath: String = ""
-    private var videoDuration: Long = 0
+    private var videoDuration: Long = 0          // ms
     private var videoFrameCount: Int = 0
     private var videoFrameRate: Float = 30f
     private var videoWidth: Int = 0
     private var videoHeight: Int = 0
-    private var currentFrameIndex: Int = -1
-    private var targetFrameIndex: Int = -1
+    private var currentFrameIndex: Int = -1      // 最近渲染到 SurfaceTexture 的帧索引
+    private var codecPosition: Int = -1          // codec 实际解码到的帧位置（可能领先于 currentFrameIndex）
+    private var backwardRecoveryTarget: Int = -1 // >= 0 表示正在从后退 seek 中恢复，值为目标帧号
 
-    // 纹理矩阵
+    // ── 纹理矩阵 ───────────────────────────────────────────────────────────
     private val transformMatrix = FloatArray(16)
-
     private val frameAvailable = AtomicBoolean(false)
 
-    // 主线程 Handler
-    private val mainHandler = Handler(Looper.getMainLooper())
-
-    // 帧可用回调
+    // ── 帧可用回调 ─────────────────────────────────────────────────────────
     private var onFrameAvailableCallback: (() -> Unit)? = null
 
-    // 顶点和纹理缓冲区
+    // ── GL 缓冲区 ──────────────────────────────────────────────────────────
     private val vertexBuffer: FloatBuffer
     private val texCoordBuffer: FloatBuffer
     private var shaderProgram: Int = 0
 
     init {
-        // 初始化顶点数据
         val vertexData = floatArrayOf(
-            -1f, -1f,
-            1f, -1f,
-            -1f, 1f,
-            1f, 1f
+            -1f, -1f,  1f, -1f,
+            -1f,  1f,  1f,  1f
         )
         vertexBuffer = ByteBuffer.allocateDirect(vertexData.size * 4)
             .order(ByteOrder.nativeOrder())
@@ -91,10 +93,8 @@ class RVRes(
         vertexBuffer.position(0)
 
         val texCoordData = floatArrayOf(
-            0f, 0f,
-            1f, 0f,
-            0f, 1f,
-            1f, 1f
+            0f, 0f,  1f, 0f,
+            0f, 1f,  1f, 1f
         )
         texCoordBuffer = ByteBuffer.allocateDirect(texCoordData.size * 4)
             .order(ByteOrder.nativeOrder())
@@ -105,15 +105,14 @@ class RVRes(
         android.opengl.Matrix.setIdentityM(transformMatrix, 0)
     }
 
+    // ── GL 初始化 ──────────────────────────────────────────────────────────
+
     fun initGL(): Int {
         Log.w(TAG, "initGL: starting...")
 
-        // 创建 OES 纹理
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         textureId = textures[0]
-
-        Log.w(TAG, "initGL: textureId=$textureId")
 
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
@@ -121,269 +120,257 @@ class RVRes(
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
-        // 创建 SurfaceTexture
         surfaceTexture = SurfaceTexture(textureId)
-        Log.w(TAG, "initGL: SurfaceTexture created: $surfaceTexture")
-
-        // 设置帧可用监听器 - 不指定 Handler，只设置标志
-        // updateTexImage() 必须在 EGL 线程调用，不能在这里调用
-        surfaceTexture?.setOnFrameAvailableListener({ 
+        surfaceTexture?.setOnFrameAvailableListener {
             frameAvailable.set(true)
-            Log.d(TAG, "onFrameAvailable: textureId=$textureId, targetFrame=$targetFrameIndex")
             onFrameAvailableCallback?.invoke()
-        })
+        }
 
-        // 创建着色器程序
         shaderProgram = createOESProgram()
-        Log.w(TAG, "initGL: shaderProgram=$shaderProgram")
-
-        Log.w(TAG, "initGL: completed, textureId=$textureId")
+        Log.w(TAG, "initGL: completed, textureId=$textureId, shader=$shaderProgram")
         return textureId
     }
+
+    // ── 视频加载（EGL 线程调用）──────────────────────────────────────────────
 
     fun loadVideo(path: String) {
         Log.w(TAG, "loadVideo: $path")
         videoPath = path
         releasePlayer()
-        hasNotifiedPrepared = false
 
         val st = surfaceTexture ?: run {
             Log.e(TAG, "loadVideo: SurfaceTexture not initialized!")
             return
         }
 
-        Log.w(TAG, "loadVideo: SurfaceTexture ready, creating MediaPlayer...")
-
-        // 创建 Surface
-        surface = Surface(st)
-
-        // 创建 MediaPlayer-Extended
-        mediaPlayer = MediaPlayer()
-        
-        // 设置帧精确 seek 模式
-        mediaPlayer?.setSeekMode(MediaPlayer.SeekMode.EXACT)
-        Log.w(TAG, "loadVideo: setSeekMode to EXACT")
-
-        // 设置 Surface
-        mediaPlayer?.setSurface(surface)
-
-        // 设置监听器
-        mediaPlayer?.setOnPreparedListener {
-            Log.w(TAG, "MediaPlayer onPrepared")
-            onMediaPlayerPrepared()
-        }
-
-        mediaPlayer?.setOnVideoSizeChangedListener { mp, width, height ->
-            Log.w(TAG, "MediaPlayer onVideoSizeChanged: ${width}x$height")
-            videoWidth = width
-            videoHeight = height
-        }
-
-        mediaPlayer?.setOnErrorListener { mp, what, extra ->
-            Log.e(TAG, "MediaPlayer onError: what=$what, extra=$extra")
-            callback.onVideoError("MediaPlayer error: what=$what, extra=$extra")
-            true
-        }
-
-        mediaPlayer?.setOnSeekCompleteListener {
-            // seek 完成后更新当前帧索引
-            currentFrameIndex = targetFrameIndex
-            frameAvailable.set(true)
-            mediaPlayer?.pause()
-            Log.d(TAG, "MediaPlayer onSeekComplete, frame=$currentFrameIndex")
-        }
-
         try {
-            // 设置数据源
-            val mediaSource: MediaSource = if (path.startsWith("content://")) {
-                Log.w(TAG, "loadVideo: using UriSource for content URI")
-                val uri = android.net.Uri.parse(path)
-                UriSource(context, uri)
+            // ── 1. 设置 MediaExtractor ──
+            val ext = MediaExtractor()
+            if (path.startsWith("content://")) {
+                ext.setDataSource(context, android.net.Uri.parse(path), null)
             } else {
-                Log.w(TAG, "loadVideo: using FileSource")
-                FileSource(File(path))
+                ext.setDataSource(path)
             }
-            
-            mediaPlayer?.setDataSource(mediaSource)
-            
-            // 异步准备
-            Log.w(TAG, "loadVideo: calling prepareAsync()")
-            mediaPlayer?.prepareAsync()
-            
+
+            // ── 2. 查找视频轨道 ──
+            var trackIdx = -1
+            var format: MediaFormat? = null
+            for (i in 0 until ext.trackCount) {
+                val fmt = ext.getTrackFormat(i)
+                val mime = fmt.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("video/")) {
+                    trackIdx = i
+                    format = fmt
+                    break
+                }
+            }
+            if (trackIdx < 0 || format == null) {
+                ext.release()
+                callback.onVideoError("No video track found")
+                return
+            }
+
+            ext.selectTrack(trackIdx)
+            videoTrackIndex = trackIdx
+
+            // ── 3. 提取视频参数 ──
+            val mime = format.getString(MediaFormat.KEY_MIME)!!
+            videoWidth = format.getInteger(MediaFormat.KEY_WIDTH)
+            videoHeight = format.getInteger(MediaFormat.KEY_HEIGHT)
+            // KEY_DURATION 在 MediaFormat 中是微秒
+            videoDuration = if (format.containsKey(MediaFormat.KEY_DURATION))
+                format.getLong(MediaFormat.KEY_DURATION) / 1000 else 0L   // μs → ms
+
+            // ── 3.5 扫描实际帧数（比 duration*fps 公式可靠）──
+            var actualFrameCount = 0
+            while (ext.getSampleTime() >= 0) {
+                actualFrameCount++
+                if (!ext.advance()) break
+            }
+            ext.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC) // 重置到起始位置
+            videoFrameCount = actualFrameCount.coerceAtLeast(1)
+
+            // 从实际帧数反推帧率（比 KEY_FRAME_RATE 更准确）
+            videoFrameRate = if (videoDuration > 0 && videoFrameCount > 1)
+                (videoFrameCount.toFloat() * 1000f) / videoDuration.toFloat()
+            else if (format.containsKey(MediaFormat.KEY_FRAME_RATE))
+                format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
+            else 30f
+
+            // ── 4. 创建 MediaCodec（输出到 SurfaceTexture）──
+            codecSurface = Surface(st)
+            val dec = MediaCodec.createDecoderByType(mime)
+            dec.configure(format, codecSurface, null, 0)
+            dec.start()
+
+            extractor = ext
+            codec = dec
+            codecInputEos = false
+            currentFrameIndex = -1
+            codecPosition = -1
+
+            isPrepared = true
+            Log.w(TAG, "loadVideo OK: duration=${videoDuration}ms, frames=$videoFrameCount, " +
+                    "size=${videoWidth}x$videoHeight, fps=$videoFrameRate, mime=$mime")
+
+            callback.onVideoPrepared(videoFrameCount, videoDuration, videoWidth, videoHeight)
+
         } catch (e: Exception) {
             Log.e(TAG, "loadVideo failed", e)
             callback.onVideoError(e.message ?: "Failed to load video")
         }
     }
 
-    private fun onMediaPlayerPrepared() {
-        val mp = mediaPlayer ?: return
-        
-        try {
-            // 获取视频信息
-            videoDuration = mp.duration.toLong()
-            videoWidth = mp.videoWidth
-            videoHeight = mp.videoHeight
-            
-            // 尝试从视频获取帧率（MediaPlayer-Extended 可能不直接提供）
-            // 使用 MediaExtractor 获取真实帧率
-            try {
-                val extractor = android.media.MediaExtractor()
-                extractor.setDataSource(videoPath)
-                for (i in 0 until extractor.trackCount) {
-                    val format = extractor.getTrackFormat(i)
-                    val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-                    if (mime.startsWith("video/")) {
-                        if (format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                            videoFrameRate = format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
-                        }
-                        break
+    // ── 帧精确 seek（EGL 线程调用，同步解码）───────────────────────────────
+
+    /**
+     * 同步解码到目标帧。
+     *
+     * 全关键帧视频模式下（配合 KeyframeTranscoder）：
+     *   - 任意方向 seek 只需解码 0~2 帧，2~3ms 完成
+     *   - 前向小步进直接顺序解码，无需 seek
+     *
+     * 非全关键帧降级模式下：
+     *   - 后退/大跳转仍需从关键帧顺序解码，但有超时保护
+     */
+    fun seekToFrame(frameIndex: Int, preDecodeCount: Int = 0) {
+        if (!isPrepared) return
+        val ext = extractor ?: return
+        val dec = codec ?: return
+
+        val target = frameIndex.coerceIn(0, videoFrameCount - 1)
+        if (target == currentFrameIndex) return
+
+        // ── 判断是否需要 extractor seek ──
+        // 全关键帧视频：seek 极快，仅对小幅前进跳过 seek
+        // 非全关键帧视频：seek 后需要从关键帧解码，但超时保护
+        val needSeek = codecPosition < 0
+                || target < codecPosition                  // 后退 → 必须 seek
+                || (target - codecPosition) > 3            // 前进超过 3 帧 → seek 更快
+
+        if (needSeek) {
+            ext.seekTo(frameToTimeUs(target), MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            dec.flush()
+            codecInputEos = false
+            codecPosition = -1
+            Log.d(TAG, "seekToFrame: seek for target=$target")
+        }
+
+        // ── 同步解码循环 ──
+        val startTime = SystemClock.elapsedRealtime()
+        val info = MediaCodec.BufferInfo()
+
+        while (true) {
+            if (SystemClock.elapsedRealtime() - startTime > DECODE_BUDGET_MS) {
+                Log.d(TAG, "seekToFrame: budget expired, codecPos=$codecPosition, target=$target")
+                break
+            }
+
+            // ── 喂入压缩数据 ──
+            if (!codecInputEos) {
+                val inIdx = dec.dequeueInputBuffer(0)
+                if (inIdx >= 0) {
+                    val buf = dec.getInputBuffer(inIdx)!!
+                    val size = ext.readSampleData(buf, 0)
+                    if (size >= 0) {
+                        dec.queueInputBuffer(inIdx, 0, size, ext.sampleTime, 0)
+                        ext.advance()
+                    } else {
+                        dec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        codecInputEos = true
                     }
                 }
-                extractor.release()
-            } catch (e: Exception) {
-                videoFrameRate = 30f
-            }
-            
-            // 计算帧数 - 使用实际视频时长和帧率
-            videoFrameCount = if (videoDuration > 0 && videoFrameRate > 0) {
-                ((videoDuration * videoFrameRate) / 1000).toInt().coerceAtLeast(1)
-            } else {
-                1
             }
 
-            Log.w(TAG, "Video info: duration=${videoDuration}ms, frames=$videoFrameCount, size=${videoWidth}x$videoHeight, fps=$videoFrameRate")
+            // ── 取出解码帧 ──
+            val outIdx = dec.dequeueOutputBuffer(info, 5_000)
+            when {
+                outIdx >= 0 -> {
+                    val frame = ptsToFrame(info.presentationTimeUs)
 
-            isPrepared = true
-
-            // 通知准备完成
-            hasNotifiedPrepared = true
-            callback.onVideoPrepared(videoFrameCount, videoDuration, videoWidth, videoHeight)
-
-            // 初始化到第一帧
-            targetFrameIndex = 0
-            currentFrameIndex = 0
-            
-            // MediaPlayer-Extended 在暂停状态下 seek 后不会渲染帧
-            // 方案：start() → seekTo() → pause()
-            mp.start()
-            mp.seekTo(0)
-            mp.pause()  // 初始化后立即暂停，防止自动播放
-
-        } catch (e: Exception) {
-            Log.e(TAG, "onMediaPlayerPrepared error", e)
-            callback.onVideoError(e.message ?: "Failed to get video info")
+                    if (frame >= target) {
+                        // ★ 到达目标帧 → 渲染
+                        dec.releaseOutputBuffer(outIdx, true)
+                        currentFrameIndex = frame
+                        codecPosition = frame
+                        frameAvailable.set(true)
+                        break
+                    } else {
+                        // 中间帧 → 跳过（不渲染）
+                        dec.releaseOutputBuffer(outIdx, false)
+                        codecPosition = frame
+                    }
+                }
+                outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> { /* 正常 */ }
+                outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    if (codecInputEos) break
+                }
+            }
         }
+
+        callback.onSeekComplete()
     }
+
+    // ── 纹理更新（EGL 线程，draw 时调用）───────────────────────────────────
 
     fun updateTexImage(): Boolean {
         if (frameAvailable.get()) {
             frameAvailable.set(false)
-            
-            // 在 EGL 线程中更新纹理
             try {
                 surfaceTexture?.updateTexImage()
                 surfaceTexture?.getTransformMatrix(transformMatrix)
-                
-                // 通知帧已准备好
                 callback.onVideoFrameReady(currentFrameIndex, textureId, transformMatrix)
-                
-                Log.d(TAG, "updateTexImage: frame updated, frameIndex=$currentFrameIndex")
                 return true
             } catch (e: Exception) {
                 Log.e(TAG, "updateTexImage error: ${e.message}")
                 return false
             }
         }
-        
-        // 如果已经有帧数据，返回 true
-        if (currentFrameIndex >= 0) {
-            return true
-        }
-        
-        return false
+        return currentFrameIndex >= 0
     }
+
+    // ── 辅助方法 ───────────────────────────────────────────────────────────
+
+    /** 帧索引 → 微秒 */
+    private fun frameToTimeUs(frame: Int): Long =
+        (frame * 1_000_000.0 / videoFrameRate).toLong()
+
+    /** 微秒 → 帧索引 */
+    private fun ptsToFrame(ptsUs: Long): Int =
+        ((ptsUs * videoFrameRate) / 1_000_000.0).toInt().coerceIn(0, videoFrameCount - 1)
 
     fun getTransformMatrix(): FloatArray = transformMatrix
-
-    fun seekToFrame(frameIndex: Int, preDecodeCount: Int = 0) {
-        if (!isPrepared) {
-            Log.w(TAG, "seekToFrame: not prepared, skipping")
-            return
-        }
-
-        val targetFrame = frameIndex.coerceIn(0, videoFrameCount - 1)
-        Log.w(TAG, "seekToFrame: targetFrame=$targetFrame, currentFrameIndex=$currentFrameIndex")
-
-        if (targetFrame == currentFrameIndex && preDecodeCount == 0) {
-            Log.d(TAG, "seekToFrame: same frame, skipping")
-            return
-        }
-
-        targetFrameIndex = targetFrame
-        
-        // 计算目标时间（毫秒）
-        val targetTimeMs = if (videoFrameRate > 0) {
-            (targetFrame.toLong() * 1000 / videoFrameRate.toLong())
-        } else {
-            (targetFrame.toLong() * videoDuration / videoFrameCount.toLong())
-        }
-
-        Log.w(TAG, "seekToFrame: seeking to ${targetTimeMs}ms for frame $targetFrame")
-        
-        // MediaPlayer-Extended 在暂停状态下 seek 后不会渲染帧
-        // 解决方案：start() → seekTo() → pause()
-        // 1. start() 让播放器进入播放状态（必须，否则 seek 不渲染）
-        // 2. seekTo() 跳转到目标帧
-        // 3. pause() 立即暂停，防止自动播放
-        try {
-            mediaPlayer?.start()
-            mediaPlayer?.seekTo(targetTimeMs)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "seekToFrame error: ${e.message}")
-        }
+    fun getCurrentPosition(): Float {
+        if (!isPrepared || videoFrameCount <= 0) return 0f
+        return currentFrameIndex.toFloat() / videoFrameCount.toFloat()
     }
+    fun getCurrentFrame(): Int = currentFrameIndex
+    fun getFrameCount(): Int = videoFrameCount
+    fun getTextureId(): Int = textureId
+    fun isPrepared(): Boolean = isPrepared
 
     fun seekToPosition(position: Float, shouldPauseAfter: Boolean = true) {
         if (!isPrepared || videoDuration <= 0) return
-
-        val targetTimeMs = (position * videoDuration).toLong().coerceIn(0, videoDuration)
-        val targetFrame = if (videoFrameRate > 0) {
-            (targetTimeMs * videoFrameRate / 1000).toInt()
-        } else {
-            (position * videoFrameCount).toInt()
-        }
-
-        seekToFrame(targetFrame)
+        val frame = (position * videoFrameCount).toInt()
+        seekToFrame(frame)
     }
 
-    fun getCurrentPosition(): Float {
-        if (!isPrepared || videoDuration <= 0) return 0f
-        return currentFrameIndex.toFloat() / videoFrameCount.toFloat()
-    }
-
-    fun getCurrentFrame(): Int = currentFrameIndex
-
-    fun getFrameCount(): Int = videoFrameCount
-
-    fun getTextureId(): Int = textureId
-
-    fun isPrepared(): Boolean = isPrepared
-
-    fun setTargetFrameRate(fps: Int) {
-        Log.d(TAG, "setTargetFrameRate: $fps fps (no-op for MediaPlayer-Extended)")
-    }
+    fun setTargetFrameRate(fps: Int) { /* no-op */ }
 
     fun setOnFrameAvailableCallback(callback: () -> Unit) {
         onFrameAvailableCallback = callback
     }
 
+    /** MediaCodec 无 play/pause 概念，此方法为 no-op */
+    fun ensurePaused() { /* no-op — codec 只在 seekToFrame 时才解码 */ }
+
+    // ── 释放 ───────────────────────────────────────────────────────────────
+
     fun unbindVideoPlayer() {
         Log.d(TAG, "unbindVideoPlayer")
-        mainHandler.removeCallbacksAndMessages(null)
         releasePlayer()
         currentFrameIndex = -1
+        codecPosition = -1
     }
 
     fun release() {
@@ -394,7 +381,6 @@ class RVRes(
             GLES20.glDeleteTextures(1, intArrayOf(textureId), 0)
             textureId = 0
         }
-
         surfaceTexture?.release()
         surfaceTexture = null
 
@@ -406,26 +392,23 @@ class RVRes(
 
     private fun releasePlayer() {
         Log.d(TAG, "releasePlayer")
+        try { codec?.stop() } catch (_: Exception) {}
+        try { codec?.release() } catch (_: Exception) {}
+        codec = null
 
-        try {
-            mediaPlayer?.stop()
-        } catch (e: Exception) {
-            Log.e(TAG, "stop player error: ${e.message}")
-        }
+        try { extractor?.release() } catch (_: Exception) {}
+        extractor = null
 
-        // MediaPlayer-Extended 没有直接的 release() 方法
-        // 调用 stop() 后不再使用该实例即可
-        mediaPlayer = null
-
-        // 释放 Surface
-        surface?.release()
-        surface = null
+        codecSurface?.release()
+        codecSurface = null
 
         isPrepared = false
-        hasNotifiedPrepared = false
         currentFrameIndex = -1
-        targetFrameIndex = -1
+        codecPosition = -1
+        codecInputEos = false
     }
+
+    // ── 着色器 ─────────────────────────────────────────────────────────────
 
     private fun createOESProgram(): Int {
         val vertexShader = """
@@ -438,7 +421,6 @@ class RVRes(
                 vTexCoord = (uTransform * vec4(aTexCoord, 0.0, 1.0)).xy;
             }
         """
-
         val fragmentShader = """
             #extension GL_OES_EGL_image_external : require
             precision mediump float;
@@ -448,30 +430,26 @@ class RVRes(
                 gl_FragColor = texture2D(sTexture, vTexCoord);
             }
         """
-
         return createProgram(vertexShader, fragmentShader)
     }
 
     private fun createProgram(vertexSource: String, fragmentSource: String): Int {
-        val vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexSource)
-        val fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
-
-        if (vertexShader == 0 || fragmentShader == 0) return 0
+        val vs = loadShader(GLES20.GL_VERTEX_SHADER, vertexSource)
+        val fs = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
+        if (vs == 0 || fs == 0) return 0
 
         val program = GLES20.glCreateProgram()
-        GLES20.glAttachShader(program, vertexShader)
-        GLES20.glAttachShader(program, fragmentShader)
+        GLES20.glAttachShader(program, vs)
+        GLES20.glAttachShader(program, fs)
         GLES20.glLinkProgram(program)
 
         val linkStatus = IntArray(1)
         GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linkStatus, 0)
-
         if (linkStatus[0] == 0) {
-            Log.e(TAG, "Failed to link program: ${GLES20.glGetProgramInfoLog(program)}")
+            Log.e(TAG, "Link failed: ${GLES20.glGetProgramInfoLog(program)}")
             GLES20.glDeleteProgram(program)
             return 0
         }
-
         return program
     }
 
@@ -479,16 +457,13 @@ class RVRes(
         val shader = GLES20.glCreateShader(type)
         GLES20.glShaderSource(shader, source)
         GLES20.glCompileShader(shader)
-
         val compiled = IntArray(1)
         GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, compiled, 0)
-
         if (compiled[0] == 0) {
-            Log.e(TAG, "Failed to compile shader: ${GLES20.glGetShaderInfoLog(shader)}")
+            Log.e(TAG, "Compile failed: ${GLES20.glGetShaderInfoLog(shader)}")
             GLES20.glDeleteShader(shader)
             return 0
         }
-
         return shader
     }
 }

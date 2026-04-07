@@ -10,6 +10,10 @@ import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 object RasterPrefs {
     const val PREF_RASTER_GROUPS = "rasterGroups"
     const val PREF_RASTER_ACTIVE_GROUP_ID = "rasterActiveGroupId"
+    /** 是否保留所有视频光栅转码缓存（true=保留，false=仅保留当前预览的） */
+    const val PREF_KEEP_VIDEO_CACHE = "rasterKeepVideoCache"
+    /** 标记：下次启动时需要清除视频光栅转码缓存 */
+    const val PREF_PENDING_CLEAR_VIDEO_CACHE = "rasterPendingClearVideoCache"
 
     /**
      * 从 SharedPreferences 加载所有光栅组

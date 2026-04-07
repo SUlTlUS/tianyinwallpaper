@@ -18,18 +18,21 @@ import android.util.Size
 class RVEffectPreCtrl(
     private val context: Context,
     private val callback: Callback? = null
+
 ) {
     companion object {
         private const val TAG = "RVEffectPreCtrl"
     }
-    
+
     interface Callback {
         fun onPrepared(frameCount: Int, duration: Long)
         fun onFrameReady()
         fun onError(message: String)
+        fun onSeekComplete()
     }
-    
+
     // 核心组件
+
     private var rvRes: RVRes? = null
     private var renderNode: VideoRasterRenderNode? = null
     private var configure: RVEffectConfigure? = null
@@ -51,7 +54,7 @@ class RVEffectPreCtrl(
     
     // 矩阵
     private val matrixManager = MatrixManager()
-    
+
     inner class MatrixManager {
         val modelMatrix = FloatArray(16)
         val viewMatrix = FloatArray(16)
@@ -86,7 +89,9 @@ class RVEffectPreCtrl(
                 videoFrameIndex = frameIndex
                 callback?.onFrameReady()
             }
-            
+            override fun onSeekComplete() {
+                callback?.onSeekComplete()
+            }
             override fun onVideoPrepared(frameCount: Int, duration: Long, width: Int, height: Int) {
                 Log.w(TAG, "onVideoPrepared: frames=$frameCount, duration=$duration, size=${width}x$height")
                 configure?.apply {
@@ -337,6 +342,13 @@ class RVEffectPreCtrl(
         Log.d(TAG, "resume")
         // 恢复渲染
     }
+
+    /**
+     * 确保播放器已暂停（帧稳定时 / 不可见时调用）
+     */
+    fun ensurePaused() {
+        rvRes?.ensurePaused()
+    }
     
     fun release() {
         Log.d(TAG, "release")
@@ -352,7 +364,7 @@ class RVEffectPreCtrl(
         
         mainHandler.removeCallbacksAndMessages(null)
     }
-    
+
     fun getFrameCount(): Int = configure?.videoFramesCount ?: 0
     
     fun getVideoDuration(): Long = configure?.videoDuration ?: 0L

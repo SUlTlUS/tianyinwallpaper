@@ -147,6 +147,21 @@ class VideoRasterRenderNode(
         // 计算MVP矩阵
         Matrix.setIdentityM(mvpMatrix, 0)
         
+        // ★ Center-crop：保持视频比例铺满屏幕，裁剪多余部分
+        val videoSize = configure.imageSize
+        if (videoSize != null && videoSize.width > 0 && videoSize.height > 0
+            && surfaceWidth > 0 && surfaceHeight > 0) {
+            val videoAR = videoSize.width.toFloat() / videoSize.height.toFloat()
+            val screenAR = surfaceWidth.toFloat() / surfaceHeight.toFloat()
+            if (videoAR > screenAR) {
+                // 视频更宽 → 左右裁剪
+                Matrix.scaleM(mvpMatrix, 0, videoAR / screenAR, 1f, 1f)
+            } else {
+                // 视频更高 → 上下裁剪
+                Matrix.scaleM(mvpMatrix, 0, 1f, screenAR / videoAR, 1f)
+            }
+        }
+
         // 应用缩放和位置
         Matrix.translateM(mvpMatrix, 0, posX, posY, 0f)
         Matrix.scaleM(mvpMatrix, 0, scaleX, scaleY, 1f)
