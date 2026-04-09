@@ -219,7 +219,49 @@ object AppUpdateManager {
         val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), filename)
         return if (file.exists()) file else null
     }
-    
+
+    /**
+     * 启动时清理下载目录中已过期的 APK：
+     * 仅删除包名匹配当前应用且版本号小于等于已安装版本的文件。
+     */
+    fun clearOutdatedDownloadedApks(context: Context) {
+        val downloadDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return
+        val installedVersionCode = getInstalledVersionCode(context)
+
+        downloadDir.listFiles { file ->
+            file.isFile && file.extension.equals("apk", ignoreCase = true)
+        }?.forEach { apkFile ->
+            val archiveInfo = runCatching {
+                context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            }.getOrNull() ?: return@forEach
+
+            if (archiveInfo.packageName != context.packageName) return@forEach
+
+            val archiveVersionCode = getArchiveVersionCode(archiveInfo)
+            if (archiveVersionCode <= installedVersionCode) {
+                if (!apkFile.delete()) {
+                    Log.w(TAG, "Failed to delete outdated apk: ${apkFile.absolutePath}")
+                } else {
+                    Log.d(TAG, "Deleted outdated apk: ${apkFile.absolutePath}, version=$archiveVersionCode, installed=$installedVersionCode")
+                }
+            }
+        }
+    }
+
+    private fun getInstalledVersionCode(context: Context): Long {
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        return getArchiveVersionCode(packageInfo)
+    }
+
+    private fun getArchiveVersionCode(packageInfo: android.content.pm.PackageInfo): Long {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+    }
+
     /**
      * 计算文件的 MD5 值
      */

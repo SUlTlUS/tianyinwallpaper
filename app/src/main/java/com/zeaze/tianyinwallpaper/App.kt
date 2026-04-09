@@ -3,6 +3,7 @@ package com.zeaze.tianyinwallpaper
 import android.app.Application
 import android.content.Context
 import com.zeaze.tianyinwallpaper.service.raster.KeyframeTranscoder
+import com.zeaze.tianyinwallpaper.update.AppUpdateManager
 import com.zeaze.tianyinwallpaper.utils.RasterPrefs
 
 class App : Application() {
@@ -14,6 +15,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         clearPendingVideoCache()
+        clearOutdatedDownloadedApks()
     }
 
     /**
@@ -26,5 +28,18 @@ class App : Application() {
             KeyframeTranscoder(this).clearCache()
             pref.edit().putBoolean(RasterPrefs.PREF_PENDING_CLEAR_VIDEO_CACHE, false).apply()
         }
+    }
+
+    /**
+     * 启动时清理已安装版本不再需要的下载 APK。
+     */
+    private fun clearOutdatedDownloadedApks() {
+        Thread {
+            runCatching {
+                AppUpdateManager.clearOutdatedDownloadedApks(this)
+            }.onFailure {
+                android.util.Log.w("App", "清理过期 APK 失败", it)
+            }
+        }.start()
     }
 }

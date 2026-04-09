@@ -80,6 +80,7 @@ import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
 import com.zeaze.tianyinwallpaper.ui.raster.RasterRouteScreen
+import com.zeaze.tianyinwallpaper.ui.test.CorrugatedTestRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
 import kotlinx.coroutines.launch
@@ -119,6 +120,7 @@ class MainActivity : BaseActivity() {
         private const val ROUTE_APP_INFO = "app_info"
         private const val ROUTE_RASTER = "raster"
         private const val ROUTE_SETTING = "setting"
+        private const val ROUTE_CORRUGATED_TEST = "corrugated_test"
         const val PREF_THEME_MODE = "themeMode"
         const val THEME_MODE_FOLLOW_SYSTEM = 0
         const val THEME_MODE_LIGHT = 1
@@ -295,7 +297,8 @@ class MainActivity : BaseActivity() {
                             onThemeModeChange = { mode ->
                                 themeMode = mode
                             },
-                            onOpenAppInfo = { openAppInfoPage() }
+                            onOpenAppInfo = { openAppInfoPage() },
+                            onOpenCorrugatedTest = { openCorrugatedTestPage() }
                         )
                     }
                     composable(
@@ -316,6 +319,23 @@ class MainActivity : BaseActivity() {
                         com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(
                             useDarkTheme = useDarkTheme
                         )
+                    }
+                    composable(
+                        route = ROUTE_CORRUGATED_TEST,
+                        enterTransition = {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Left,
+                                animationSpec = tween(280)
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Right,
+                                animationSpec = tween(280)
+                            )
+                        }
+                    ) {
+                        CorrugatedTestRouteScreen(useDarkTheme = useDarkTheme)
                     }
                 }
 
@@ -729,6 +749,10 @@ class MainActivity : BaseActivity() {
 
     fun openAppInfoPage() {
         pendingRoute = ROUTE_APP_INFO
+    }
+
+    fun openCorrugatedTestPage() {
+        pendingRoute = ROUTE_CORRUGATED_TEST
     }
 
     fun setBottomBarVisible(visible: Boolean) {

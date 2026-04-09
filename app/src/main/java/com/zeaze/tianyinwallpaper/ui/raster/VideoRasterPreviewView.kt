@@ -87,6 +87,12 @@ fun VideoRasterPreviewView(
     // ── EGL 渲染器 ──
     val renderer = remember(videoUri) { VideoRasterPreviewRenderer(context, videoUri.orEmpty()) }
 
+    // ── 灵敏度同步 ──
+    val sensorWidth = group.sensorWidth
+    androidx.compose.runtime.LaunchedEffect(sensorWidth) {
+        renderer.maxAngleRad = (0.3285 + 0.041 * sensorWidth).toFloat()
+    }
+
     // 提取模糊缩略图 + 启动监听
     DisposableEffect(videoUri) {
         // 异步提取缩略图
@@ -250,10 +256,7 @@ private class VideoRasterPreviewRenderer(
     private var accumulatedAngle = 0f
     private var filteredVelocity = 0f
     private val FILTER_ALPHA = 0.4f
-    private val MAX_ANGLE_RAD = Math.toRadians(45.0).toFloat()
-    private val DEAD_ZONE_EXIT_RAD = Math.toRadians(1.5).toFloat()
-    private val DEAD_ZONE_ENTER_RAD = Math.toRadians(0.5).toFloat()
-    private var inDeadZone = true
+    @Volatile var maxAngleRad = Math.toRadians(45.0).toFloat()
 
     // ── 帧控制 ──
     private var currentPlaybackPosition = 0f
@@ -302,18 +305,11 @@ private class VideoRasterPreviewRenderer(
 
         filteredVelocity = FILTER_ALPHA * e.values[1] + (1f - FILTER_ALPHA) * filteredVelocity
         accumulatedAngle += filteredVelocity * dt
-        accumulatedAngle = accumulatedAngle.coerceIn(-MAX_ANGLE_RAD, MAX_ANGLE_RAD)
-
-        inDeadZone = if (inDeadZone) {
-            abs(accumulatedAngle) < DEAD_ZONE_EXIT_RAD
-        } else {
-            abs(accumulatedAngle) < DEAD_ZONE_ENTER_RAD
-        }
-        val sensorValue = if (inDeadZone) 0f else accumulatedAngle
+        accumulatedAngle = accumulatedAngle.coerceIn(-maxAngleRad, maxAngleRad)
 
         eglHandler?.post {
             if (effectCtrl?.isPrepared() != true) return@post
-            val normalized = (sensorValue / MAX_ANGLE_RAD).coerceIn(-1f, 1f)
+            val normalized = (accumulatedAngle / maxAngleRad).coerceIn(-1f, 1f)
             currentPlaybackPosition = abs(normalized)
         }
     }

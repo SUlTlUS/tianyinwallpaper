@@ -111,6 +111,7 @@ import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.utils.FileUtil
+import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
 import com.zeaze.tianyinwallpaper.utils.showToast
 import io.reactivex.functions.Consumer
 import java.io.File
@@ -487,12 +488,26 @@ fun MainRouteScreen(
     val replaceImageLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && replaceIndex != null) {
             takePersistableUriPermissions(listOf(uri))
+            val targetIndex = replaceIndex!!
+            val oldModel = wallpapers.getOrNull(targetIndex)
             val newModel = TianYinWallpaperModel().apply {
                 uuid = UUID.randomUUID().toString()
                 type = WALLPAPER_TYPE_STATIC
                 imgUri = uri.toString()
             }
-            wallpapers[replaceIndex!!] = newModel
+            wallpapers[targetIndex] = newModel
+            oldModel?.let {
+                ThumbnailUtils.removeWallpaperCache(
+                    context,
+                    ThumbnailUtils.Request(
+                        uuid = it.uuid.orEmpty(),
+                        type = it.type,
+                        imgUri = it.imgUri,
+                        videoUri = it.videoUri,
+                        imgPath = it.imgPath
+                    )
+                )
+            }
             fullScreenPreviewModel = newModel
             saveCache()
             replaceIndex = null
@@ -501,12 +516,26 @@ fun MainRouteScreen(
     val replaceVideoLaunch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && replaceIndex != null) {
             takePersistableUriPermissions(listOf(uri))
+            val targetIndex = replaceIndex!!
+            val oldModel = wallpapers.getOrNull(targetIndex)
             val newModel = TianYinWallpaperModel().apply {
                 uuid = UUID.randomUUID().toString()
                 type = WALLPAPER_TYPE_DYNAMIC
                 videoUri = uri.toString()
             }
-            wallpapers[replaceIndex!!] = newModel
+            wallpapers[targetIndex] = newModel
+            oldModel?.let {
+                ThumbnailUtils.removeWallpaperCache(
+                    context,
+                    ThumbnailUtils.Request(
+                        uuid = it.uuid.orEmpty(),
+                        type = it.type,
+                        imgUri = it.imgUri,
+                        videoUri = it.videoUri,
+                        imgPath = it.imgPath
+                    )
+                )
+            }
             fullScreenPreviewModel = newModel
             saveCache()
             replaceIndex = null
@@ -594,9 +623,20 @@ fun MainRouteScreen(
         RxBus.postWithCode(RxConstants.RX_SELECTION_MODE_CHANGED, SelectionBarState(selectionMode, isAllSelected))
     }
 
+    fun buildThumbnailRequest(model: TianYinWallpaperModel): ThumbnailUtils.Request {
+        return ThumbnailUtils.Request(
+            uuid = model.uuid.orEmpty(),
+            type = model.type,
+            imgUri = model.imgUri,
+            videoUri = model.videoUri,
+            imgPath = model.imgPath
+        )
+    }
+
     fun removeWallpaperAt(index: Int) {
         if (index !in wallpapers.indices) return
-        wallpapers.removeAt(index)
+        val removed = wallpapers.removeAt(index)
+        ThumbnailUtils.removeWallpaperCache(context, buildThumbnailRequest(removed))
 
         val updatedSelection = selectedPositions
             .asSequence()
@@ -706,10 +746,7 @@ fun MainRouteScreen(
     }
 
     fun delete(index: Int) {
-        if (index in wallpapers.indices) {
-            wallpapers.removeAt(index)
-            saveCache()
-        }
+        removeWallpaperAt(index)
     }
 
     fun parseTimeText(text: String): Int? {
@@ -1089,10 +1126,9 @@ fun MainRouteScreen(
                                                 val indexes = selectedPositions.toMutableList()
                                                 Collections.sort(indexes, Collections.reverseOrder())
                                                 for (index in indexes) {
-                                                    if (index in wallpapers.indices) wallpapers.removeAt(index)
+                                                    removeWallpaperAt(index)
                                                 }
                                                 selectedPositions.clear()
-                                                saveCache()
                                                 exitSelectionMode()
                                                 showDeleteSelectedDialog = false
                                             }

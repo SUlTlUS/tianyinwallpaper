@@ -95,7 +95,8 @@ private sealed class SettingsDialogState {
 fun SettingRouteScreen(
     useDarkTheme: Boolean,
     onThemeModeChange: (Int) -> Unit = {},
-    onOpenAppInfo: () -> Unit = {}
+    onOpenAppInfo: () -> Unit = {},
+    onOpenCorrugatedTest: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
@@ -411,6 +412,9 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
+                    SettingTextItem("波纹玻璃测试页", contentColor) {
+                        onOpenCorrugatedTest()
+                    }
                     SettingTextItem("关于", contentColor) {
                         onOpenAppInfo()
                     }

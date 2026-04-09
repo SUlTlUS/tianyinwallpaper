@@ -161,6 +161,7 @@ class KeyframeTranscoder(private val context: Context) {
             inputFormat.getLong(MediaFormat.KEY_DURATION) else 0L
 
         Log.w(TAG, "Input: ${width}x${height}, fps=$fps, duration=${durationUs / 1000}ms, mime=$mime")
+        Log.w(TAG, "Input color: ${describeColorFormat(inputFormat)}")
 
         // ── 2. 设置 Encoder（全关键帧）──
         val supportsCQ = isCQSupported()
@@ -172,17 +173,22 @@ class KeyframeTranscoder(private val context: Context) {
             setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
 
+            // 尽量透传输入色彩元数据，减少 SDR/HDR 与色域误判导致的偏色。
+            copyColorKeyIfPresent(inputFormat, this, MediaFormat.KEY_COLOR_STANDARD)
+            copyColorKeyIfPresent(inputFormat, this, MediaFormat.KEY_COLOR_TRANSFER)
+            copyColorKeyIfPresent(inputFormat, this, MediaFormat.KEY_COLOR_RANGE)
+
             if (supportsCQ && Build.VERSION.SDK_INT >= 28) {
                 // ★ CQ 模式：直接用 QP 控制质量，不依赖码率
                 // QP 范围 0~51，值越小质量越高。18 ≈ 视觉无损
                 setInteger(MediaFormat.KEY_BITRATE_MODE,
                     MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CQ)
-                setInteger(MediaFormat.KEY_QUALITY, 16)
+                setInteger(MediaFormat.KEY_QUALITY, 51)
                 // 部分设备 CQ 模式仍要求设置 bitrate（作为上限提示）
                 setInteger(MediaFormat.KEY_BIT_RATE, width * height * 20)
             } else {
                 // 降级：高码率 VBR
-                setInteger(MediaFormat.KEY_BIT_RATE, width * height * 35)
+                setInteger(MediaFormat.KEY_BIT_RATE, width * height * 60)
             }
         }
 
@@ -190,6 +196,8 @@ class KeyframeTranscoder(private val context: Context) {
         encoder.configure(encFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         val inputSurface = encoder.createInputSurface()
         encoder.start()
+
+        Log.w(TAG, "Encoder request color: ${describeColorFormat(encFormat)}")
 
         // ── 3. 设置 Decoder（输出到 Encoder 的 InputSurface）──
         val decoder = MediaCodec.createDecoderByType(mime)
@@ -220,6 +228,7 @@ class KeyframeTranscoder(private val context: Context) {
                             muxer.start()
                             muxerStarted = true
                             Log.d(TAG, "Muxer started, format: ${encoder.outputFormat}")
+                            Log.w(TAG, "Encoder output color: ${describeColorFormat(encoder.outputFormat)}")
                         }
                         idx >= 0 -> {
                             val buf = encoder.getOutputBuffer(idx)!!
@@ -325,10 +334,39 @@ class KeyframeTranscoder(private val context: Context) {
         return false
     }
 
+    private fun describeColorFormat(format: MediaFormat): String {
+        val standard = getFormatIntOrNull(format, MediaFormat.KEY_COLOR_STANDARD)
+        val transfer = getFormatIntOrNull(format, MediaFormat.KEY_COLOR_TRANSFER)
+        val range = getFormatIntOrNull(format, MediaFormat.KEY_COLOR_RANGE)
+        return "standard=$standard, transfer=$transfer, range=$range"
+    }
+
+    private fun copyColorKeyIfPresent(source: MediaFormat, target: MediaFormat, key: String) {
+        val value = getFormatIntOrNull(source, key) ?: return
+        try {
+            target.setInteger(key, value)
+        } catch (e: Exception) {
+            Log.w(TAG, "Skip unsupported color key $key=$value", e)
+        }
+    }
+
+    private fun getFormatIntOrNull(format: MediaFormat, key: String): Int? {
+        if (!format.containsKey(key)) return null
+        return try {
+            format.getInteger(key)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private inline fun safeRelease(block: () -> Unit) {
         try { block() } catch (_: Exception) {}
     }
 }
+
+
+
+
 
 
 

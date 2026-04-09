@@ -84,7 +84,7 @@ object ThumbnailUtils {
      * 从内存缓存获取缩略图
      */
     fun getFromCache(request: Request): Bitmap? = cache.get(request.cacheKey)
-    
+
     /**
      * 从内存缓存获取缩略图（通过 cacheKey）
      */
@@ -259,19 +259,42 @@ object ThumbnailUtils {
     }
 
     /**
-     * 从缓存移除指定项
+     * 从缓存移除指定项（内存 + 任务）
      */
     fun removeFromCache(request: Request) {
+        cancelTask(request.cacheKey)
         cache.remove(request.cacheKey)
     }
     
     /**
-     * 从缓存移除指定项（通过 cacheKey）
+     * 从缓存移除指定项（通过 cacheKey，内存 + 任务）
      */
     fun removeFromCache(cacheKey: String) {
+        cancelTask(cacheKey)
         cache.remove(cacheKey)
     }
-    
+
+    /**
+     * 删除某个壁纸条目的全部缩略图缓存（内存 + 视频磁盘缓存）
+     */
+    fun removeWallpaperCache(context: Context, request: Request) {
+        removeFromCache(request)
+        removeVideoThumbnailFile(context, request.uuid)
+    }
+
+    /**
+     * 按 uuid 删除视频缩略图磁盘缓存
+     */
+    fun removeVideoThumbnailFile(context: Context, uuid: String) {
+        if (uuid.isBlank()) return
+        val thumbnailFile = getVideoThumbnailFile(context, uuid) ?: return
+        if (!thumbnailFile.exists()) return
+
+        if (!thumbnailFile.delete()) {
+            Log.w(TAG, "Failed to delete video thumbnail: ${thumbnailFile.absolutePath}")
+        }
+    }
+
     /**
      * 获取缓存统计
      */
@@ -432,4 +455,5 @@ object ThumbnailUtils {
     ): Bitmap? {
         return getVideoFrame(context, Uri.parse(videoUriString), timeUs, option, targetWidth, targetHeight)
     }
+
 }

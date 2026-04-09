@@ -84,6 +84,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -118,6 +119,7 @@ import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
+import com.zeaze.tianyinwallpaper.catalog.components.StripedGlass
 import androidx.compose.ui.geometry.Rect
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
@@ -156,6 +158,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.input.pointer.pointerInput
 
@@ -163,6 +166,28 @@ private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
 private const val MIN_STATIC_GROUP_IMAGES = 2
 private const val HOLD_SELECT_TIMEOUT_MS = 500L
+
+private fun RasterGroupModel.toThumbnailRequest(): ThumbnailUtils.Request? {
+    return if (type == RasterGroupModel.TYPE_STATIC) {
+        val firstImageUri = imageUris.firstOrNull() ?: return null
+        ThumbnailUtils.Request(
+            uuid = id,
+            type = WALLPAPER_TYPE_STATIC,
+            imgUri = firstImageUri,
+            videoUri = null,
+            imgPath = null
+        )
+    } else {
+        val dynamicVideoUri = videoUri ?: return null
+        ThumbnailUtils.Request(
+            uuid = id,
+            type = WALLPAPER_TYPE_DYNAMIC,
+            imgUri = null,
+            videoUri = dynamicVideoUri,
+            imgPath = null
+        )
+    }
+}
 
 private enum class StaticPickMode {
     CREATE_NEW,
@@ -205,7 +230,8 @@ fun RasterRouteScreen(
     var staticPickTargetId by remember { mutableStateOf<String?>(null) }
     var dynamicPickTargetId by remember { mutableStateOf<String?>(null) }
     var staticEditorGroupId by remember { mutableStateOf<String?>(null) }
-    
+    var videoEditorGroupId by remember { mutableStateOf<String?>(null) }
+
     //  新增：替换单张图片的状态
     var singleReplaceTargetId by remember { mutableStateOf<String?>(null) }
     var singleReplaceIndex by remember { mutableStateOf(-1) }
@@ -652,6 +678,32 @@ fun RasterRouteScreen(
     }
 
     val gridState = rememberLazyGridState()
+
+    // 跟随可见区域预热缩略图，减少回滑时重新解码导致的闪烁。
+    LaunchedEffect(gridState, groups.size) {
+        snapshotFlow {
+            val visibleItems = gridState.layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) null
+            else visibleItems.minOf { it.index } to visibleItems.maxOf { it.index }
+        }
+            .distinctUntilChanged()
+            .collect { range ->
+                val (visibleStart, visibleEnd) = range ?: return@collect
+                if (groups.isEmpty()) return@collect
+
+                val requests = groups.mapNotNull { it.toThumbnailRequest() }
+                if (requests.isEmpty()) return@collect
+
+                ThumbnailUtils.preloadVisibleRange(
+                    context = context,
+                    requests = requests,
+                    visibleStart = visibleStart,
+                    visibleEnd = visibleEnd,
+                    preloadOffset = 8
+                )
+            }
+    }
+
     var pendingReorderSave by remember { mutableStateOf(false) }
     val reorderableState = rememberReorderableLazyGridState(
         lazyGridState = gridState,
@@ -1049,6 +1101,14 @@ fun RasterRouteScreen(
                 // ✅ 新增：传入编辑状态
                 staticEditorGroupId = staticEditorGroupId,
                 onStaticEditorDismiss = { staticEditorGroupId = null },
+                // ── 视频光栅编辑
+                videoEditorGroupId = videoEditorGroupId,
+                onVideoEditorDismiss = { videoEditorGroupId = null },
+                onVideoEditorReplaceVideo = { editorGroup ->
+                    videoEditorGroupId = null
+                    dynamicPickTargetId = editorGroup.id
+                    pickDynamicLauncher.launch(arrayOf("video/*"))
+                },
                 onStaticEditorReplaceAll = { editorGroup ->
                     staticPickMode = StaticPickMode.REPLACE_ALL
                     staticPickTargetId = editorGroup.id
@@ -1168,8 +1228,12 @@ fun RasterRouteScreen(
                     persistGroups()
                 },
                 onVideoAction = {
-                    dynamicPickTargetId = detailGroup?.id
-                    pickDynamicLauncher.launch(arrayOf("video/*"))
+                    if (group.type == RasterGroupModel.TYPE_DYNAMIC) {
+                        videoEditorGroupId = group.id
+                    } else {
+                        dynamicPickTargetId = detailGroup?.id
+                        pickDynamicLauncher.launch(arrayOf("video/*"))
+                    }
                 }
             )
         }
@@ -1257,24 +1321,27 @@ private fun RasterGroupCard(
 @Composable
 private fun RasterGroupThumbnail(group: RasterGroupModel) {
     val context = LocalContext.current
-    val bitmap by produceState<android.graphics.Bitmap?>(initialValue = null, group.id) {
+    val request = remember(
+        group.id,
+        group.type,
+        group.videoUri,
+        group.imageUris.firstOrNull()
+    ) {
+        group.toThumbnailRequest()
+    }
+
+    val bitmap by produceState<android.graphics.Bitmap?>(
+        initialValue = request?.let { ThumbnailUtils.getFromCache(it) },
+        key1 = request?.cacheKey
+    ) {
+        val safeRequest = request ?: run {
+            value = null
+            return@produceState
+        }
+        if (value != null) return@produceState
+
         value = withContext(Dispatchers.IO) {
-            runCatching {
-                if (group.type == RasterGroupModel.TYPE_STATIC) {
-                    val firstUri = group.imageUris.firstOrNull() ?: return@withContext null
-                    // 使用采样减少内存占用
-                    val options = android.graphics.BitmapFactory.Options().apply {
-                        inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-                        inSampleSize = 4
-                    }
-                    context.contentResolver.openInputStream(Uri.parse(firstUri))?.use {
-                        android.graphics.BitmapFactory.decodeStream(it, null, options)
-                    }
-                } else {
-                    val videoUri = group.videoUri ?: return@withContext null
-                    ThumbnailUtils.getVideoFrame(context, Uri.parse(videoUri))
-                }
-            }.getOrNull()
+            ThumbnailUtils.loadThumbnail(context, safeRequest)
         }
     }
 
@@ -1289,7 +1356,7 @@ private fun RasterGroupThumbnail(group: RasterGroupModel) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.DarkGray),
+                .background(Color(0xFF2A2A2A)),
             contentAlignment = Alignment.Center
         ) {
             Text("无缩略图", color = Color.White)
@@ -1312,6 +1379,10 @@ private fun RasterDetailScreen(
     onStaticEditorMove: (RasterGroupModel, Int, Int) -> Unit,
     onStaticEditorCommitReorder: () -> Unit,
     onStaticEditorDeleteSingle: (RasterGroupModel, Int) -> Unit,
+    // ── 视频光栅编辑
+    videoEditorGroupId: String?,
+    onVideoEditorDismiss: () -> Unit,
+    onVideoEditorReplaceVideo: (RasterGroupModel) -> Unit,
     onSensorWidthChanged: (RasterGroupModel, Float) -> Unit,
     onSensorWidthChangeFinished: (RasterGroupModel, Float) -> Unit,
     // 新增参数回调
@@ -1349,7 +1420,7 @@ private fun RasterDetailScreen(
     }
 
     val showStaticEditor = staticEditorGroupId != null
-    val editorGroup = staticEditorGroupId?.let { id -> groups.firstOrNull { it.id == id } }
+    val editorGroup = (staticEditorGroupId ?: videoEditorGroupId)?.let { id -> groups.firstOrNull { it.id == id } }
 
     // 定义需要采样的区域
     val luminanceRegions = remember {
@@ -1388,6 +1459,10 @@ private fun RasterDetailScreen(
         rememberRegionLuminanceState(luminanceSampler, "videoAction")
     } else null
 
+    // 系统返回关闭编辑面板
+    BackHandler(enabled = staticEditorGroupId != null) { onStaticEditorDismiss() }
+    BackHandler(enabled = videoEditorGroupId != null)  { onVideoEditorDismiss() }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // 捕获层
         Box(
@@ -1417,6 +1492,52 @@ private fun RasterDetailScreen(
                         onLoadingChanged = { videoLoading = it }
                     )
                 }
+                // 2. 顶层：条纹玻璃效果层 (只在选择了条纹效果时显示)
+                // 假设 EFFECT_STRIPED 的值为 3
+                if (group.effectType == 3) {
+                    // 获取手机倾斜状态 (0.0f ~ 1.0f)，模拟扫描线位置
+                    val (tilt, _) = rememberTiltState(group.sensorWidth)
+
+                    // 定义玻璃的显示宽度 (比如屏幕宽度的 40%)
+                    val bandWidth = 0.4f
+                    // 边缘渐变消失的宽度 (15%)
+                    val fadeWidth = 0.15f
+
+                    // 计算玻璃完全不透明的核心区域
+                    val startOpaque = (tilt - bandWidth / 2).coerceIn(0f, 1f)
+                    val endOpaque = (tilt + bandWidth / 2).coerceIn(0f, 1f)
+
+                    // 生成动态追踪扫描线的渐变画笔
+                    val trackingBrush = Brush.horizontalGradient(
+                        0.0f to Color.Transparent,
+                        (startOpaque - fadeWidth).coerceAtLeast(0f) to Color.Transparent, // 左侧开始出现
+                        startOpaque to Color.Black, // 左侧完全清晰
+                        endOpaque to Color.Black,   // 右侧完全清晰
+                        (endOpaque + fadeWidth).coerceAtMost(1f) to Color.Transparent, // 右侧消失
+                        1.0f to Color.Transparent
+                    )
+
+                    // 如果需要截获背景，请确保创建了这个 layerBackdrop
+                    val glassBackdrop = rememberLayerBackdrop()
+
+                    Box(modifier = Modifier.fillMaxSize().layerBackdrop(glassBackdrop)) {
+                        StripedGlass(
+                            backdrop = glassBackdrop,
+                            shape = RoundedCornerShape(0.dp),
+                            profile = GlassProfile.Prism,
+                            direction = StripedDirection.Vertical, // 纵向条纹
+                            phase = 0f, // 动画暂时关闭
+                            blurRadius = 0.dp, // 模糊 0
+                            colorSaturation = 1.2f, // 饱和度 1.2
+                            colorContrast = 1.1f, // 对比度 1.1
+                            // 这些值从下方滑块状态获取 (下面会定义这些 state)
+                            wavelength = stripedWavelength.dp,
+                            amplitude = stripedAmplitude.dp,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .fadeMask(trackingBrush) // 应用动态遮罩
+                        ) {}
+                    }
             }
         }
 
@@ -1560,7 +1681,7 @@ private fun RasterDetailScreen(
         // 编辑面板
         AnimatedContent(
             targetState = editorGroup,
-            contentKey = { it?.id },  // 只根据 ID 判断，避免滑块变化触发动画
+            contentKey = { it?.id },
             transitionSpec = {
                 (fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
                         scaleIn(
@@ -1584,27 +1705,36 @@ private fun RasterDetailScreen(
         ) { currentEditorGroup ->
             if (currentEditorGroup != null) {
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
-                val sheetBackdrop = rememberLayerBackdrop()  // 为 LiquidSlider 导出
+                val sheetBackdrop = rememberLayerBackdrop()
                 val thumbnailListState = rememberLazyListState()
+
+                // ★ 新增：当前选中的标签页 (0: 调整, 1: 效果)
+                var staticEditorTab by remember(currentEditorGroup.id) { mutableStateOf(0) }
+                // ★ 新增：条纹效果的独立控制变量 (建议后续持久化到 RasterGroupModel 中)
+                var stripedWavelength by remember(currentEditorGroup.id) { mutableStateOf(32f) }
+                var stripedAmplitude by remember(currentEditorGroup.id) { mutableStateOf(16f) }
+
+                // ★ 关键：把所有的状态变量提前声明，防止切换标签页时被销毁重建
+                var selectedEffectType by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.effectType) }
+                var sensorWidth by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.sensorWidth) }
+                var transitionBand by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.transitionBand) }
+                var edgeSoftness by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.edgeSoftness) }
 
                 Column(
                     Modifier
-                        .padding(horizontal = 24.dp, vertical = 32.dp)  // 左右24dp，上下32dp
+                        .padding(horizontal = 24.dp, vertical = 32.dp)
                         .fillMaxWidth()
                         .wrapContentHeight()
                         .drawBackdrop(
                             backdrop = editBackdrop,
                             shape = { RoundedRectangle(48f.dp) },
                             effects = {
-                                colorControls(
-                                    brightness = if (isLightTheme) 0.2f else 0f,
-                                    saturation = 1.5f
-                                )
+                                colorControls(brightness = if (isLightTheme) 0.2f else 0f, saturation = 1.5f)
                                 blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
                                 lens(16f.dp.toPx(), 32f.dp.toPx(), depthEffect = true)
                             },
                             highlight = { Highlight.Plain },
-                            exportedBackdrop = sheetBackdrop,  // 导出给 LiquidSlider 使用
+                            exportedBackdrop = sheetBackdrop,
                             onDrawSurface = { drawRect(containerColor) }
                         )
                         .pointerInput(Unit) { detectTapGestures { } }
@@ -1616,358 +1746,315 @@ private fun RasterDetailScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        BasicText("图集光栅", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+                        BasicText(
+                            if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
+                            style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold)
+                        )
                     }
                     Spacer(Modifier.height(4.dp))
                     BasicText(
-                        "支持添加多张图片，长按图片可拖拽排序",
+                        if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) "支持添加多张图片，长按图片可拖拽排序" else "调整灵敏度或替换视频文件",
                         style = TextStyle(contentColor.copy(alpha = 0.7f), 14.sp)
                     )
                     Spacer(Modifier.height(12.dp))
-                    val reorderableState = rememberReorderableLazyListState(
-                        lazyListState = thumbnailListState,
-                        onMove = { from, to ->
-                            onStaticEditorMove(currentEditorGroup, from.index, to.index)
-                            onStaticEditorCommitReorder()
-                        }
-                    )
-                    
-                    LazyRow(
-                        state = thumbnailListState,
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        lazyItemsIndexed(
-                            items = currentEditorGroup.imageUris,
-                            key = { index, uri ->
-                                val occurrence = currentEditorGroup.imageUris
-                                    .take(index + 1)
-                                    .count { it == uri }
-                                "${uri}#$occurrence"
+
+                    // === 图集缩略图区域（保持不变） ===
+                    if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) {
+                        val reorderableState = rememberReorderableLazyListState(
+                            lazyListState = thumbnailListState,
+                            onMove = { from, to ->
+                                onStaticEditorMove(currentEditorGroup, from.index, to.index)
+                                onStaticEditorCommitReorder()
                             }
-                        ) { index, uri ->
-                            val occurrence = currentEditorGroup.imageUris.take(index + 1).count { it == uri }
-                            val itemKey = "${uri}#$occurrence"
-                            ReorderableItem(reorderableState, key = itemKey) { isDragging ->
-                                Box(
-                                    modifier = Modifier
-                                        .height(150.dp)
-                                        .aspectRatio(screenAspectRatio)
-                                        .zIndex(if (isDragging) 1f else 0f)
-                                        .graphicsLayer {
-                                            scaleX = if (isDragging) 1.05f else 1f
-                                            scaleY = if (isDragging) 1.05f else 1f
-                                            shadowElevation = if (isDragging) 8.dp.toPx() else 0f
-                                            shape = RoundedCornerShape(12.dp)
-                                            clip = true
+                        )
+                        LazyRow(
+                            state = thumbnailListState,
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            lazyItemsIndexed(
+                                items = currentEditorGroup.imageUris,
+                                key = { index, uri ->
+                                    val occurrence = currentEditorGroup.imageUris.take(index + 1).count { it == uri }
+                                    "${uri}#$occurrence"
+                                }
+                            ) { index, uri ->
+                                val occurrence = currentEditorGroup.imageUris.take(index + 1).count { it == uri }
+                                val itemKey = "${uri}#$occurrence"
+                                ReorderableItem(reorderableState, key = itemKey) { isDragging ->
+                                    Box(
+                                        modifier = Modifier
+                                            .height(150.dp)
+                                            .aspectRatio(screenAspectRatio)
+                                            .zIndex(if (isDragging) 1f else 0f)
+                                            .graphicsLayer {
+                                                scaleX = if (isDragging) 1.05f else 1f
+                                                scaleY = if (isDragging) 1.05f else 1f
+                                                shadowElevation = if (isDragging) 8.dp.toPx() else 0f
+                                                shape = RoundedCornerShape(12.dp)
+                                                clip = true
+                                            }
+                                            .longPressDraggableHandle()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .border(1.dp, if (index == 0) Color(0xFF2A83FF) else Color.Transparent, RoundedCornerShape(12.dp))
+                                            .clickable { onStaticEditorReplaceSingle(currentEditorGroup, index) }
+                                    ) {
+                                        val bmp by produceState<android.graphics.Bitmap?>(initialValue = null, uri) {
+                                            value = withContext(Dispatchers.IO) {
+                                                runCatching {
+                                                    val options = android.graphics.BitmapFactory.Options().apply {
+                                                        inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                                                        inSampleSize = 2
+                                                    }
+                                                    context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+                                                        android.graphics.BitmapFactory.decodeStream(it, null, options)
+                                                    }
+                                                }.getOrNull()
+                                            }
                                         }
-                                        .longPressDraggableHandle()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .border(
-                                            1.dp,
-                                            if (index == 0) Color(0xFF2A83FF) else Color.Transparent,
-                                            RoundedCornerShape(12.dp)
-                                        )
-                                        .clickable { onStaticEditorReplaceSingle(currentEditorGroup, index) }
-                                ) {
-                                val bmp by produceState<android.graphics.Bitmap?>(initialValue = null, uri) {
-                                    value = withContext(Dispatchers.IO) {
-                                        runCatching {
-                                            val options = android.graphics.BitmapFactory.Options().apply {
-                                                inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-                                                inSampleSize = 2
-                                            }
-                                            context.contentResolver.openInputStream(Uri.parse(uri))?.use {
-                                                android.graphics.BitmapFactory.decodeStream(it, null, options)
-                                            }
-                                        }.getOrNull()
+                                        if (bmp != null) {
+                                            Image(bitmap = bmp!!.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                        } else {
+                                            Box(Modifier.fillMaxSize().background(Color.Gray))
+                                        }
+                                        BasicText("${index + 1}", style = TextStyle(Color.White, 12.sp, fontWeight = FontWeight.Bold), modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).background(Color(0x99000000), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                                        if (index == 0) {
+                                            BasicText("封面", style = TextStyle(Color.White, 12.sp), modifier = Modifier.align(Alignment.BottomCenter).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 2.dp))
+                                        }
+                                        Text(text = "×", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.TopStart).padding(4.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFE53935)).clickable { onStaticEditorDeleteSingle(currentEditorGroup, index) }.padding(horizontal = 7.dp, vertical = 0.dp))
                                     }
                                 }
-                                if (bmp != null) {
-                                    Image(
-                                        bitmap = bmp!!.asImageBitmap(),
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Box(Modifier.fillMaxSize().background(Color.Gray))
+                            }
+                            item {
+                                Box(
+                                    modifier = Modifier.height(150.dp).aspectRatio(screenAspectRatio).clip(RoundedCornerShape(12.dp)).background(containerColor.copy(0.2f)).clickable { onStaticEditorAppend(currentEditorGroup) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    BasicText("+", style = TextStyle(contentColor, 24.sp))
                                 }
-                                BasicText(
-                                    "${index + 1}",
-                                    style = TextStyle(
-                                        Color.White,
-                                        12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    ),
+                            }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // === ★ 新增：标签页切换 UI ===
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(40.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(contentColor.copy(alpha = 0.05f))
+                                .padding(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf(0 to "调整", 1 to "效果").forEach { (index, title) ->
+                                val isSelected = staticEditorTab == index
+                                Box(
                                     modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(4.dp)
-                                        .background(Color(0x99000000), RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                                if (index == 0) {
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(if (isSelected) contentColor.copy(alpha = 0.1f) else Color.Transparent)
+                                        .clickable { staticEditorTab = index },
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     BasicText(
-                                        "封面",
-                                        style = TextStyle(Color.White, 12.sp),
-                                        modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .background(Color(0x66000000))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        text = title,
+                                        style = TextStyle(
+                                            color = if (isSelected) contentColor else contentColor.copy(alpha = 0.6f),
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
                                     )
                                 }
-
-                                Text(
-                                    text = "×",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier
-                                        .align(Alignment.TopStart)
-                                        .padding(4.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFFE53935))
-                                        .clickable { onStaticEditorDeleteSingle(currentEditorGroup, index) }
-                                        .padding(horizontal = 7.dp, vertical = 0.dp)
-                                )
                             }
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // === ★ 新增：带水平滑动动画的标签内容页 ===
+                        AnimatedContent(
+                            targetState = staticEditorTab,
+                            transitionSpec = {
+                                if (targetState > initialState) {
+                                    slideInHorizontally { width -> width } + fadeIn() togetherWith
+                                            slideOutHorizontally { width -> -width } + fadeOut()
+                                } else {
+                                    slideInHorizontally { width -> -width } + fadeIn() togetherWith
+                                            slideOutHorizontally { width -> width } + fadeOut()
+                                }
+                            },
+                            label = "StaticTabContent"
+                        ) { tab ->
+                            Column(Modifier.fillMaxWidth()) {
+                                if (tab == 0) {
+                                    // ────────── 调整标签页 (Tab 0) ──────────
+                                    val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText("灵敏度", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                        BasicText("倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘", style = TextStyle(contentColor.copy(0.5f), 12.sp))
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        BasicText("高", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                        LiquidSlider(
+                                            value = { sensorWidth },
+                                            onValueChange = { sensorWidth = it; onSensorWidthChanged(currentEditorGroup, it) },
+                                            onValueChangeFinished = { onSensorWidthChangeFinished(currentEditorGroup, sensorWidth) },
+                                            valueRange = 1f..9f,
+                                            visibilityThreshold = 0.1f,
+                                            backdrop = sheetBackdrop,
+                                            isLightTheme = isLightTheme,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        BasicText("低", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                    }
+
+                                    Spacer(Modifier.height(16.dp))
+                                    BasicText("过渡带宽", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                        LiquidSlider(
+                                            value = { transitionBand },
+                                            onValueChange = { transitionBand = it; onTransitionBandChanged(currentEditorGroup, it) },
+                                            onValueChangeFinished = { onTransitionBandChangeFinished(currentEditorGroup, transitionBand) },
+                                            valueRange = 0.1f..1f,
+                                            visibilityThreshold = 0.001f,
+                                            backdrop = sheetBackdrop,
+                                            isLightTheme = isLightTheme,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        BasicText("宽", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                    }
+
+                                    Spacer(Modifier.height(16.dp))
+                                    BasicText("边缘柔化", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        BasicText("锐", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                        LiquidSlider(
+                                            value = { edgeSoftness },
+                                            onValueChange = { edgeSoftness = it; onEdgeSoftnessChanged(currentEditorGroup, it) },
+                                            onValueChangeFinished = { onEdgeSoftnessChangeFinished(currentEditorGroup, edgeSoftness) },
+                                            valueRange = 0.01f..0.5f,
+                                            visibilityThreshold = 0.001f,
+                                            backdrop = sheetBackdrop,
+                                            isLightTheme = isLightTheme,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        BasicText("柔", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                    }
+                                } else {
+                                    // ────────── 效果标签页 (Tab 1) ──────────
+                                    BasicText("扫描线效果", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                    Spacer(Modifier.height(12.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        listOf(
+                                            RasterGroupModel.EFFECT_STANDARD to "标准",
+                                            RasterGroupModel.EFFECT_LENTICULAR to "光栅透镜"
+                                        ).forEach { (type, name) ->
+                                            val isSelected = selectedEffectType == type
+                                            Row(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(36.dp)
+                                                    .clip(RoundedCornerShape(18.dp))
+                                                    .background(if (isSelected) accentColor else contentColor.copy(0.1f))
+                                                    .clickable {
+                                                        selectedEffectType = type
+                                                        onEffectTypeChanged(currentEditorGroup, type)
+                                                    },
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                BasicText(name, style = TextStyle(if (isSelected) Color.White else contentColor, 13.sp))
+                                            }
+                                        }
+                                    }
+                                    // 给效果页补一点空白，防止切页时高度变化太剧烈跳动
+                                    Spacer(Modifier.height(72.dp))
+                                }
+                            }
+                        }
+                    } else {
+                        // === 视频光栅逻辑（保持原样，只显示灵敏度） ===
+                        Spacer(Modifier.height(16.dp))
+                        val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("灵敏度", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                            BasicText("倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘", style = TextStyle(contentColor.copy(0.5f), 12.sp))
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            BasicText("高", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                            LiquidSlider(
+                                value = { sensorWidth },
+                                onValueChange = { sensorWidth = it; onSensorWidthChanged(currentEditorGroup, it) },
+                                onValueChangeFinished = { onSensorWidthChangeFinished(currentEditorGroup, sensorWidth) },
+                                valueRange = 1f..9f,
+                                visibilityThreshold = 0.1f,
+                                backdrop = sheetBackdrop,
+                                isLightTheme = isLightTheme,
+                                modifier = Modifier.weight(1f)
+                            )
+                            BasicText("低", style = TextStyle(contentColor.copy(0.6f), 12.sp))
                         }
                     }
 
-                    item {
-                            Box(
-                                modifier = Modifier
-                                    .height(150.dp)
-                                    .aspectRatio(screenAspectRatio)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(containerColor.copy(0.2f))
-                                    .clickable { onStaticEditorAppend(currentEditorGroup) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                BasicText("+", style = TextStyle(contentColor, 24.sp))
-                            }
-                        }
-                    }
-                    
-                    // ── 效果类型选择 ──
-                    Spacer(Modifier.height(16.dp))
-                    
-                    var selectedEffectType by remember(currentEditorGroup.id) {
-                        mutableStateOf(currentEditorGroup.effectType)
-                    }
-                    
-                    BasicText(
-                        "扫描线效果",
-                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
-                    )
-                    
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            RasterGroupModel.EFFECT_STANDARD to "标准",
-                            RasterGroupModel.EFFECT_LENTICULAR to "光栅透镜"
-                        ).forEach { (type, name) ->
-                            val isSelected = selectedEffectType == type
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(36.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(
-                                        if (isSelected) accentColor else contentColor.copy(0.1f)
-                                    )
-                                    .clickable {
-                                        selectedEffectType = type
-                                        onEffectTypeChanged(currentEditorGroup, type)
-                                    },
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                BasicText(
-                                    name,
-                                    style = TextStyle(
-                                        if (isSelected) Color.White else contentColor,
-                                        13.sp
-                                    )
-                                )
-                            }
-                        }
-                    }
-                    
-                    // ── 传感器灵敏度滑块 ──
-                    Spacer(Modifier.height(16.dp))
-
-                    var sensorWidth by remember(currentEditorGroup.id) {
-                        mutableStateOf(currentEditorGroup.sensorWidth)
-                    }
-
-                    // 灵敏度范围 1~9 对应角度 20°~40°
-                    val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicText(
-                            "灵敏度",
-                            style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
-                        )
-                        BasicText(
-                            "倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘",
-                            style = TextStyle(contentColor.copy(0.5f), 12.sp)
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        BasicText(
-                            "高",
-                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
-                        )
-
-                        LiquidSlider(
-                            value = { sensorWidth },
-                            onValueChange = {
-                                sensorWidth = it
-                                onSensorWidthChanged(currentEditorGroup, it)
-                            },
-                            onValueChangeFinished = {
-                                onSensorWidthChangeFinished(currentEditorGroup, sensorWidth)
-                            },
-                            valueRange = 1f..9f,
-                            visibilityThreshold = 0.1f,
-                            backdrop = sheetBackdrop,
-                            isLightTheme = isLightTheme,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        BasicText(
-                            "低",
-                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
-                        )
-                    }
-
-
-                    
-                    // ── 过渡带宽调节 ──
-                    Spacer(Modifier.height(16.dp))
-                    
-                    var transitionBand by remember(currentEditorGroup.id) {
-                        mutableStateOf(currentEditorGroup.transitionBand)
-                    }
-                    
-                    BasicText(
-                        "过渡带宽",
-                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        BasicText(
-                            "窄",
-                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
-                        )
-                        
-                        LiquidSlider(
-                            value = { transitionBand },
-                            onValueChange = {
-                                transitionBand = it
-                                onTransitionBandChanged(currentEditorGroup, it)
-                            },
-                            onValueChangeFinished = {
-                                onTransitionBandChangeFinished(currentEditorGroup, transitionBand)
-                            },
-                            valueRange = 0.1f..1f,
-                            visibilityThreshold = 0.001f,
-                            backdrop = sheetBackdrop,
-                            isLightTheme = isLightTheme,
-                            modifier = Modifier.weight(1f)
-                        )
-                        
-                        BasicText(
-                            "宽",
-                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
-                        )
-                    }
-                    
-                    // ── 边缘柔化调节 ──
-                    Spacer(Modifier.height(12.dp))
-                    
-                    var edgeSoftness by remember(currentEditorGroup.id) {
-                        mutableStateOf(currentEditorGroup.edgeSoftness)
-                    }
-                    
-                    BasicText(
-                        "边缘柔化",
-                        style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold)
-                    )
-                    
-                    Spacer(Modifier.height(4.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        BasicText(
-                            "锐",
-                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
-                        )
-                        
-                        LiquidSlider(
-                            value = { edgeSoftness },
-                            onValueChange = {
-                                edgeSoftness = it
-                                onEdgeSoftnessChanged(currentEditorGroup, it)
-                            },
-                            onValueChangeFinished = {
-                                onEdgeSoftnessChangeFinished(currentEditorGroup, edgeSoftness)
-                            },
-                            valueRange = 0.01f..0.5f,
-                            visibilityThreshold = 0.001f,
-                            backdrop = sheetBackdrop,
-                            isLightTheme = isLightTheme,
-                            modifier = Modifier.weight(1f)
-                        )
-                        
-                        BasicText(
-                            "柔",
-                            style = TextStyle(contentColor.copy(0.6f), 12.sp)
-                        )
-                    }
-                    
-                    Spacer(Modifier.height(12.dp))
+                    // ── 底部通用按钮 ──
+                    Spacer(Modifier.height(24.dp))
                     Row(
                         Modifier
                             .clip(Capsule())
                             .background(accentColor)
-                            .clickable { onStaticEditorReplaceAll(currentEditorGroup) }
+                            .clickable {
+                                if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) onStaticEditorReplaceAll(currentEditorGroup)
+                                else onVideoEditorReplaceVideo(currentEditorGroup)
+                            }
                             .height(48.dp)
                             .fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        BasicText("替换全部图片", style = TextStyle(Color.White, 16.sp))
+                        BasicText(if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) "替换全部图片" else "替换视频", style = TextStyle(Color.White, 16.sp))
                     }
                     Spacer(Modifier.height(8.dp))
                     Row(
                         Modifier
                             .clip(Capsule())
                             .background(containerColor.copy(0.2f))
-                            .clickable { onStaticEditorDismiss() }
+                            .clickable {
+                                if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) onStaticEditorDismiss()
+                                else onVideoEditorDismiss()
+                            }
                             .height(48.dp)
                             .fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center,
@@ -2122,3 +2209,4 @@ private fun rememberTiltState(sensorWidth: Float = 4.5f, maxAngle: Float = 30f):
 
     return tilt to direction
 }
+

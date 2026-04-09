@@ -66,11 +66,6 @@ class VideoRasterWallpaperService : WallpaperService() {
         private val FILTER_ALPHA  = 0.4f
         private val MAX_ANGLE_RAD = Math.toRadians(45.0).toFloat()
 
-        // 死区迟滞（仅用于稳定中心位置，阈值较小）
-        private val DEAD_ZONE_EXIT_RAD  = Math.toRadians(1.5).toFloat()
-        private val DEAD_ZONE_ENTER_RAD = Math.toRadians(0.5).toFloat()
-        private var inDeadZone = true
-
         var onAngleChanged: ((Float) -> Unit)? = null
 
         fun registerSensor(context: Context) {
@@ -91,7 +86,6 @@ class VideoRasterWallpaperService : WallpaperService() {
             lastTimestamp    = 0L
             accumulatedAngle = 0f
             filteredVelocity = 0f
-            inDeadZone       = true
             mCurAngleSensorValue = 0f
         }
 
@@ -109,12 +103,7 @@ class VideoRasterWallpaperService : WallpaperService() {
             accumulatedAngle += filteredVelocity * dt
             accumulatedAngle  = accumulatedAngle.coerceIn(-MAX_ANGLE_RAD, MAX_ANGLE_RAD)
 
-            inDeadZone = if (inDeadZone) {
-                abs(accumulatedAngle) < DEAD_ZONE_EXIT_RAD
-            } else {
-                abs(accumulatedAngle) < DEAD_ZONE_ENTER_RAD
-            }
-            mCurAngleSensorValue = if (inDeadZone) 0f else accumulatedAngle
+            mCurAngleSensorValue = accumulatedAngle
             onAngleChanged?.invoke(mCurAngleSensorValue)
         }
 
@@ -364,7 +353,8 @@ class VideoRasterWallpaperService : WallpaperService() {
          */
         private fun doSensorChangeEvent(sensorValue: Float) {
             if (effectCtrl?.isPrepared() != true) return
-            val maxAngle = Math.toRadians(45.0).toFloat()
+            val sw = group?.sensorWidth ?: 1.5f
+            val maxAngle = (0.3285 + 0.041 * sw).toFloat()
 
             val normalized = (sensorValue / maxAngle).coerceIn(-1f, 1f)
             currentPlaybackPosition = abs(normalized)   // [0, 1]
@@ -431,39 +421,6 @@ class VideoRasterWallpaperService : WallpaperService() {
             private var sH = 0
             private var isEglReady = false
             private var drawCounter = 0L
-
-            private fun drawDebugBar() {
-                val totalFrames = effectCtrl?.getFrameCount() ?: 0
-                if (totalFrames == 0 || sW <= 0 || sH <= 0) return
-
-                val barH    = 8
-                val barY    = 0
-                val posW    = (currentPlaybackPosition * sW).toInt()
-                val frameW  = (lastFrameIndex.coerceAtLeast(0).toFloat() / (totalFrames - 1) * sW).toInt()
-
-                GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
-
-                // 背景条（深灰）
-                GLES20.glScissor(0, barY, sW, barH)
-                GLES20.glClearColor(0.2f, 0.2f, 0.2f, 0.8f)
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-
-                // 帧位置（白色）
-                if (frameW > 0) {
-                    GLES20.glScissor(0, barY, frameW, barH)
-                    GLES20.glClearColor(1f, 1f, 1f, 1f)
-                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-                }
-
-                // 倾斜位置（青色）
-                if (posW > 0) {
-                    GLES20.glScissor(0, barY, posW, barH / 2)
-                    GLES20.glClearColor(0f, 0.8f, 0.8f, 1f)
-                    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-                }
-
-                GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
-            }
 
             fun onSizeChanged(w: Int, h: Int) {
                 sW = w; sH = h
@@ -541,7 +498,6 @@ class VideoRasterWallpaperService : WallpaperService() {
                 }
 
                 effectCtrl?.onDrawFrame(sW, sH)
-                drawDebugBar()
                 if (!EGL14.eglSwapBuffers(display, eglSurface)) {
                     Log.e(TAG, "eglSwapBuffers failed: ${EGL14.eglGetError()}")
                 }

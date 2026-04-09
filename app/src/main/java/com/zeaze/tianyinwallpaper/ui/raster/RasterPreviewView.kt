@@ -47,7 +47,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun RasterPreviewView(
     group: RasterGroupModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
