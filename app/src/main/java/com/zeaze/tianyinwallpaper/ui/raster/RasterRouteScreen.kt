@@ -119,7 +119,6 @@ import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
-import com.zeaze.tianyinwallpaper.catalog.components.StripedGlass
 import androidx.compose.ui.geometry.Rect
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
@@ -1492,52 +1491,7 @@ private fun RasterDetailScreen(
                         onLoadingChanged = { videoLoading = it }
                     )
                 }
-                // 2. 顶层：条纹玻璃效果层 (只在选择了条纹效果时显示)
-                // 假设 EFFECT_STRIPED 的值为 3
-                if (group.effectType == 3) {
-                    // 获取手机倾斜状态 (0.0f ~ 1.0f)，模拟扫描线位置
-                    val (tilt, _) = rememberTiltState(group.sensorWidth)
 
-                    // 定义玻璃的显示宽度 (比如屏幕宽度的 40%)
-                    val bandWidth = 0.4f
-                    // 边缘渐变消失的宽度 (15%)
-                    val fadeWidth = 0.15f
-
-                    // 计算玻璃完全不透明的核心区域
-                    val startOpaque = (tilt - bandWidth / 2).coerceIn(0f, 1f)
-                    val endOpaque = (tilt + bandWidth / 2).coerceIn(0f, 1f)
-
-                    // 生成动态追踪扫描线的渐变画笔
-                    val trackingBrush = Brush.horizontalGradient(
-                        0.0f to Color.Transparent,
-                        (startOpaque - fadeWidth).coerceAtLeast(0f) to Color.Transparent, // 左侧开始出现
-                        startOpaque to Color.Black, // 左侧完全清晰
-                        endOpaque to Color.Black,   // 右侧完全清晰
-                        (endOpaque + fadeWidth).coerceAtMost(1f) to Color.Transparent, // 右侧消失
-                        1.0f to Color.Transparent
-                    )
-
-                    // 如果需要截获背景，请确保创建了这个 layerBackdrop
-                    val glassBackdrop = rememberLayerBackdrop()
-
-                    Box(modifier = Modifier.fillMaxSize().layerBackdrop(glassBackdrop)) {
-                        StripedGlass(
-                            backdrop = glassBackdrop,
-                            shape = RoundedCornerShape(0.dp),
-                            profile = GlassProfile.Prism,
-                            direction = StripedDirection.Vertical, // 纵向条纹
-                            phase = 0f, // 动画暂时关闭
-                            blurRadius = 0.dp, // 模糊 0
-                            colorSaturation = 1.2f, // 饱和度 1.2
-                            colorContrast = 1.1f, // 对比度 1.1
-                            // 这些值从下方滑块状态获取 (下面会定义这些 state)
-                            wavelength = stripedWavelength.dp,
-                            amplitude = stripedAmplitude.dp,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .fadeMask(trackingBrush) // 应用动态遮罩
-                        ) {}
-                    }
             }
         }
 
@@ -1710,9 +1664,6 @@ private fun RasterDetailScreen(
 
                 // ★ 新增：当前选中的标签页 (0: 调整, 1: 效果)
                 var staticEditorTab by remember(currentEditorGroup.id) { mutableStateOf(0) }
-                // ★ 新增：条纹效果的独立控制变量 (建议后续持久化到 RasterGroupModel 中)
-                var stripedWavelength by remember(currentEditorGroup.id) { mutableStateOf(32f) }
-                var stripedAmplitude by remember(currentEditorGroup.id) { mutableStateOf(16f) }
 
                 // ★ 关键：把所有的状态变量提前声明，防止切换标签页时被销毁重建
                 var selectedEffectType by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.effectType) }
