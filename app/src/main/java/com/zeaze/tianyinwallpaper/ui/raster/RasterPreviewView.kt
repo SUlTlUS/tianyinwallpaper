@@ -16,14 +16,13 @@ import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -37,12 +36,13 @@ import kotlinx.coroutines.withContext
 /**
  * 光栅壁纸预览组件 - 使用 TextureView + 共享渲染器
  * 效果与实际壁纸服务完全一致
- * 
+ *
  * 支持：
- * - 多种扫描线效果
+ * - 多种扫描线效果（标准 / 条纹玻璃）
  * - 实时参数更新
  * - 集成传感器数据处理
  * - 异步加载图片避免卡顿
+ * - 条纹玻璃效果已集成到 GL 渲染管线，无需 API 33+ 限制
  */
 @Composable
 fun RasterPreviewView(
@@ -51,13 +51,13 @@ fun RasterPreviewView(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    
+
     // 渲染器实例（集成传感器处理）
     val renderer = remember { RasterGLRenderer() }
 
     // TextureView 引用
     var textureView by remember { mutableStateOf<TextureView?>(null) }
-    
+
     // 记录渲染器是否已启动
     var isRendererStarted by remember { mutableStateOf(false) }
 
@@ -69,14 +69,18 @@ fun RasterPreviewView(
         group.transitionBand,
         group.edgeSoftness,
         group.effectType,
-        group.lenticularPitch,
-        group.lenticularAngle
+        group.stripedWavelength,
+        group.stripedAmplitude,
+        group.narrowWavelength,
+        group.narrowAmplitude,
+        group.glassAnimEnabled,
+        group.deadZoneEnabled
     ) {
         if (isRendererStarted) {
             renderer.updateParamsFromModel(group)
         }
     }
-    
+
     // 当图片列表变化时异步重新加载
     LaunchedEffect(group.imageUris, isRendererStarted) {
         if (isRendererStarted && group.imageUris.isNotEmpty()) {

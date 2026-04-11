@@ -117,6 +117,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import androidx.compose.ui.geometry.Rect
@@ -1226,6 +1227,74 @@ fun RasterRouteScreen(
                     // 拖动结束时持久化
                     persistGroups()
                 },
+                onStripedWavelengthChanged = { editorGroup, newWavelength ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(stripedWavelength = newWavelength)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
+                    }
+                },
+                onStripedWavelengthChangeFinished = { _, _ ->
+                    persistGroups()
+                },
+                onStripedAmplitudeChanged = { editorGroup, newAmplitude ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(stripedAmplitude = newAmplitude)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
+                    }
+                },
+                onStripedAmplitudeChangeFinished = { _, _ ->
+                    persistGroups()
+                },
+                onNarrowWavelengthChanged = { editorGroup, newWavelength ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(narrowWavelength = newWavelength)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
+                    }
+                },
+                onNarrowWavelengthChangeFinished = { _, _ ->
+                    persistGroups()
+                },
+                onNarrowAmplitudeChanged = { editorGroup, newAmplitude ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(narrowAmplitude = newAmplitude)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
+                    }
+                },
+                onNarrowAmplitudeChangeFinished = { _, _ ->
+                    persistGroups()
+                },
+                onGlassAnimEnabledChanged = { editorGroup, enabled ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(glassAnimEnabled = enabled)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
+                        persistGroups()
+                    }
+                },
+                onDeadZoneEnabledChanged = { editorGroup, enabled ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(deadZoneEnabled = enabled)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
+                        persistGroups()
+                    }
+                },
                 onVideoAction = {
                     if (group.type == RasterGroupModel.TYPE_DYNAMIC) {
                         videoEditorGroupId = group.id
@@ -1390,6 +1459,19 @@ private fun RasterDetailScreen(
     onTransitionBandChangeFinished: (RasterGroupModel, Float) -> Unit,
     onEdgeSoftnessChanged: (RasterGroupModel, Float) -> Unit,
     onEdgeSoftnessChangeFinished: (RasterGroupModel, Float) -> Unit,
+    // ── 玻璃效果参数回调
+    onStripedWavelengthChanged: (RasterGroupModel, Float) -> Unit,
+    onStripedWavelengthChangeFinished: (RasterGroupModel, Float) -> Unit,
+    onStripedAmplitudeChanged: (RasterGroupModel, Float) -> Unit,
+    onStripedAmplitudeChangeFinished: (RasterGroupModel, Float) -> Unit,
+    onNarrowWavelengthChanged: (RasterGroupModel, Float) -> Unit,
+    onNarrowWavelengthChangeFinished: (RasterGroupModel, Float) -> Unit,
+    onNarrowAmplitudeChanged: (RasterGroupModel, Float) -> Unit,
+    onNarrowAmplitudeChangeFinished: (RasterGroupModel, Float) -> Unit,
+    // ── 动画开关回调
+    onGlassAnimEnabledChanged: (RasterGroupModel, Boolean) -> Unit,
+    // ── 死区开关回调
+    onDeadZoneEnabledChanged: (RasterGroupModel, Boolean) -> Unit,
     groups: List<RasterGroupModel>,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
@@ -1670,6 +1752,12 @@ private fun RasterDetailScreen(
                 var sensorWidth by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.sensorWidth) }
                 var transitionBand by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.transitionBand) }
                 var edgeSoftness by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.edgeSoftness) }
+                var stripedWavelength by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.stripedWavelength) }
+                var stripedAmplitude by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.stripedAmplitude) }
+                var narrowWavelength by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.narrowWavelength) }
+                var narrowAmplitude by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.narrowAmplitude) }
+                var glassAnimEnabled by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.glassAnimEnabled) }
+                var deadZoneEnabled by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.deadZoneEnabled) }
 
                 Column(
                     Modifier
@@ -1692,17 +1780,7 @@ private fun RasterDetailScreen(
                         .padding(16.dp)
                 ) {
                     Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicText(
-                            if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
-                            style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold)
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
+
                     BasicText(
                         if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) "支持添加多张图片，长按图片可拖拽排序" else "调整灵敏度或替换视频文件",
                         style = TextStyle(contentColor.copy(alpha = 0.7f), 14.sp)
@@ -1846,6 +1924,33 @@ private fun RasterDetailScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        BasicText("边缘死区", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                        if (enableLiquidGlass && sheetBackdrop != null) {
+                                            LiquidToggle(
+                                                selected = { deadZoneEnabled },
+                                                onSelect = {
+                                                    deadZoneEnabled = it
+                                                    onDeadZoneEnabledChanged(currentEditorGroup, it)
+                                                },
+                                                backdrop = sheetBackdrop,
+                                                isLightTheme = isLightTheme,
+                                            )
+                                        } else {
+                                            androidx.compose.material.Switch(
+                                                checked = deadZoneEnabled,
+                                                onCheckedChange = {
+                                                    deadZoneEnabled = it
+                                                    onDeadZoneEnabledChanged(currentEditorGroup, it)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(16.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         BasicText("灵敏度", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
                                         BasicText("倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘", style = TextStyle(contentColor.copy(0.5f), 12.sp))
                                     }
@@ -1914,15 +2019,16 @@ private fun RasterDetailScreen(
                                     }
                                 } else {
                                     // ────────── 效果标签页 (Tab 1) ──────────
-                                    BasicText("扫描线效果", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
-                                    Spacer(Modifier.height(12.dp))
+                                    //Spacer(Modifier.height(12.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         listOf(
                                             RasterGroupModel.EFFECT_STANDARD to "标准",
-                                            RasterGroupModel.EFFECT_LENTICULAR to "光栅透镜"
+                                            RasterGroupModel.EFFECT_CORRUGATED_GLASS to "波纹",
+                                            RasterGroupModel.EFFECT_REEDED_GLASS to "长虹",
+                                            RasterGroupModel.EFFECT_PRISM_GLASS to "棱镜"
                                         ).forEach { (type, name) ->
                                             val isSelected = selectedEffectType == type
                                             Row(
@@ -1942,13 +2048,165 @@ private fun RasterDetailScreen(
                                             }
                                         }
                                     }
+
+                                    // ── 玻璃效果专属参数 ──
+                                    val isGlassEffect = selectedEffectType == RasterGroupModel.EFFECT_CORRUGATED_GLASS ||
+                                            selectedEffectType == RasterGroupModel.EFFECT_REEDED_GLASS ||
+                                            selectedEffectType == RasterGroupModel.EFFECT_PRISM_GLASS
+                                    if (isGlassEffect) {
+                                        Spacer(Modifier.height(16.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            BasicText("动画", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                            if (enableLiquidGlass && sheetBackdrop != null) {
+                                                LiquidToggle(
+                                                    selected = { glassAnimEnabled },
+                                                    onSelect = {
+                                                        glassAnimEnabled = it
+                                                        onGlassAnimEnabledChanged(currentEditorGroup, it)
+                                                    },
+                                                    backdrop = sheetBackdrop,
+                                                    isLightTheme = isLightTheme,
+                                                )
+                                            } else {
+                                                androidx.compose.material.Switch(
+                                                    checked = glassAnimEnabled,
+                                                    onCheckedChange = {
+                                                        glassAnimEnabled = it
+                                                        onGlassAnimEnabledChanged(currentEditorGroup, it)
+                                                    }
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(Modifier.height(16.dp))
+                                        BasicText("波长", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                        Spacer(Modifier.height(4.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                            LiquidSlider(
+                                                value = { stripedWavelength },
+                                                onValueChange = { stripedWavelength = it; onStripedWavelengthChanged(currentEditorGroup, it) },
+                                                onValueChangeFinished = { onStripedWavelengthChangeFinished(currentEditorGroup, stripedWavelength) },
+                                                valueRange = 8f..80f,
+                                                visibilityThreshold = 1f,
+                                                backdrop = sheetBackdrop,
+                                                isLightTheme = isLightTheme,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            BasicText("宽", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                        }
+
+                                        Spacer(Modifier.height(16.dp))
+                                        BasicText("振幅", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                        Spacer(Modifier.height(4.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            BasicText("弱", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                            LiquidSlider(
+                                                value = { stripedAmplitude },
+                                                onValueChange = { stripedAmplitude = it; onStripedAmplitudeChanged(currentEditorGroup, it) },
+                                                onValueChangeFinished = { onStripedAmplitudeChangeFinished(currentEditorGroup, stripedAmplitude) },
+                                                valueRange = 2f..40f,
+                                                visibilityThreshold = 1f,
+                                                backdrop = sheetBackdrop,
+                                                isLightTheme = isLightTheme,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            BasicText("强", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                        }
+
+                                        // ── 棱镜模式额外参数 ──
+                                        if (selectedEffectType == RasterGroupModel.EFFECT_PRISM_GLASS) {
+                                            Spacer(Modifier.height(16.dp))
+                                            BasicText("窄波波长", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                            Spacer(Modifier.height(4.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                LiquidSlider(
+                                                    value = { narrowWavelength },
+                                                    onValueChange = { narrowWavelength = it; onNarrowWavelengthChanged(currentEditorGroup, it) },
+                                                    onValueChangeFinished = { onNarrowWavelengthChangeFinished(currentEditorGroup, narrowWavelength) },
+                                                    valueRange = 4f..40f,
+                                                    visibilityThreshold = 1f,
+                                                    backdrop = sheetBackdrop,
+                                                    isLightTheme = isLightTheme,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                BasicText("宽", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                            }
+
+                                            Spacer(Modifier.height(16.dp))
+                                            BasicText("窄波振幅", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                            Spacer(Modifier.height(4.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                BasicText("弱", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                LiquidSlider(
+                                                    value = { narrowAmplitude },
+                                                    onValueChange = { narrowAmplitude = it; onNarrowAmplitudeChanged(currentEditorGroup, it) },
+                                                    onValueChangeFinished = { onNarrowAmplitudeChangeFinished(currentEditorGroup, narrowAmplitude) },
+                                                    valueRange = 1f..20f,
+                                                    visibilityThreshold = 1f,
+                                                    backdrop = sheetBackdrop,
+                                                    isLightTheme = isLightTheme,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                BasicText("强", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                            }
+                                        }
+                                    }
+
                                     // 给效果页补一点空白，防止切页时高度变化太剧烈跳动
-                                    Spacer(Modifier.height(72.dp))
+                                    //Spacer(Modifier.height(if (isGlassEffect) 24.dp else 72.dp))
                                 }
                             }
                         }
                     } else {
                         // === 视频光栅逻辑（保持原样，只显示灵敏度） ===
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("边缘死区", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                            if (enableLiquidGlass && sheetBackdrop != null) {
+                                LiquidToggle(
+                                    selected = { deadZoneEnabled },
+                                    onSelect = {
+                                        deadZoneEnabled = it
+                                        onDeadZoneEnabledChanged(currentEditorGroup, it)
+                                    },
+                                    backdrop = sheetBackdrop,
+                                    isLightTheme = isLightTheme,
+                                )
+                            } else {
+                                androidx.compose.material.Switch(
+                                    checked = deadZoneEnabled,
+                                    onCheckedChange = {
+                                        deadZoneEnabled = it
+                                        onDeadZoneEnabledChanged(currentEditorGroup, it)
+                                    }
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(16.dp))
                         val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
                         Row(
@@ -1978,6 +2236,9 @@ private fun RasterDetailScreen(
                             )
                             BasicText("低", style = TextStyle(contentColor.copy(0.6f), 12.sp))
                         }
+
+                        Spacer(Modifier.height(16.dp))
+
                     }
 
                     // ── 底部通用按钮 ──

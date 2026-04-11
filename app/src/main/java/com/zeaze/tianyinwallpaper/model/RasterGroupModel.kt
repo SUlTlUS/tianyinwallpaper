@@ -20,18 +20,24 @@ data class RasterGroupModel(
     
     // ── 效果类型 ──
     var effectType: Int = EFFECT_STANDARD,   // 扫描线效果类型
-    
-    // ── 光栅透镜效果参数 ──
-    var lenticularPitch: Float = 0.03f,      // 光栅条纹间距 (0.01 ~ 0.1)
-    var lenticularAngle: Float = 0f          // 光栅倾斜角度 (弧度)
+
+    // ── 玻璃效果参数 ──
+    var stripedWavelength: Float = 32f,      // 条纹波长 (dp, 8 ~ 80)
+    var stripedAmplitude: Float = 16f,       // 条纹振幅 (dp, 2 ~ 40)
+    var narrowWavelength: Float = 12f,       // 窄波波长 (dp, 仅棱镜模式, 4 ~ 40)
+    var narrowAmplitude: Float = 6f,         // 窄波振幅 (dp, 仅棱镜模式, 1 ~ 20)
+    var glassAnimEnabled: Boolean = true,    // 玻璃动画开关（扫描线移动时条纹滚动）
+    var deadZoneEnabled: Boolean = true      // 死区开关（关闭后倾斜始终响应，无淡出效果）
 ) {
     companion object {
         const val TYPE_STATIC = 0
         const val TYPE_DYNAMIC = 1
         
         // 效果类型常量
-        const val EFFECT_STANDARD = 0     // 标准扫描线
-        const val EFFECT_LENTICULAR = 2   // 光栅透镜
+        const val EFFECT_STANDARD = 0       // 标准扫描线
+        const val EFFECT_CORRUGATED_GLASS = 3  // 波纹玻璃
+        const val EFFECT_REEDED_GLASS = 4   // 长虹玻璃
+        const val EFFECT_PRISM_GLASS = 5    // 棱镜玻璃
     }
 }
 

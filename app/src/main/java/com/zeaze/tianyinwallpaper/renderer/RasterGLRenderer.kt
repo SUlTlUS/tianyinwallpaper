@@ -51,10 +51,7 @@ class RasterGLRenderer {
             }
         }
     
-    // 光栅透镜效果参数（已移除效果，保留接口兼容）
-    var lenticularPitch: Float = 0.03f
-    var lenticularAngle: Float = 0f
-    
+
     // ── 传感器处理参数 ──
     // 灵敏度系数 (0.5 ~ 9.0)，值越小越灵敏
     var sensitivity: Float = 1.5f
@@ -91,11 +88,15 @@ class RasterGLRenderer {
     // 输出状态
     var tiltNormalized: Float = 0f
         private set
-    var tiltDirection: Int = 0
+    @Volatile var tiltDirection: Int = 0
         private set
     
     // 传感器回调
     var onTiltChanged: ((tilt: Float, direction: Int) -> Unit)? = null
+
+    // 扫描线位置（供 Compose 层读取）
+    fun getScanProgress(): Float = scanProgress
+    fun getScanDirection(): Int = scanDirection
 
     // ── 状态 ──
     @Volatile private var imageCount: Int = 0
@@ -106,6 +107,20 @@ class RasterGLRenderer {
     @Volatile private var scanProgress: Float = 0f
     @Volatile private var scanDirection: Int = 0
     @Volatile private var effectTypeDirty: Boolean = false
+
+    // 扫描线淡出：当过渡消失时渐变淡出而不是突然消失
+    @Volatile private var scanFadeAlpha: Float = 0f
+    // 保留上一次有效的过渡状态，用于淡出渲染
+    @Volatile private var lastScanFromIndex: Int = -1
+    @Volatile private var lastScanToIndex: Int = -1
+    @Volatile private var lastScanProgress: Float = 0f
+    @Volatile private var lastScanDirection: Int = 0
+
+    // 淡入/淡出渲染使用的过渡参数（由 updateScanFadeAlpha 实时计算）
+    @Volatile private var fadeFromIndex: Int = -1
+    @Volatile private var fadeToIndex: Int = -1
+    @Volatile private var fadeProgress: Float = 0f
+    @Volatile private var fadeDirection: Int = 0
 
     // ── Bitmap 数据 ──
     private val bitmaps = mutableListOf<Bitmap>()
@@ -129,8 +144,12 @@ class RasterGLRenderer {
             val transitionBand: Float,
             val edgeSoftness: Float,
             val effectType: ScanlineEffectType,
-            val lenticularPitch: Float,
-            val lenticularAngle: Float
+            val stripedWavelength: Float = 32f,
+            val stripedAmplitude: Float = 16f,
+            val narrowWavelength: Float = 12f,
+            val narrowAmplitude: Float = 6f,
+            val glassAnimEnabled: Boolean = true,
+            val deadZoneEnabled: Boolean = true
         ) : RenderMessage()
         data class ExecuteTask(val task: () -> Unit) : RenderMessage()
         object Render : RenderMessage()
@@ -221,8 +240,10 @@ class RasterGLRenderer {
             transitionBand = group.transitionBand,
             edgeSoftness = group.edgeSoftness,
             effectType = ScanlineEffectType.fromId(group.effectType),
-            lenticularPitch = group.lenticularPitch,
-            lenticularAngle = group.lenticularAngle
+            stripedWavelength = group.stripedWavelength,
+            stripedAmplitude = group.stripedAmplitude,
+            narrowWavelength = group.narrowWavelength,
+            narrowAmplitude = group.narrowAmplitude
         )
         
         // 更新传感器灵敏度
@@ -248,8 +269,12 @@ class RasterGLRenderer {
             transitionBand = group.transitionBand,
             edgeSoftness = group.edgeSoftness,
             effectType = ScanlineEffectType.fromId(group.effectType),
-            lenticularPitch = group.lenticularPitch,
-            lenticularAngle = group.lenticularAngle
+            stripedWavelength = group.stripedWavelength,
+            stripedAmplitude = group.stripedAmplitude,
+            narrowWavelength = group.narrowWavelength,
+            narrowAmplitude = group.narrowAmplitude,
+            glassAnimEnabled = group.glassAnimEnabled,
+            deadZoneEnabled = group.deadZoneEnabled
         )
         
         // 更新传感器灵敏度
@@ -323,9 +348,28 @@ class RasterGLRenderer {
             }
             scanDirection = if (direction >= 0) 1 else -1
             scanProgress = mappedProgress
+            // 保存有效过渡状态（供淡出使用）
+            lastScanFromIndex = fromIdx
+            lastScanToIndex = toIdx
+            lastScanProgress = mappedProgress
+            lastScanDirection = scanDirection
         }
         requestRender()
     }
+
+    // ── 玻璃效果参数 ──
+    var stripedWavelength: Float = 32f
+    var stripedAmplitude: Float = 16f
+    var narrowWavelength: Float = 12f
+    var narrowAmplitude: Float = 6f
+
+    var glassAnimEnabled: Boolean = true
+
+    /** 死区开关（关闭后倾斜始终响应，无淡出效果） */
+    var deadZoneEnabled: Boolean = true
+
+    /** 禁用透明遮罩（1.0=全屏玻璃，0.0=仅扫描线附近），用于调试测试 */
+    var glassFullWidth: Float = 0f
 
     /**
      * 更新所有渲染参数
@@ -334,18 +378,29 @@ class RasterGLRenderer {
         transitionBand: Float = this.transitionBand,
         edgeSoftness: Float = this.edgeSoftness,
         effectType: ScanlineEffectType = this.effectType,
-        lenticularPitch: Float = this.lenticularPitch,
-        lenticularAngle: Float = this.lenticularAngle
+        stripedWavelength: Float = this.stripedWavelength,
+        stripedAmplitude: Float = this.stripedAmplitude,
+        narrowWavelength: Float = this.narrowWavelength,
+        narrowAmplitude: Float = this.narrowAmplitude,
+        glassAnimEnabled: Boolean = this.glassAnimEnabled,
+        deadZoneEnabled: Boolean = this.deadZoneEnabled
     ) {
         this.transitionBand = transitionBand
         this.edgeSoftness = edgeSoftness
         this.effectType = effectType
-        this.lenticularPitch = lenticularPitch
-        this.lenticularAngle = lenticularAngle
+        this.stripedWavelength = stripedWavelength
+        this.stripedAmplitude = stripedAmplitude
+        this.narrowWavelength = narrowWavelength
+        this.narrowAmplitude = narrowAmplitude
+        this.glassAnimEnabled = glassAnimEnabled
+        this.deadZoneEnabled = deadZoneEnabled
         
         messageQueue.offer(RenderMessage.UpdateParams(
             transitionBand, edgeSoftness, effectType,
-            lenticularPitch, lenticularAngle
+            stripedWavelength, stripedAmplitude,
+            narrowWavelength, narrowAmplitude,
+            glassAnimEnabled,
+            deadZoneEnabled
         ))
         requestRender()
     }
@@ -364,10 +419,11 @@ class RasterGLRenderer {
      */
     private fun recalculateTiltFromCurrentAngle() {
         // 死区处理
-        val angleWithDeadZone = if (abs(smoothAngle) < deadZoneAngle) {
+        val effectiveDeadZone = if (deadZoneEnabled) deadZoneAngle else 0f
+        val angleWithDeadZone = if (abs(smoothAngle) < effectiveDeadZone) {
             0f
         } else {
-            smoothAngle - deadZoneAngle * sign(smoothAngle)
+            smoothAngle - effectiveDeadZone * sign(smoothAngle)
         }
 
         // 计算归一化倾斜值（与 onSensorEvent 保持一致）
@@ -442,11 +498,12 @@ class RasterGLRenderer {
         smoothAngle = adaptiveSmooth(filteredAngle)
 
         // 死区处理
-        val angleWithDeadZone = if (abs(smoothAngle) < deadZoneAngle) {
+        val effectiveDeadZone = if (deadZoneEnabled) deadZoneAngle else 0f
+        val angleWithDeadZone = if (abs(smoothAngle) < effectiveDeadZone) {
             0f
         } else {
             // 死区外保持原值，但减少死区边缘的跳变
-            smoothAngle - deadZoneAngle * sign(smoothAngle)
+            smoothAngle - effectiveDeadZone * sign(smoothAngle)
         }
 
         // 计算归一化倾斜值
@@ -630,6 +687,9 @@ class RasterGLRenderer {
         // 着色器程序
         private var singleProg: Int = 0
         private var standardProg: Int = 0
+        private var corrugatedGlassProg: Int = 0
+        private var reededGlassProg: Int = 0
+        private var prismGlassProg: Int = 0
         
         // 当前活动的效果类型
         private var activeEffectType: ScanlineEffectType = ScanlineEffectType.STANDARD
@@ -637,6 +697,17 @@ class RasterGLRenderer {
         // 参数缓存
         private var paramTransitionBand: Float = 0.55f
         private var paramEdgeSoftness: Float = 0.25f
+        private var paramStripedWavelength: Float = 32f
+        private var paramStripedAmplitude: Float = 16f
+        private var paramNarrowWavelength: Float = 12f
+        private var paramNarrowAmplitude: Float = 6f
+        private var paramGlassAnimEnabled: Boolean = true
+        private var paramDeadZoneEnabled: Boolean = true
+
+        // 玻璃动画相位追踪
+        private var glassPhase: Float = 0f
+        private var lastProgress: Float = 0f
+        private var lastFrameTimeNanos: Long = 0L
 
         private var vBuf: FloatBuffer
         private var tBuf: FloatBuffer
@@ -697,12 +768,27 @@ class RasterGLRenderer {
                             scanFromIndex = -1
                             scanToIndex = -1
                             scanProgress = 0f
+                            scanFadeAlpha = 0f
+                            lastScanFromIndex = -1
+                            lastScanToIndex = -1
+                            lastScanProgress = 0f
+                            lastScanDirection = 0
+                            fadeFromIndex = -1
+                            fadeToIndex = -1
+                            fadeProgress = 0f
+                            fadeDirection = 0
                         }
                         is RenderMessage.UpdateTilt -> { }
                         is RenderMessage.UpdateParams -> {
                             paramTransitionBand = msg.transitionBand
                             paramEdgeSoftness = msg.edgeSoftness
                             activeEffectType = msg.effectType
+                            paramStripedWavelength = msg.stripedWavelength
+                            paramStripedAmplitude = msg.stripedAmplitude
+                            paramNarrowWavelength = msg.narrowWavelength
+                            paramNarrowAmplitude = msg.narrowAmplitude
+                            paramGlassAnimEnabled = msg.glassAnimEnabled
+                            paramDeadZoneEnabled = msg.deadZoneEnabled
                         }
                         is RenderMessage.ExecuteTask -> {
                             if (display != EGL14.EGL_NO_DISPLAY && eglSurface != EGL14.EGL_NO_SURFACE && isSurfaceValid.get()) {
@@ -761,13 +847,19 @@ class RasterGLRenderer {
 
         private fun initGL() {
             // 单图着色器
-            val vs = "attribute vec4 aPos; attribute vec2 aTex; varying vec2 vTex; uniform mat4 uMVP; uniform mat4 uST; void main(){ gl_Position = uMVP * aPos; vTex = (uST * vec4(aTex,0,1)).xy; }"
-            val fsSingle = "precision mediump float; varying vec2 vTex; uniform sampler2D sTex; void main(){ gl_FragColor = texture2D(sTex, vTex); }"
-            singleProg = createProg(vs, fsSingle)
+            singleProg = createProg(RasterShaders.SINGLE_VERTEX, RasterShaders.SINGLE_FRAGMENT)
 
             // 标准扫描线着色器
-            val transVs = createTransitionVertexShader()
-            standardProg = createProg(transVs, createStandardFragmentShader())
+            standardProg = createProg(RasterShaders.TRANSITION_VERTEX, RasterShaders.STANDARD_FRAGMENT)
+
+            // 波纹玻璃着色器
+            corrugatedGlassProg = createProg(RasterShaders.TRANSITION_VERTEX, RasterShaders.CORRUGATED_GLASS_FRAGMENT)
+
+            // 长虹玻璃着色器
+            reededGlassProg = createProg(RasterShaders.TRANSITION_VERTEX, RasterShaders.REEDED_GLASS_FRAGMENT)
+
+            // 棱镜玻璃着色器
+            prismGlassProg = createProg(RasterShaders.TRANSITION_VERTEX, RasterShaders.PRISM_GLASS_FRAGMENT)
 
             // 创建纹理
             val tex = IntArray(3)
@@ -785,57 +877,16 @@ class RasterGLRenderer {
             }
         }
 
-        // ── 着色器代码 ──
-
-        private fun createTransitionVertexShader(): String = """
-            attribute vec4 aPos;
-            attribute vec2 aTex;
-            varying vec2 vTexA;
-            varying vec2 vTexB;
-            uniform mat4 uMVP;
-            uniform mat4 uSTA;
-            uniform mat4 uSTB;
-            void main() {
-                gl_Position = uMVP * aPos;
-                vTexA = (uSTA * vec4(aTex, 0.0, 1.0)).xy;
-                vTexB = (uSTB * vec4(aTex, 0.0, 1.0)).xy;
-            }
-        """.trimIndent()
-
-        private fun createStandardFragmentShader(): String = """
-            precision mediump float;
-            varying vec2 vTexA;
-            varying vec2 vTexB;
-            uniform sampler2D sTexA;
-            uniform sampler2D sTexB;
-            uniform float uProgress;
-            uniform float uDirection;
-            uniform float uEdgeSoftness;
-            uniform float uScreenWidth;
-
-            void main() {
-                vec4 colorA = texture2D(sTexA, vTexA);
-                vec4 colorB = texture2D(sTexB, vTexB);
-
-                float coord = gl_FragCoord.x / uScreenWidth;
-                float blend;
-
-                if (uDirection > 0.0) {
-                    float edge = 1.0 - uProgress;
-                    blend = smoothstep(edge - uEdgeSoftness, edge + uEdgeSoftness, coord);
-                    gl_FragColor = mix(colorA, colorB, blend);
-                } else {
-                    float edge = uProgress;
-                    blend = smoothstep(edge - uEdgeSoftness, edge + uEdgeSoftness, coord);
-                    gl_FragColor = mix(colorB, colorA, blend);
-                }
-            }
-        """.trimIndent()
-
         private fun draw() {
             if (!isSurfaceValid.get()) return
             if (display == EGL14.EGL_NO_DISPLAY || eglSurface == EGL14.EGL_NO_SURFACE) return
             if (imageCount == 0) return
+
+            // 更新玻璃动画相位
+            updateGlassPhase()
+
+            // 更新扫描线淡出 alpha
+            updateScanFadeAlpha()
 
             if (!EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) return
 
@@ -849,8 +900,13 @@ class RasterGLRenderer {
                 // 使用 >= 0.001f 避免浮点精度问题
                 val hasActiveTransition = scanFromIndex >= 0 && scanToIndex >= 0 && scanProgress >= 0.001f
                 if (hasActiveTransition) {
-                    // 有活动的过渡状态，显示过渡效果
+                        // 有活动的过渡状态，显示过渡效果
                     drawTransitionAt(scanFromIndex, scanToIndex, scanProgress, scanDirection)
+                } else if (scanFadeAlpha > 0.01f && fadeFromIndex >= 0 && fadeToIndex >= 0) {
+                    // 过渡消失但正在淡出：先画底层单图，再叠加淡出的过渡效果
+                    val targetIdx = displayedIntIndex.coerceIn(0, maxOf(0, imageCount - 1))
+                    drawSingleAt(targetIdx)
+                    drawFadingTransitionAt(fadeFromIndex, fadeToIndex, fadeProgress, fadeDirection, scanFadeAlpha)
                 } else {
                     // ✅ 静止状态：显示单张图片，限制索引范围
                     val targetIdx = displayedIntIndex.coerceIn(0, maxOf(0, imageCount - 1))
@@ -864,6 +920,116 @@ class RasterGLRenderer {
                 EGL14.eglSwapBuffers(display, eglSurface)
             }
         }
+
+        /**
+         * 根据扫描线移动速度和方向更新玻璃动画相位
+         * 扫描线移动时条纹滚动，静止时相位不变
+         */
+        private fun updateGlassPhase() {
+            val isGlassEffect = activeEffectType == ScanlineEffectType.CORRUGATED_GLASS ||
+                    activeEffectType == ScanlineEffectType.REEDED_GLASS ||
+                    activeEffectType == ScanlineEffectType.PRISM_GLASS
+            if (!isGlassEffect) return
+
+            // 动画开关关闭时不更新相位
+            if (!paramGlassAnimEnabled) return
+
+            val now = System.nanoTime()
+            if (lastFrameTimeNanos == 0L) {
+                lastFrameTimeNanos = now
+                lastProgress = scanProgress
+                return
+            }
+
+            val deltaNanos = now - lastFrameTimeNanos
+            if (deltaNanos <= 0) return
+            lastFrameTimeNanos = now
+
+            // 计算扫描线进度变化量
+            val progressDelta = scanProgress - lastProgress
+            lastProgress = scanProgress
+
+            // 只在有活动过渡时更新相位
+            val hasActiveTransition = scanFromIndex >= 0 && scanToIndex >= 0 && scanProgress >= 0.001f
+            if (!hasActiveTransition) return
+
+            // progressDelta 的符号和方向决定条纹滚动方向
+            // 方向 + 速度映射到相位变化：速度越快条纹滚动越快
+            val speed = abs(progressDelta)
+            // 将速度映射为相位步进，乘以缩放因子让动画更明显
+            val phaseScale = 15.0f * TWO_PI
+            val phaseStep = progressDelta * phaseScale
+
+            glassPhase = (glassPhase + phaseStep) % TWO_PI
+            if (glassPhase < 0) glassPhase += TWO_PI
+        }
+
+        /**
+         * 更新扫描线淡出 alpha 及淡出所需的过渡参数
+         * 有活动过渡时立即设为1，无过渡时跟随倾斜角度淡出
+         * 角度驱动：fraction 距离 band 边缘越远，alpha 越低
+         * 死区关闭时跳过淡出，直接消失
+         *
+         * 关键：当没有活跃过渡时，根据 currentFloatIndex 实时计算
+         * fadeFrom/fadeTo/fadeProgress/fadeDirection，确保淡入淡出
+         * 总是使用当前角度对应的正确图片对和方向。
+         */
+        private fun updateScanFadeAlpha() {
+            val hasActiveTransition = scanFromIndex >= 0 && scanToIndex >= 0 && scanProgress >= 0.001f
+            if (hasActiveTransition) {
+                scanFadeAlpha = 1f
+                fadeFromIndex = scanFromIndex
+                fadeToIndex = scanToIndex
+                fadeProgress = scanProgress
+                fadeDirection = scanDirection
+            } else {
+                if (!paramDeadZoneEnabled) {
+                    scanFadeAlpha = 0f
+                    return
+                }
+                // 根据当前 currentFloatIndex 计算 fraction 与 band 边缘的距离
+                val maxIdx = (imageCount - 1).toFloat()
+                if (maxIdx <= 0f) {
+                    scanFadeAlpha = 0f
+                    return
+                }
+                val curIdx = currentFloatIndex.coerceIn(0f, maxIdx * 1.02f)
+                val intIdx = if (curIdx >= imageCount - 1)
+                    (imageCount - 2).coerceAtLeast(0)
+                else
+                    curIdx.toInt().coerceIn(0, (imageCount - 2).coerceAtLeast(0))
+                val fraction = curIdx - intIdx
+                val bandStart = (1f - paramTransitionBand) / 2f
+                val bandEnd = (1f + paramTransitionBand) / 2f
+
+                // 计算 fraction 与 band 边缘的距离
+                val distFromBand = when {
+                    fraction <= bandStart -> bandStart - fraction
+                    fraction >= bandEnd -> fraction - bandEnd
+                    else -> 0f  // 在 band 内（不应到达，防御性处理）
+                }
+
+                // 淡出范围：距离 band 边缘 0.25 时完全透明
+                val fadeRange = 0.25f
+                scanFadeAlpha = (1f - distFromBand / fadeRange).coerceIn(0f, 1f)
+
+                // 根据当前角度实时计算淡入/淡出使用的过渡参数
+                // 确保 from/to/progress/direction 与当前倾斜方向一致
+                if (scanFadeAlpha > 0.01f) {
+                    fadeFromIndex = intIdx
+                    fadeToIndex = intIdx + 1
+                    // 根据距 band 边缘的距离映射 progress
+                    if (fraction <= bandStart) {
+                        fadeProgress = 0f
+                    } else {
+                        fadeProgress = ((fraction - bandStart) / paramTransitionBand).coerceIn(0f, 1f)
+                    }
+                    fadeDirection = tiltDirection
+                }
+            }
+        }
+
+        private val TWO_PI = (Math.PI * 2.0).toFloat()
         
         /**
          * 在指定索引和进度绘制过渡效果
@@ -909,8 +1075,12 @@ class RasterGLRenderer {
             }
             
             // 选择当前效果类型的着色器程序
-            // 光栅透镜效果已移除，LENTICULAR 类型回退到标准效果
-            val prog = standardProg
+            val prog = when (activeEffectType) {
+                ScanlineEffectType.CORRUGATED_GLASS -> corrugatedGlassProg
+                ScanlineEffectType.REEDED_GLASS -> reededGlassProg
+                ScanlineEffectType.PRISM_GLASS -> prismGlassProg
+                else -> standardProg
+            }
             
             GLES20.glUseProgram(prog)
 
@@ -987,8 +1157,173 @@ class RasterGLRenderer {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uDirection"), direction.toFloat())
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uEdgeSoftness"), paramEdgeSoftness)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uScreenWidth"), sW.toFloat())
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uFadeAlpha"), 1.0f)
+
+            // 玻璃效果专属参数
+            if (activeEffectType == ScanlineEffectType.CORRUGATED_GLASS ||
+                activeEffectType == ScanlineEffectType.REEDED_GLASS ||
+                activeEffectType == ScanlineEffectType.PRISM_GLASS) {
+                val wavelengthNorm = paramStripedWavelength / sW.toFloat()
+                val amplitudeNorm = paramStripedAmplitude / sW.toFloat()
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uScreenHeight"), sH.toFloat())
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uAmplitude"), amplitudeNorm)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uWavelength"), wavelengthNorm.coerceAtLeast(0.001f))
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uHighlightStrength"), 0.0f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uShadowStrength"), 0.0f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uColorSaturation"), 1.2f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uColorContrast"), 1.1f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uGlassFullWidth"), glassFullWidth)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uPhase"), glassPhase)
+
+                // 棱镜模式额外参数
+                if (activeEffectType == ScanlineEffectType.PRISM_GLASS) {
+                    val narrowWavelengthNorm = paramNarrowWavelength / sW.toFloat()
+                    val narrowAmplitudeNorm = paramNarrowAmplitude / sW.toFloat()
+                    GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uNarrowAmplitude"), narrowAmplitudeNorm)
+                    GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uNarrowWavelength"), narrowWavelengthNorm.coerceAtLeast(0.001f))
+                }
+            }
 
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+            // 关闭 blending
+            GLES20.glDisable(GLES20.GL_BLEND)
+        }
+
+        /**
+         * 绘制淡出中的过渡效果（叠加在单图之上）
+         * RGB 正常 alpha 混合实现淡出，但 alpha 通道保持 1.0 防止透出底色
+         */
+        private fun drawFadingTransitionAt(fromIdx: Int, toIdx: Int, progress: Float, direction: Int, fadeAlpha: Float) {
+            val bmpA: Bitmap?
+            val bmpB: Bitmap?
+            synchronized(bitmapsLock) {
+                bmpA = bitmaps.getOrNull(fromIdx)
+                bmpB = bitmaps.getOrNull(toIdx)
+            }
+
+            if (bmpA == null || bmpA.isRecycled || bmpB == null || bmpB.isRecycled) return
+
+            // 确保纹理已上传
+            uploadToTexA(bmpA)
+            uploadToTexB(bmpB)
+
+            // 开启 blending：RGB 正常混合淡出，alpha 通道始终保持 1.0（不透出底色）
+            // Alpha 方程：resultA = srcA * 1 + dstA * (1 - srcA) = fadeAlpha + 1.0 * (1 - fadeAlpha) = 1.0
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFuncSeparate(
+                GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA,  // RGB: 标准 alpha 混合（淡出效果）
+                GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA          // Alpha: 始终合并为 1.0
+            )
+
+            // 选择着色器
+            val prog = when (activeEffectType) {
+                ScanlineEffectType.CORRUGATED_GLASS -> corrugatedGlassProg
+                ScanlineEffectType.REEDED_GLASS -> reededGlassProg
+                ScanlineEffectType.PRISM_GLASS -> prismGlassProg
+                else -> standardProg
+            }
+            GLES20.glUseProgram(prog)
+
+            val sAsp = if (sH > 0) sW.toFloat() / sH else 9f / 16f
+
+            // texA 纹理坐标变换
+            val stMatA = FloatArray(16)
+            val aW = bmpA?.width ?: 1
+            val aH = bmpA?.height ?: 1
+            val aAsp = aW.toFloat() / aH
+            Matrix.setIdentityM(stMatA, 0)
+            Matrix.translateM(stMatA, 0, 0f, 1f, 0f)
+            Matrix.scaleM(stMatA, 0, 1f, -1f, 1f)
+            if (aAsp > sAsp) {
+                val scale = aAsp / sAsp
+                Matrix.translateM(stMatA, 0, 0.5f, 0.5f, 0f)
+                Matrix.scaleM(stMatA, 0, 1f / scale, 1f, 1f)
+                Matrix.translateM(stMatA, 0, -0.5f, -0.5f, 0f)
+            } else {
+                val scale = sAsp / aAsp
+                Matrix.translateM(stMatA, 0, 0.5f, 0.5f, 0f)
+                Matrix.scaleM(stMatA, 0, 1f, 1f / scale, 1f)
+                Matrix.translateM(stMatA, 0, -0.5f, -0.5f, 0f)
+            }
+
+            // texB 纹理坐标变换
+            val stMatB = FloatArray(16)
+            val bW = bmpB?.width ?: 1
+            val bH = bmpB?.height ?: 1
+            val bAsp = bW.toFloat() / bH
+            Matrix.setIdentityM(stMatB, 0)
+            Matrix.translateM(stMatB, 0, 0f, 1f, 0f)
+            Matrix.scaleM(stMatB, 0, 1f, -1f, 1f)
+            if (bAsp > sAsp) {
+                val scale = bAsp / sAsp
+                Matrix.translateM(stMatB, 0, 0.5f, 0.5f, 0f)
+                Matrix.scaleM(stMatB, 0, 1f / scale, 1f, 1f)
+                Matrix.translateM(stMatB, 0, -0.5f, -0.5f, 0f)
+            } else {
+                val scale = sAsp / bAsp
+                Matrix.translateM(stMatB, 0, 0.5f, 0.5f, 0f)
+                Matrix.scaleM(stMatB, 0, 1f, 1f / scale, 1f)
+                Matrix.translateM(stMatB, 0, -0.5f, -0.5f, 0f)
+            }
+
+            val mvp = FloatArray(16)
+            Matrix.setIdentityM(mvp, 0)
+
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uMVP"), 1, false, mvp, 0)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uSTA"), 1, false, stMatA, 0)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(prog, "uSTB"), 1, false, stMatB, 0)
+
+            val aPos = GLES20.glGetAttribLocation(prog, "aPos")
+            val aTex = GLES20.glGetAttribLocation(prog, "aTex")
+            GLES20.glEnableVertexAttribArray(aPos)
+            GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, vBuf)
+            GLES20.glEnableVertexAttribArray(aTex)
+            GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tBuf)
+
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texAId)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "sTexA"), 0)
+
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texBId)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "sTexB"), 1)
+
+            // 通用参数 + fade alpha
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uProgress"), progress)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uDirection"), direction.toFloat())
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uEdgeSoftness"), paramEdgeSoftness)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uScreenWidth"), sW.toFloat())
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uFadeAlpha"), fadeAlpha)
+
+            // 玻璃效果专属参数
+            if (activeEffectType == ScanlineEffectType.CORRUGATED_GLASS ||
+                activeEffectType == ScanlineEffectType.REEDED_GLASS ||
+                activeEffectType == ScanlineEffectType.PRISM_GLASS) {
+                val wavelengthNorm = paramStripedWavelength / sW.toFloat()
+                val amplitudeNorm = paramStripedAmplitude / sW.toFloat()
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uScreenHeight"), sH.toFloat())
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uAmplitude"), amplitudeNorm)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uWavelength"), wavelengthNorm.coerceAtLeast(0.001f))
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uHighlightStrength"), 0.0f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uShadowStrength"), 0.0f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uColorSaturation"), 1.2f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uColorContrast"), 1.1f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uGlassFullWidth"), glassFullWidth)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uPhase"), glassPhase)
+
+                if (activeEffectType == ScanlineEffectType.PRISM_GLASS) {
+                    val narrowWavelengthNorm = paramNarrowWavelength / sW.toFloat()
+                    val narrowAmplitudeNorm = paramNarrowAmplitude / sW.toFloat()
+                    GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uNarrowAmplitude"), narrowAmplitudeNorm)
+                    GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uNarrowWavelength"), narrowWavelengthNorm.coerceAtLeast(0.001f))
+                }
+            }
+
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+            // 关闭 blending
+            GLES20.glDisable(GLES20.GL_BLEND)
         }
 
         private fun drawSingle() {
@@ -1042,6 +1377,9 @@ class RasterGLRenderer {
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, iTexId)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+            // 关闭 blending
+            GLES20.glDisable(GLES20.GL_BLEND)
         }
 
         private fun drawTransition() {

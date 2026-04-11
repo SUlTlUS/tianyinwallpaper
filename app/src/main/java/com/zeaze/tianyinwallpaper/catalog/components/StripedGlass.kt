@@ -357,7 +357,7 @@ half4 main(float2 coord) {
 """
 
 // ============================================================================
-// Shader 2: Corrugated Glass (瓦楞/标准正弦波)
+// Shader 2: Corrugated Glass (波纹/标准正弦波)
 // ============================================================================
 @Language("AGSL")
 private const val CorrugatedRefractionShaderString = ShaderCommon + """
