@@ -39,7 +39,6 @@ jobs:
 
       - name: Generate update_info.json
         run: |
-          mkdir -p update
           APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
           APK_NAME=$(basename "$APK_FILE")
           APK_SIZE=$(stat -c%s "$APK_FILE")
@@ -48,22 +47,24 @@ jobs:
           VERSION_NAME="${{ steps.version.outputs.name }}"
           VERSION_CODE="${{ steps.version.outputs.code }}"
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION_NAME}/${APK_NAME}"
-          COMMIT_MSG=$(git log -1 --pretty=format:"%s%n%n%b")
+          
+          # 读取 changelog.md 中当前版本的更新说明
+          CHANGELOG=$(awk "/^## ${VERSION_NAME}$/{found=1;next} /^## /{found=0} found && NF" update/changelog.md)
           
           # 提取多行变量给后续 Release 使用
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-          echo "commit_msg<<$EOF" >> $GITHUB_ENV
-          echo "$COMMIT_MSG" >> $GITHUB_ENV
+          echo "release_body<<$EOF" >> $GITHUB_ENV
+          echo "$CHANGELOG" >> $GITHUB_ENV
           echo "$EOF" >> $GITHUB_ENV
           
-          # 使用 jq 确保提交信息字符串在 JSON 中安全转义
+          # 使用 jq 确保更新说明字符串在 JSON 中安全转义
           jq -n \
             --arg code "$VERSION_CODE" \
             --arg name "$VERSION_NAME" \
             --arg filename "$APK_NAME" \
             --arg url "$DOWNLOAD_URL" \
             --arg time "$CURRENT_TIME" \
-            --arg des "$COMMIT_MSG" \
+            --arg des "$CHANGELOG" \
             --arg size "$APK_SIZE" \
             --arg md5 "$APK_MD5" \
             '{
@@ -99,7 +100,7 @@ jobs:
           body: |
             ## 天音壁纸 ${{ steps.version.outputs.tag }}
             
-            ${{ env.commit_msg }}
+            ${{ env.release_body }}
             
             ### 下载
             - 下载下方 APK 文件安装即可
