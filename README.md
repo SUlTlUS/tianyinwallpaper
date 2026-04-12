@@ -78,3 +78,5 @@ app/src/main/java/com/zeaze/tianyinwallpaper/
 ## 许可证
 
 使用Apache协议开源
+
+原作者:十二今天也很可爱 @prpr12
