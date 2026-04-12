@@ -104,9 +104,7 @@ jobs:
             
             ### 下载
             - 下载下方 APK 文件安装即可
-            
-            ### 应用内更新
-            - update_info.json 文件用于应用内更新功能
+
           files: |
             app/build/outputs/apk/release/*.apk
           generate_release_notes: true
