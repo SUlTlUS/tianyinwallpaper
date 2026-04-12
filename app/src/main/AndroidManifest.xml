@@ -21,17 +21,6 @@
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar">
 
-        <meta-data
-            android:name="PGYER_API_KEY"
-            android:value="自己申请蒲公英sdk或者删了蒲公英"></meta-data>
-        <meta-data
-            android:name="PGYER_FRONTJS_KEY"
-            android:value="自己申请蒲公英sdk或者删了蒲公英"></meta-data>
-
-        <meta-data
-            android:name="PGYER_FEATURE_CHECK_UNPDATE"
-            android:value="true"></meta-data>
-
         <activity
             android:name=".MainActivity"
             android:screenOrientation="portrait"

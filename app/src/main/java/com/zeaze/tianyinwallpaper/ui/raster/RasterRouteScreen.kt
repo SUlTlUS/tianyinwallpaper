@@ -22,14 +22,18 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -56,6 +60,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -121,6 +128,9 @@ import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
@@ -159,7 +169,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+
 import androidx.compose.ui.input.pointer.pointerInput
 
 private const val WALLPAPER_TYPE_STATIC = 0
@@ -1285,6 +1297,18 @@ fun RasterRouteScreen(
                         persistGroups()
                     }
                 },
+                onGlassBandWidthChanged = { editorGroup, newBandWidth ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(glassBandWidth = newBandWidth)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
+                    }
+                },
+                onGlassBandWidthChangeFinished = { editorGroup, _ ->
+                    persistGroups()
+                },
                 onDeadZoneEnabledChanged = { editorGroup, enabled ->
                     val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
                     if (idx >= 0) {
@@ -1470,6 +1494,9 @@ private fun RasterDetailScreen(
     onNarrowAmplitudeChangeFinished: (RasterGroupModel, Float) -> Unit,
     // ── 动画开关回调
     onGlassAnimEnabledChanged: (RasterGroupModel, Boolean) -> Unit,
+    // ── 玻璃宽度回调
+    onGlassBandWidthChanged: (RasterGroupModel, Float) -> Unit,
+    onGlassBandWidthChangeFinished: (RasterGroupModel, Float) -> Unit,
     // ── 死区开关回调
     onDeadZoneEnabledChanged: (RasterGroupModel, Boolean) -> Unit,
     groups: List<RasterGroupModel>,
@@ -1540,9 +1567,23 @@ private fun RasterDetailScreen(
         rememberRegionLuminanceState(luminanceSampler, "videoAction")
     } else null
 
-    // 系统返回关闭编辑面板
-    BackHandler(enabled = staticEditorGroupId != null) { onStaticEditorDismiss() }
-    BackHandler(enabled = videoEditorGroupId != null)  { onVideoEditorDismiss() }
+    // BottomSheet 拖拽关闭状态（提前声明，供 BackHandler 使用）
+    val coroutineScope = rememberCoroutineScope()
+    val animatedOffset = remember { Animatable(0f) }
+
+    // 系统返回关闭编辑面板（带下滑动画）
+    BackHandler(enabled = staticEditorGroupId != null) {
+        coroutineScope.launch {
+            animatedOffset.animateTo(2000f, animationSpec = tween(250))
+            onStaticEditorDismiss()
+        }
+    }
+    BackHandler(enabled = videoEditorGroupId != null) {
+        coroutineScope.launch {
+            animatedOffset.animateTo(2000f, animationSpec = tween(250))
+            onVideoEditorDismiss()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // 捕获层
@@ -1714,31 +1755,60 @@ private fun RasterDetailScreen(
 
 
 
-        // 编辑面板
-        AnimatedContent(
-            targetState = editorGroup,
-            contentKey = { it?.id },
-            transitionSpec = {
-                (fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                        scaleIn(
-                            initialScale = 0.8f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessLow
+        // 编辑面板（BottomSheet）
+        val currentEditorGroup = editorGroup
+        val isSheetVisible = currentEditorGroup != null
+
+
+        // BottomSheet 拖拽关闭状态
+        val sheetOffsetY = remember { mutableStateOf(0f) }
+        val dismissThreshold = with(LocalDensity.current) { 200.dp.toPx() }
+
+        // 重置偏移当面板重新显示
+        LaunchedEffect(isSheetVisible) {
+            if (isSheetVisible) {
+                animatedOffset.snapTo(0f)
+                sheetOffsetY.value = 0f
+            }
+        }
+
+        // 点击面板外区域关闭（带下滑动画）
+        if (isSheetVisible) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable {
+                        coroutineScope.launch {
+                            animatedOffset.animateTo(
+                                2000f,
+                                animationSpec = tween(250)
                             )
-                        ))
-                    .togetherWith(
-                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                scaleOut(
-                                    targetScale = 0.8f,
-                                    animationSpec = spring(stiffness = Spring.StiffnessLow)
-                                )
-                    )
-            },
-            contentAlignment = Alignment.BottomCenter,
-            label = "StaticEditOverlay",
-            modifier = Modifier.fillMaxSize()
-        ) { currentEditorGroup ->
+                            if (staticEditorGroupId != null) onStaticEditorDismiss()
+                            else onVideoEditorDismiss()
+                        }
+                    }
+            )
+        }
+
+        // BottomSheet 内容
+        AnimatedVisibility(
+            visible = isSheetVisible,
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            ) + fadeIn(),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            ) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
             if (currentEditorGroup != null) {
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
                 val sheetBackdrop = rememberLayerBackdrop()
@@ -1757,16 +1827,28 @@ private fun RasterDetailScreen(
                 var narrowWavelength by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.narrowWavelength) }
                 var narrowAmplitude by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.narrowAmplitude) }
                 var glassAnimEnabled by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.glassAnimEnabled) }
+                var glassBandWidth by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.glassBandWidth) }
                 var deadZoneEnabled by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.deadZoneEnabled) }
+
+                // ★ 控制 slider/toggle 交互时禁止滚动
+                var isSliderOrToggleInteracting by remember { mutableStateOf(false) }
+                val scrollState = rememberScrollState()
+                val disableScrollConnection = remember(isSliderOrToggleInteracting) {
+                    object : NestedScrollConnection {
+                        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                            return if (isSliderOrToggleInteracting) available else Offset.Zero
+                        }
+                    }
+                }
 
                 Column(
                     Modifier
-                        .padding(horizontal = 24.dp, vertical = 32.dp)
                         .fillMaxWidth()
-                        .wrapContentHeight()
+                        .heightIn(max = 520.dp)
+                        .offset { IntOffset(0, animatedOffset.value.roundToInt()) }
                         .drawBackdrop(
                             backdrop = editBackdrop,
-                            shape = { RoundedRectangle(48f.dp) },
+                            shape = { RoundedRectangle(41f.dp) },
                             effects = {
                                 colorControls(brightness = if (isLightTheme) 0.2f else 0f, saturation = 1.5f)
                                 blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
@@ -1777,15 +1859,87 @@ private fun RasterDetailScreen(
                             onDrawSurface = { drawRect(containerColor) }
                         )
                         .pointerInput(Unit) { detectTapGestures { } }
-                        .padding(16.dp)
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                 ) {
+                    // 拖拽手柄（固定在顶部，不随内容滚动）
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .pointerInput(Unit) {
+                                detectDragGestures(
+                                    onDragEnd = {
+                                        if (animatedOffset.value > dismissThreshold) {
+                                            coroutineScope.launch {
+                                                animatedOffset.animateTo(
+                                                    2000f,
+                                                    animationSpec = tween(200)
+                                                )
+                                                if (staticEditorGroupId != null) onStaticEditorDismiss()
+                                                else onVideoEditorDismiss()
+                                            }
+                                        } else {
+                                            coroutineScope.launch {
+                                                animatedOffset.animateTo(
+                                                    0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                                        stiffness = Spring.StiffnessMedium
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        coroutineScope.launch {
+                                            animatedOffset.animateTo(
+                                                0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                        }
+                                    }
+                                ) { change, dragAmount ->
+                                    change.consume()
+                                    val newOffset = (animatedOffset.value + dragAmount.y).coerceAtLeast(0f)
+                                    coroutineScope.launch {
+                                        animatedOffset.snapTo(newOffset)
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(vertical = 4.dp)
+                                .width(40.dp)
+                                .height(4.dp)
+                                .background(contentColor.copy(alpha = 0.3f), RoundedCornerShape(2.dp))
+
+                        )
+
+                    }
                     Spacer(Modifier.height(4.dp))
 
                     BasicText(
-                        if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) "支持添加多张图片，长按图片可拖拽排序" else "调整灵敏度或替换视频文件",
-                        style = TextStyle(contentColor.copy(alpha = 0.7f), 14.sp)
+                        if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
+                        style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold),
+                        modifier = Modifier.fillMaxWidth().wrapContentSize(Alignment.Center)
                     )
                     Spacer(Modifier.height(12.dp))
+
+                    // 可滚动内容区域
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .nestedScroll(disableScrollConnection)
+                            .padding(horizontal = 8.dp)
+                            .verticalScroll(scrollState),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
 
                     // === 图集缩略图区域（保持不变） ===
                     if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) {
@@ -1862,6 +2016,14 @@ private fun RasterDetailScreen(
                                     BasicText("+", style = TextStyle(contentColor, 24.sp))
                                 }
                             }
+                            item {
+                                Box(
+                                    modifier = Modifier.height(150.dp).aspectRatio(screenAspectRatio).clip(RoundedCornerShape(12.dp)).background(accentColor.copy(alpha = 0.15f)).clickable { onStaticEditorReplaceAll(currentEditorGroup) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    BasicText("替换全部", style = TextStyle(accentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                }
+                            }
                         }
 
                         Spacer(Modifier.height(16.dp))
@@ -1906,11 +2068,23 @@ private fun RasterDetailScreen(
                             targetState = staticEditorTab,
                             transitionSpec = {
                                 if (targetState > initialState) {
-                                    slideInHorizontally { width -> width } + fadeIn() togetherWith
-                                            slideOutHorizontally { width -> -width } + fadeOut()
+                                    slideInHorizontally(
+                                        animationSpec = tween(250),
+                                        initialOffsetX = { width -> width }
+                                    ) + fadeIn(animationSpec = tween(250)) togetherWith
+                                            slideOutHorizontally(
+                                                animationSpec = tween(250),
+                                                targetOffsetX = { width -> -width }
+                                            ) + fadeOut(animationSpec = tween(250))
                                 } else {
-                                    slideInHorizontally { width -> -width } + fadeIn() togetherWith
-                                            slideOutHorizontally { width -> width } + fadeOut()
+                                    slideInHorizontally(
+                                        animationSpec = tween(250),
+                                        initialOffsetX = { width -> -width }
+                                    ) + fadeIn(animationSpec = tween(250)) togetherWith
+                                            slideOutHorizontally(
+                                                animationSpec = tween(250),
+                                                targetOffsetX = { width -> width }
+                                            ) + fadeOut(animationSpec = tween(250))
                                 }
                             },
                             label = "StaticTabContent"
@@ -1920,27 +2094,30 @@ private fun RasterDetailScreen(
                                     // ────────── 调整标签页 (Tab 0) ──────────
                                     val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        BasicText("边缘死区", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                        BasicText("边缘死区", style = TextStyle(contentColor, 15.sp))
                                         if (enableLiquidGlass && sheetBackdrop != null) {
                                             LiquidToggle(
-                                                selected = { deadZoneEnabled },
+                                                selected = { !deadZoneEnabled },
                                                 onSelect = {
-                                                    deadZoneEnabled = it
-                                                    onDeadZoneEnabledChanged(currentEditorGroup, it)
+                                                    deadZoneEnabled = !it
+                                                    onDeadZoneEnabledChanged(currentEditorGroup, !it)
                                                 },
+                                                onDragStarted = { isSliderOrToggleInteracting = true },
+                                                onDragFinished = { isSliderOrToggleInteracting = false },
                                                 backdrop = sheetBackdrop,
                                                 isLightTheme = isLightTheme,
                                             )
                                         } else {
                                             androidx.compose.material.Switch(
-                                                checked = deadZoneEnabled,
+                                                checked = !deadZoneEnabled,
                                                 onCheckedChange = {
-                                                    deadZoneEnabled = it
-                                                    onDeadZoneEnabledChanged(currentEditorGroup, it)
+                                                    deadZoneEnabled = !it
+                                                    onDeadZoneEnabledChanged(currentEditorGroup, !it)
                                                 }
                                             )
                                         }
@@ -1951,7 +2128,7 @@ private fun RasterDetailScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        BasicText("灵敏度", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                        BasicText("灵敏度", style = TextStyle(contentColor, 14.sp))
                                         BasicText("倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘", style = TextStyle(contentColor.copy(0.5f), 12.sp))
                                     }
                                     Spacer(Modifier.height(4.dp))
@@ -1963,8 +2140,8 @@ private fun RasterDetailScreen(
                                         BasicText("高", style = TextStyle(contentColor.copy(0.6f), 12.sp))
                                         LiquidSlider(
                                             value = { sensorWidth },
-                                            onValueChange = { sensorWidth = it; onSensorWidthChanged(currentEditorGroup, it) },
-                                            onValueChangeFinished = { onSensorWidthChangeFinished(currentEditorGroup, sensorWidth) },
+                                            onValueChange = { sensorWidth = it; isSliderOrToggleInteracting = true },
+                                            onValueChangeFinished = { isSliderOrToggleInteracting = false; onSensorWidthChanged(currentEditorGroup, sensorWidth); onSensorWidthChangeFinished(currentEditorGroup, sensorWidth) },
                                             valueRange = 1f..9f,
                                             visibilityThreshold = 0.1f,
                                             backdrop = sheetBackdrop,
@@ -1975,7 +2152,7 @@ private fun RasterDetailScreen(
                                     }
 
                                     Spacer(Modifier.height(16.dp))
-                                    BasicText("过渡带宽", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                    BasicText("过渡带宽", style = TextStyle(contentColor, 14.sp))
                                     Spacer(Modifier.height(4.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -1985,8 +2162,8 @@ private fun RasterDetailScreen(
                                         BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
                                         LiquidSlider(
                                             value = { transitionBand },
-                                            onValueChange = { transitionBand = it; onTransitionBandChanged(currentEditorGroup, it) },
-                                            onValueChangeFinished = { onTransitionBandChangeFinished(currentEditorGroup, transitionBand) },
+                                            onValueChange = { transitionBand = it; isSliderOrToggleInteracting = true },
+                                            onValueChangeFinished = { isSliderOrToggleInteracting = false; onTransitionBandChanged(currentEditorGroup, transitionBand); onTransitionBandChangeFinished(currentEditorGroup, transitionBand) },
                                             valueRange = 0.1f..1f,
                                             visibilityThreshold = 0.001f,
                                             backdrop = sheetBackdrop,
@@ -1997,7 +2174,7 @@ private fun RasterDetailScreen(
                                     }
 
                                     Spacer(Modifier.height(16.dp))
-                                    BasicText("边缘柔化", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                                    BasicText("边缘柔化", style = TextStyle(contentColor, 14.sp))
                                     Spacer(Modifier.height(4.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -2007,8 +2184,8 @@ private fun RasterDetailScreen(
                                         BasicText("锐", style = TextStyle(contentColor.copy(0.6f), 12.sp))
                                         LiquidSlider(
                                             value = { edgeSoftness },
-                                            onValueChange = { edgeSoftness = it; onEdgeSoftnessChanged(currentEditorGroup, it) },
-                                            onValueChangeFinished = { onEdgeSoftnessChangeFinished(currentEditorGroup, edgeSoftness) },
+                                            onValueChange = { edgeSoftness = it; isSliderOrToggleInteracting = true },
+                                            onValueChangeFinished = { isSliderOrToggleInteracting = false; onEdgeSoftnessChanged(currentEditorGroup, edgeSoftness); onEdgeSoftnessChangeFinished(currentEditorGroup, edgeSoftness) },
                                             valueRange = 0.01f..0.5f,
                                             visibilityThreshold = 0.001f,
                                             backdrop = sheetBackdrop,
@@ -2053,168 +2230,198 @@ private fun RasterDetailScreen(
                                     val isGlassEffect = selectedEffectType == RasterGroupModel.EFFECT_CORRUGATED_GLASS ||
                                             selectedEffectType == RasterGroupModel.EFFECT_REEDED_GLASS ||
                                             selectedEffectType == RasterGroupModel.EFFECT_PRISM_GLASS
-                                    if (isGlassEffect) {
-                                        Spacer(Modifier.height(16.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            BasicText("动画", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
-                                            if (enableLiquidGlass && sheetBackdrop != null) {
-                                                LiquidToggle(
-                                                    selected = { glassAnimEnabled },
-                                                    onSelect = {
-                                                        glassAnimEnabled = it
-                                                        onGlassAnimEnabledChanged(currentEditorGroup, it)
-                                                    },
-                                                    backdrop = sheetBackdrop,
-                                                    isLightTheme = isLightTheme,
-                                                )
+                                    val isPrismEffect = selectedEffectType == RasterGroupModel.EFFECT_PRISM_GLASS
+                                    AnimatedContent(
+                                        targetState = Triple(selectedEffectType, isGlassEffect, isPrismEffect),
+                                        transitionSpec = {
+                                            if (targetState.first > initialState.first) {
+                                                slideInHorizontally(
+                                                    animationSpec = tween(200),
+                                                    initialOffsetX = { width -> width }
+                                                ) + fadeIn(animationSpec = tween(200)) togetherWith
+                                                        slideOutHorizontally(
+                                                            animationSpec = tween(200),
+                                                            targetOffsetX = { width -> -width }
+                                                        ) + fadeOut(animationSpec = tween(200))
                                             } else {
-                                                androidx.compose.material.Switch(
-                                                    checked = glassAnimEnabled,
-                                                    onCheckedChange = {
-                                                        glassAnimEnabled = it
-                                                        onGlassAnimEnabledChanged(currentEditorGroup, it)
+                                                slideInHorizontally(
+                                                    animationSpec = tween(200),
+                                                    initialOffsetX = { width -> -width }
+                                                ) + fadeIn(animationSpec = tween(200)) togetherWith
+                                                        slideOutHorizontally(
+                                                            animationSpec = tween(200),
+                                                            targetOffsetX = { width -> width }
+                                                        ) + fadeOut(animationSpec = tween(200))
+                                            } using SizeTransform(
+                                                clip = false,
+                                                sizeAnimationSpec = { _, _ ->
+                                                    tween(200, easing = FastOutSlowInEasing)
+                                                }
+                                            )
+                                        },
+                                        label = "EffectParams"
+                                    ) { (_, glassEffect, prismEffect) ->
+                                        Column(Modifier.fillMaxWidth()) {
+                                            if (glassEffect) {
+                                                Spacer(Modifier.height(16.dp))
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    BasicText("动画", style = TextStyle(contentColor, 15.sp))
+                                                    if (enableLiquidGlass && sheetBackdrop != null) {
+                                                        LiquidToggle(
+                                                            selected = { glassAnimEnabled },
+                                                            onSelect = {
+                                                                glassAnimEnabled = it
+                                                                onGlassAnimEnabledChanged(currentEditorGroup, it)
+                                                            },
+                                                            onDragStarted = { isSliderOrToggleInteracting = true },
+                                                            onDragFinished = { isSliderOrToggleInteracting = false },
+                                                            backdrop = sheetBackdrop,
+                                                            isLightTheme = isLightTheme,
+                                                        )
+                                                    } else {
+                                                        androidx.compose.material.Switch(
+                                                            checked = glassAnimEnabled,
+                                                            onCheckedChange = {
+                                                                glassAnimEnabled = it
+                                                                onGlassAnimEnabledChanged(currentEditorGroup, it)
+                                                            }
+                                                        )
                                                     }
-                                                )
-                                            }
-                                        }
+                                                }
 
-                                        Spacer(Modifier.height(16.dp))
-                                        BasicText("波长", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
-                                        Spacer(Modifier.height(4.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                            LiquidSlider(
-                                                value = { stripedWavelength },
-                                                onValueChange = { stripedWavelength = it; onStripedWavelengthChanged(currentEditorGroup, it) },
-                                                onValueChangeFinished = { onStripedWavelengthChangeFinished(currentEditorGroup, stripedWavelength) },
-                                                valueRange = 8f..80f,
-                                                visibilityThreshold = 1f,
-                                                backdrop = sheetBackdrop,
-                                                isLightTheme = isLightTheme,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            BasicText("宽", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                        }
+                                                Spacer(Modifier.height(16.dp))
+                                                BasicText("宽度", style = TextStyle(contentColor, 14.sp))
+                                                Spacer(Modifier.height(4.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                    LiquidSlider(
+                                                        value = { glassBandWidth },
+                                                        onValueChange = { glassBandWidth = it; isSliderOrToggleInteracting = true },
+                                                        onValueChangeFinished = { isSliderOrToggleInteracting = false; onGlassBandWidthChanged(currentEditorGroup, glassBandWidth); onGlassBandWidthChangeFinished(currentEditorGroup, glassBandWidth) },
+                                                        valueRange = 0.05f..1f,
+                                                        visibilityThreshold = 0.01f,
+                                                        backdrop = sheetBackdrop,
+                                                        isLightTheme = isLightTheme,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    BasicText("宽", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                }
 
-                                        Spacer(Modifier.height(16.dp))
-                                        BasicText("振幅", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
-                                        Spacer(Modifier.height(4.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            BasicText("弱", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                            LiquidSlider(
-                                                value = { stripedAmplitude },
-                                                onValueChange = { stripedAmplitude = it; onStripedAmplitudeChanged(currentEditorGroup, it) },
-                                                onValueChangeFinished = { onStripedAmplitudeChangeFinished(currentEditorGroup, stripedAmplitude) },
-                                                valueRange = 2f..40f,
-                                                visibilityThreshold = 1f,
-                                                backdrop = sheetBackdrop,
-                                                isLightTheme = isLightTheme,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            BasicText("强", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                        }
+                                                Spacer(Modifier.height(16.dp))
 
-                                        // ── 棱镜模式额外参数 ──
-                                        if (selectedEffectType == RasterGroupModel.EFFECT_PRISM_GLASS) {
-                                            Spacer(Modifier.height(16.dp))
-                                            BasicText("窄波波长", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
-                                            Spacer(Modifier.height(4.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                                LiquidSlider(
-                                                    value = { narrowWavelength },
-                                                    onValueChange = { narrowWavelength = it; onNarrowWavelengthChanged(currentEditorGroup, it) },
-                                                    onValueChangeFinished = { onNarrowWavelengthChangeFinished(currentEditorGroup, narrowWavelength) },
-                                                    valueRange = 4f..40f,
-                                                    visibilityThreshold = 1f,
-                                                    backdrop = sheetBackdrop,
-                                                    isLightTheme = isLightTheme,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                BasicText("宽", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                            }
+                                                BasicText("波长", style = TextStyle(contentColor, 14.sp))
+                                                Spacer(Modifier.height(4.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                    LiquidSlider(
+                                                        value = { stripedWavelength },
+                                                        onValueChange = { stripedWavelength = it; isSliderOrToggleInteracting = true },
+                                                        onValueChangeFinished = { isSliderOrToggleInteracting = false; onStripedWavelengthChanged(currentEditorGroup, stripedWavelength); onStripedWavelengthChangeFinished(currentEditorGroup, stripedWavelength) },
+                                                        valueRange = 8f..80f,
+                                                        visibilityThreshold = 1f,
+                                                        backdrop = sheetBackdrop,
+                                                        isLightTheme = isLightTheme,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    BasicText("宽", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                }
 
-                                            Spacer(Modifier.height(16.dp))
-                                            BasicText("窄波振幅", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
-                                            Spacer(Modifier.height(4.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                BasicText("弱", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                                LiquidSlider(
-                                                    value = { narrowAmplitude },
-                                                    onValueChange = { narrowAmplitude = it; onNarrowAmplitudeChanged(currentEditorGroup, it) },
-                                                    onValueChangeFinished = { onNarrowAmplitudeChangeFinished(currentEditorGroup, narrowAmplitude) },
-                                                    valueRange = 1f..20f,
-                                                    visibilityThreshold = 1f,
-                                                    backdrop = sheetBackdrop,
-                                                    isLightTheme = isLightTheme,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                BasicText("强", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                Spacer(Modifier.height(16.dp))
+                                                BasicText("振幅", style = TextStyle(contentColor, 14.sp))
+                                                Spacer(Modifier.height(4.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    BasicText("弱", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                    LiquidSlider(
+                                                        value = { stripedAmplitude },
+                                                        onValueChange = { stripedAmplitude = it; isSliderOrToggleInteracting = true },
+                                                        onValueChangeFinished = { isSliderOrToggleInteracting = false; onStripedAmplitudeChanged(currentEditorGroup, stripedAmplitude); onStripedAmplitudeChangeFinished(currentEditorGroup, stripedAmplitude) },
+                                                        valueRange = 2f..40f,
+                                                        visibilityThreshold = 1f,
+                                                        backdrop = sheetBackdrop,
+                                                        isLightTheme = isLightTheme,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    BasicText("强", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                }
+
+                                                // ── 棱镜模式额外参数 ──
+                                                if (prismEffect) {
+                                                    Spacer(Modifier.height(16.dp))
+                                                    BasicText("窄波波长", style = TextStyle(contentColor, 14.sp))
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                        LiquidSlider(
+                                                            value = { narrowWavelength },
+                                                            onValueChange = { narrowWavelength = it; isSliderOrToggleInteracting = true },
+                                                            onValueChangeFinished = { isSliderOrToggleInteracting = false; onNarrowWavelengthChanged(currentEditorGroup, narrowWavelength); onNarrowWavelengthChangeFinished(currentEditorGroup, narrowWavelength) },
+                                                            valueRange = 4f..40f,
+                                                            visibilityThreshold = 1f,
+                                                            backdrop = sheetBackdrop,
+                                                            isLightTheme = isLightTheme,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                        BasicText("宽", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                    }
+
+                                                    Spacer(Modifier.height(16.dp))
+                                                    BasicText("窄波振幅", style = TextStyle(contentColor, 14.sp))
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        BasicText("弱", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                        LiquidSlider(
+                                                            value = { narrowAmplitude },
+                                                            onValueChange = { narrowAmplitude = it; isSliderOrToggleInteracting = true },
+                                                            onValueChangeFinished = { isSliderOrToggleInteracting = false; onNarrowAmplitudeChanged(currentEditorGroup, narrowAmplitude); onNarrowAmplitudeChangeFinished(currentEditorGroup, narrowAmplitude) },
+                                                            valueRange = 1f..20f,
+                                                            visibilityThreshold = 1f,
+                                                            backdrop = sheetBackdrop,
+                                                            isLightTheme = isLightTheme,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                        BasicText("强", style = TextStyle(contentColor.copy(0.6f), 12.sp))
+                                                    }
+                                                }
                                             }
                                         }
                                     }
-
-                                    // 给效果页补一点空白，防止切页时高度变化太剧烈跳动
-                                    //Spacer(Modifier.height(if (isGlassEffect) 24.dp else 72.dp))
                                 }
                             }
                         }
                     } else {
                         // === 视频光栅逻辑（保持原样，只显示灵敏度） ===
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            BasicText("边缘死区", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
-                            if (enableLiquidGlass && sheetBackdrop != null) {
-                                LiquidToggle(
-                                    selected = { deadZoneEnabled },
-                                    onSelect = {
-                                        deadZoneEnabled = it
-                                        onDeadZoneEnabledChanged(currentEditorGroup, it)
-                                    },
-                                    backdrop = sheetBackdrop,
-                                    isLightTheme = isLightTheme,
-                                )
-                            } else {
-                                androidx.compose.material.Switch(
-                                    checked = deadZoneEnabled,
-                                    onCheckedChange = {
-                                        deadZoneEnabled = it
-                                        onDeadZoneEnabledChanged(currentEditorGroup, it)
-                                    }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(16.dp))
                         val angleThresholdRad = 0.3285 + 0.041 * sensorWidth
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            BasicText("灵敏度", style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Bold))
+                            BasicText("灵敏度", style = TextStyle(contentColor, 14.sp))
                             BasicText("倾斜 ${String.format("%.0f", Math.toDegrees(angleThresholdRad))}° 到达边缘", style = TextStyle(contentColor.copy(0.5f), 12.sp))
                         }
                         Spacer(Modifier.height(4.dp))
@@ -2226,8 +2433,8 @@ private fun RasterDetailScreen(
                             BasicText("高", style = TextStyle(contentColor.copy(0.6f), 12.sp))
                             LiquidSlider(
                                 value = { sensorWidth },
-                                onValueChange = { sensorWidth = it; onSensorWidthChanged(currentEditorGroup, it) },
-                                onValueChangeFinished = { onSensorWidthChangeFinished(currentEditorGroup, sensorWidth) },
+                                onValueChange = { sensorWidth = it; isSliderOrToggleInteracting = true },
+                                onValueChangeFinished = { isSliderOrToggleInteracting = false; onSensorWidthChanged(currentEditorGroup, sensorWidth); onSensorWidthChangeFinished(currentEditorGroup, sensorWidth) },
                                 valueRange = 1f..9f,
                                 visibilityThreshold = 0.1f,
                                 backdrop = sheetBackdrop,
@@ -2241,39 +2448,23 @@ private fun RasterDetailScreen(
 
                     }
 
-                    // ── 底部通用按钮 ──
-                    Spacer(Modifier.height(24.dp))
-                    Row(
-                        Modifier
-                            .clip(Capsule())
-                            .background(accentColor)
-                            .clickable {
-                                if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) onStaticEditorReplaceAll(currentEditorGroup)
-                                else onVideoEditorReplaceVideo(currentEditorGroup)
-                            }
-                            .height(48.dp)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicText(if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) "替换全部图片" else "替换视频", style = TextStyle(Color.White, 16.sp))
+                    // ── 底部按钮（仅视频类型显示替换按钮）──
+                    if (currentEditorGroup.type != RasterGroupModel.TYPE_STATIC) {
+                        Spacer(Modifier.height(24.dp))
+                        Row(
+                            Modifier
+                                .clip(Capsule())
+                                .background(accentColor)
+                                .clickable { onVideoEditorReplaceVideo(currentEditorGroup) }
+                                .height(48.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            BasicText("替换视频", style = TextStyle(Color.White, 16.sp))
+                        }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        Modifier
-                            .clip(Capsule())
-                            .background(containerColor.copy(0.2f))
-                            .clickable {
-                                if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) onStaticEditorDismiss()
-                                else onVideoEditorDismiss()
-                            }
-                            .height(48.dp)
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicText(context.getString(R.string.common_cancel), style = TextStyle(contentColor, 16.sp))
-                    }
+                    } // 可滚动内容区域结束
                 }
             }
         }

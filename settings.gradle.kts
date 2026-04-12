@@ -14,8 +14,6 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven { url = uri("https://www.jitpack.io") }
-        maven { url = uri("https://frontjs-static.pgyer.com/dist/sdk/pgyersdk") }
-        maven { url = uri("https://raw.githubusercontent.com/Pgyer/analytics/master") }
     }
 }
 rootProject.name = "TianYinWallpaper"

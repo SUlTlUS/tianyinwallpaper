@@ -131,6 +131,7 @@ object RasterShaders {
         uniform float uColorSaturation;
         uniform float uColorContrast;
         uniform float uGlassFullWidth;
+        uniform float uGlassBandWidth;
         uniform float uPhase;
         uniform float uFadeAlpha;
 
@@ -202,7 +203,7 @@ object RasterShaders {
                 : mix(colorB, colorA, blend);
 
             float lineX = (uDirection > 0.0) ? (1.0 - uProgress) : uProgress;
-            float bandWidth = 0.3;
+            float bandWidth = uGlassBandWidth;
             float distFromLine = abs(coord - lineX);
             float glassAlpha = mix(
                 smoothstep(bandWidth, bandWidth * 0.1, distFromLine),
@@ -336,6 +337,7 @@ object RasterShaders {
         uniform float uColorSaturation;
         uniform float uColorContrast;
         uniform float uGlassFullWidth;
+        uniform float uGlassBandWidth;
         uniform float uPhase;
         uniform float uFadeAlpha;
         uniform float uNarrowAmplitude;
@@ -388,7 +390,7 @@ object RasterShaders {
                 : mix(colorB, colorA, blend);
 
             float lineX = (uDirection > 0.0) ? (1.0 - uProgress) : uProgress;
-            float bandWidth = 0.4;
+            float bandWidth = uGlassBandWidth;
             float distFromLine = abs(coord - lineX);
             float glassAlpha = mix(
                 smoothstep(bandWidth, bandWidth * 0.1, distFromLine),

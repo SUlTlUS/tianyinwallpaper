@@ -57,6 +57,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.shapes.Capsule
@@ -101,6 +103,8 @@ fun SettingRouteScreen(
     val context = LocalContext.current
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
+
+    var corrugatedTestVisible by remember { mutableStateOf(pref.getBoolean(PREF_CORRUGATED_TEST_ENABLED, false)) }
 
     var hidePermissionDialog by remember { mutableStateOf(pref.getBoolean("hide_permission_dialog", false)) }
     var rand by remember { mutableStateOf(pref.getBoolean("rand", false)) }
@@ -412,8 +416,10 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
-                    SettingTextItem("波纹玻璃测试页", contentColor) {
-                        onOpenCorrugatedTest()
+                    if (corrugatedTestVisible) {
+                        SettingTextItem("波纹玻璃测试页", contentColor) {
+                            onOpenCorrugatedTest()
+                        }
                     }
                     SettingTextItem("关于", contentColor) {
                         onOpenAppInfo()
@@ -956,6 +962,13 @@ fun AppInfoRouteScreen(
     val verName = getVersionName(context)
     val aboutText = remember { getAboutText() }
 
+    // 版本号点击5次开关波纹玻璃测试页入口
+    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
+    var corrugatedTestEnabled by remember { mutableStateOf(pref.getBoolean(PREF_CORRUGATED_TEST_ENABLED, false)) }
+    var versionTapCount by remember { mutableStateOf(0) }
+    var lastTapTime by remember { mutableStateOf(0L) }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -976,28 +989,65 @@ fun AppInfoRouteScreen(
         ) {
             // App Icon
             Spacer(modifier = Modifier.height(48.dp))
-            Box(
-                modifier = Modifier
-                    .height(100.dp)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                // You can add an actual Image here later, for now just text
-                Text(
-                    text = "天音壁纸",
-                    style = TextStyle(
-                        color = contentColor,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+            val appIconBitmap = remember(context) {
+                val drawable = context.packageManager.getApplicationIcon(context.applicationInfo)
+                val bitmap = android.graphics.Bitmap.createBitmap(
+                    192, 192, android.graphics.Bitmap.Config.ARGB_8888
                 )
+                val canvas = android.graphics.Canvas(bitmap)
+                drawable.setBounds(0, 0, 192, 192)
+                drawable.draw(canvas)
+                bitmap.asImageBitmap()
             }
+            androidx.compose.foundation.Image(
+                bitmap = appIconBitmap,
+                contentDescription = "App Icon",
+                modifier = Modifier
+                    .width(100.dp)
+                    .height(100.dp)
+                    .clip(RoundedCornerShape(20.dp)),
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "天音壁纸",
+                style = TextStyle(
+                    color = contentColor,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            )
             Text(
                 text = "版本 $verName",
                 style = TextStyle(
                     color = contentColor.copy(0.6f),
                     fontSize = 14.sp
-                )
+                ),
+                modifier = Modifier
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastTapTime > 2000L) {
+                            versionTapCount = 1
+                        } else {
+                            versionTapCount++
+                        }
+                        lastTapTime = now
+                        if (versionTapCount >= 5) {
+                            versionTapCount = 0
+                            corrugatedTestEnabled = !corrugatedTestEnabled
+                            pref.edit().putBoolean(PREF_CORRUGATED_TEST_ENABLED, corrugatedTestEnabled).apply()
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            Toast.makeText(
+                                context,
+                                if (corrugatedTestEnabled) "已开启波纹玻璃测试页" else "已关闭波纹玻璃测试页",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                    .padding(vertical = 4.dp)
             )
             Spacer(modifier = Modifier.height(32.dp))
 
@@ -1210,3 +1260,4 @@ private const val DEFAULT_AUTO_SWITCH_INTERVAL_SECONDS = 3600L
 private const val DEFAULT_AUTO_SWITCH_TIME_POINTS = "12:00"
 private const val AUTO_SWITCH_MODE_NONE = 0
 private val AUTO_SWITCH_MODE_ITEMS = arrayOf("离开桌面", "时间间隔", "时间点")
+private const val PREF_CORRUGATED_TEST_ENABLED = "corrugated_test_enabled"

@@ -149,6 +149,7 @@ class RasterGLRenderer {
             val narrowWavelength: Float = 12f,
             val narrowAmplitude: Float = 6f,
             val glassAnimEnabled: Boolean = true,
+            val glassBandWidth: Float = 0.3f,
             val deadZoneEnabled: Boolean = true
         ) : RenderMessage()
         data class ExecuteTask(val task: () -> Unit) : RenderMessage()
@@ -243,7 +244,8 @@ class RasterGLRenderer {
             stripedWavelength = group.stripedWavelength,
             stripedAmplitude = group.stripedAmplitude,
             narrowWavelength = group.narrowWavelength,
-            narrowAmplitude = group.narrowAmplitude
+            narrowAmplitude = group.narrowAmplitude,
+            glassBandWidth = group.glassBandWidth
         )
         
         // 更新传感器灵敏度
@@ -274,6 +276,7 @@ class RasterGLRenderer {
             narrowWavelength = group.narrowWavelength,
             narrowAmplitude = group.narrowAmplitude,
             glassAnimEnabled = group.glassAnimEnabled,
+            glassBandWidth = group.glassBandWidth,
             deadZoneEnabled = group.deadZoneEnabled
         )
         
@@ -371,6 +374,9 @@ class RasterGLRenderer {
     /** 禁用透明遮罩（1.0=全屏玻璃，0.0=仅扫描线附近），用于调试测试 */
     var glassFullWidth: Float = 0f
 
+    /** 玻璃折射区域宽度 (0.05 ~ 1.0) */
+    var glassBandWidth: Float = 0.3f
+
     /**
      * 更新所有渲染参数
      */
@@ -383,6 +389,7 @@ class RasterGLRenderer {
         narrowWavelength: Float = this.narrowWavelength,
         narrowAmplitude: Float = this.narrowAmplitude,
         glassAnimEnabled: Boolean = this.glassAnimEnabled,
+        glassBandWidth: Float = this.glassBandWidth,
         deadZoneEnabled: Boolean = this.deadZoneEnabled
     ) {
         this.transitionBand = transitionBand
@@ -393,6 +400,7 @@ class RasterGLRenderer {
         this.narrowWavelength = narrowWavelength
         this.narrowAmplitude = narrowAmplitude
         this.glassAnimEnabled = glassAnimEnabled
+        this.glassBandWidth = glassBandWidth
         this.deadZoneEnabled = deadZoneEnabled
         
         messageQueue.offer(RenderMessage.UpdateParams(
@@ -400,6 +408,7 @@ class RasterGLRenderer {
             stripedWavelength, stripedAmplitude,
             narrowWavelength, narrowAmplitude,
             glassAnimEnabled,
+            glassBandWidth,
             deadZoneEnabled
         ))
         requestRender()
@@ -702,6 +711,7 @@ class RasterGLRenderer {
         private var paramNarrowWavelength: Float = 12f
         private var paramNarrowAmplitude: Float = 6f
         private var paramGlassAnimEnabled: Boolean = true
+        private var paramGlassBandWidth: Float = 0.3f
         private var paramDeadZoneEnabled: Boolean = true
 
         // 玻璃动画相位追踪
@@ -788,6 +798,7 @@ class RasterGLRenderer {
                             paramNarrowWavelength = msg.narrowWavelength
                             paramNarrowAmplitude = msg.narrowAmplitude
                             paramGlassAnimEnabled = msg.glassAnimEnabled
+                            paramGlassBandWidth = msg.glassBandWidth
                             paramDeadZoneEnabled = msg.deadZoneEnabled
                         }
                         is RenderMessage.ExecuteTask -> {
@@ -1173,6 +1184,7 @@ class RasterGLRenderer {
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uColorSaturation"), 1.2f)
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uColorContrast"), 1.1f)
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uGlassFullWidth"), glassFullWidth)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uGlassBandWidth"), paramGlassBandWidth)
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uPhase"), glassPhase)
 
                 // 棱镜模式额外参数
@@ -1310,6 +1322,7 @@ class RasterGLRenderer {
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uColorSaturation"), 1.2f)
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uColorContrast"), 1.1f)
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uGlassFullWidth"), glassFullWidth)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uGlassBandWidth"), paramGlassBandWidth)
                 GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uPhase"), glassPhase)
 
                 if (activeEffectType == ScanlineEffectType.PRISM_GLASS) {

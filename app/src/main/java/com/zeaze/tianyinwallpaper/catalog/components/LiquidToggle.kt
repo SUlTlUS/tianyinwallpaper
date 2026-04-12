@@ -51,7 +51,9 @@ fun LiquidToggle(
     onSelect: (Boolean) -> Unit,
     backdrop: Backdrop,
     isLightTheme: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDragStarted: () -> Unit = {},
+    onDragFinished: () -> Unit = {},
 ) {
     val accentColor =
         if (isLightTheme) Color(0xFF34C759)
@@ -86,6 +88,7 @@ fun LiquidToggle(
                     }
                     onSelect(isSelected)
                     didDrag = false
+                    onDragFinished()
                 } else {
                     fraction = if (selected()) 0f else 1f
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress) // Using LongPress for a strong click feel, or TextHandleMove
@@ -95,6 +98,7 @@ fun LiquidToggle(
             onDrag = { _, dragAmount ->
                 if (!didDrag) {
                     didDrag = dragAmount.x != 0f
+                    if (didDrag) onDragStarted()
                 }
                 val oldFraction = fraction
                 val delta = dragAmount.x / dragWidth

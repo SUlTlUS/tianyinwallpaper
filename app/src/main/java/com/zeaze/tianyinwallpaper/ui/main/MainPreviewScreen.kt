@@ -13,16 +13,21 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -34,7 +39,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -43,6 +51,7 @@ import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -52,7 +61,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -68,6 +80,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.core.net.toUri
 import com.alibaba.fastjson.JSON
 import com.kyant.shapes.Capsule
@@ -96,10 +112,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.runtime.rememberUpdatedState
 
 @Composable
 internal fun MainPreviewOverlayHost(
@@ -444,6 +461,11 @@ private fun WallpaperPreviewRenderer(
 ) {
     Box(modifier = modifier.background(backgroundColor)) {
         val isDynamicWallpaper = model.type == WALLPAPER_TYPE_DYNAMIC
+
+    // BottomSheet 拖拽关闭状态
+    val sheetCoroutineScope = rememberCoroutineScope()
+    val animatedOffset = remember { Animatable(0f) }
+    val dismissThreshold = with(LocalDensity.current) { 200.dp.toPx() }
         if (isDynamicWallpaper) {
             WallpaperThumbnail(
                 model = model,
@@ -793,7 +815,7 @@ private fun SettingToggleRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        androidx.compose.foundation.text.BasicText(label, style = TextStyle(contentColor, 16.sp))
+        androidx.compose.foundation.text.BasicText(label, style = TextStyle(contentColor, 15.sp))
         if (enableLiquidGlass) {
             LiquidToggle(
                 selected = { currentChecked },
@@ -1029,6 +1051,11 @@ internal fun WallpaperDetailScreen(
 
     val isDynamicWallpaper = model.type == WALLPAPER_TYPE_DYNAMIC
 
+    // BottomSheet 拖拽关闭状态
+    val sheetCoroutineScope = rememberCoroutineScope()
+    val animatedOffset = remember { Animatable(0f) }
+    val dismissThreshold = with(LocalDensity.current) { 200.dp.toPx() }
+
     val oOo0 = 0.04f
     val oOOo = 4.0E-4f
     val o0oO = 0.015f
@@ -1178,6 +1205,18 @@ internal fun WallpaperDetailScreen(
     }
 
     // 预览页返回时先保存当前缩放/位置/亮度。
+    BackHandler(enabled = showVideoDialog) {
+        sheetCoroutineScope.launch {
+            animatedOffset.animateTo(2000f, animationSpec = tween(250))
+            showVideoDialog = false
+        }
+    }
+    BackHandler(enabled = showImageDialog) {
+        sheetCoroutineScope.launch {
+            animatedOffset.animateTo(2000f, animationSpec = tween(250))
+            showImageDialog = false
+        }
+    }
     BackHandler(enabled = !showVideoDialog && !showImageDialog) {
         persistPreviewState()
         onDismiss()
@@ -1429,184 +1468,252 @@ internal fun WallpaperDetailScreen(
             onReplace: () -> Unit,
             onDismiss: () -> Unit
         ) {
-            AnimatedVisibility(
-                visible = visible,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                fun saveTimeSettings(): Boolean {
-                    startTime = startHour * 60 + startMinute
-                    endTime = endHour * 60 + endMinute
-                    if (independentTimeEnabled && startTime == endTime) {
-                        Toast.makeText(context, "开始时间不能与结束时间相同", Toast.LENGTH_SHORT).show()
-                        return false
-                    }
-                    onTimeAction(startTime, endTime, loopEnabled, independentTimeEnabled)
-                    return true
+            fun saveTimeSettings(): Boolean {
+                startTime = startHour * 60 + startMinute
+                endTime = endHour * 60 + endMinute
+                if (independentTimeEnabled && startTime == endTime) {
+                    Toast.makeText(context, "开始时间不能与结束时间相同", Toast.LENGTH_SHORT).show()
+                    return false
                 }
+                onTimeAction(startTime, endTime, loopEnabled, independentTimeEnabled)
+                return true
+            }
 
-                BackHandler(enabled = true) {
-                    if (saveTimeSettings()) {
-                        onDismiss()
-                    }
-                }
-
-                fun saveAndClose() {
-                    if (!saveTimeSettings()) return
-                    onBrightnessAction(brightness)
-                    onVolumeAction(volume)
+            fun saveAndClose() {
+                if (!saveTimeSettings()) return
+                onBrightnessAction(brightness)
+                onVolumeAction(volume)
+                sheetCoroutineScope.launch {
+                    animatedOffset.animateTo(2000f, animationSpec = tween(250))
                     onDismiss()
                 }
+            }
 
+            // 重置偏移当面板重新显示
+            LaunchedEffect(visible) {
+                if (visible) {
+                    animatedOffset.snapTo(0f)
+                }
+            }
+
+            // 点击面板外区域关闭（带下滑动画）
+            if (visible) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { saveAndClose() }
+                        ) {
+                            sheetCoroutineScope.launch {
+                                animatedOffset.animateTo(2000f, animationSpec = tween(250))
+                                onDismiss()
+                            }
+                        }
+                )
+            }
+
+            // BottomSheet 内容
+            AnimatedVisibility(
+                visible = visible,
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                ) + fadeIn(),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                ) + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                val sheetBackdrop = rememberLayerBackdrop()
+                val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
+
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 520.dp)
+                        .offset { IntOffset(0, animatedOffset.value.roundToInt()) }
+                        .drawBackdrop(
+                            backdrop = editBackdrop,
+                            shape = { RoundedRectangle(41f.dp) },
+                            effects = {
+                                colorControls(
+                                    brightness = if (isLightTheme) 0.2f else 0f,
+                                    saturation = 1.5f
+                                )
+                                blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
+                                lens(16f.dp.toPx(), 32f.dp.toPx(), depthEffect = true)
+                            },
+                            highlight = { Highlight.Plain },
+                            exportedBackdrop = sheetBackdrop,
+                            onDrawSurface = { drawRect(containerColor) }
+                        )
+                        .pointerInput(Unit) { detectTapGestures { } }
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                 ) {
-                    val sheetBackdrop = rememberLayerBackdrop()
+                    // 拖拽手柄
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .pointerInput(Unit) {
+                                detectDragGestures(
+                                    onDragEnd = {
+                                        if (animatedOffset.value > dismissThreshold) {
+                                            sheetCoroutineScope.launch {
+                                                animatedOffset.animateTo(2000f, animationSpec = tween(200))
+                                                onDismiss()
+                                            }
+                                        } else {
+                                            sheetCoroutineScope.launch {
+                                                animatedOffset.animateTo(
+                                                    0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                                        stiffness = Spring.StiffnessMedium
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        sheetCoroutineScope.launch {
+                                            animatedOffset.animateTo(
+                                                0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                        }
+                                    }
+                                ) { change, dragAmount ->
+                                    change.consume()
+                                    val newOffset = (animatedOffset.value + dragAmount.y).coerceAtLeast(0f)
+                                    sheetCoroutineScope.launch { animatedOffset.snapTo(newOffset) }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(vertical = 4.dp)
+                                .width(40.dp)
+                                .height(4.dp)
+                                .background(contentColor.copy(alpha = 0.3f), RoundedCornerShape(2.dp))
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+
+                    // 可滚动内容区域
+                    val scrollState = rememberScrollState()
                     Column(
                         Modifier
-                            .align(Alignment.Center)
-                            .padding(40.dp)
-                            .wrapContentHeight()
-                            .drawBackdrop(
-                                backdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) },
-                                shape = { RoundedRectangle(48f.dp) },
-                                effects = {
-                                    colorControls(
-                                        brightness = if (isLightTheme) 0.2f else 0f,
-                                        saturation = 1.5f
-                                    )
-                                    blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
-                                    lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
-                                },
-                                highlight = { Highlight.Plain },
-                                exportedBackdrop = sheetBackdrop,
-                                onDrawSurface = { drawRect(containerColor) }
-                            )
-                            .pointerInput(Unit) { detectTapGestures { } }
+                            .fillMaxWidth()
+                            .verticalScroll(scrollState),
+                            //.padding(horizontal = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Column(
-                            Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                        androidx.compose.foundation.text.BasicText(title, style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+
+                        Spacer(Modifier.height(12.dp))
+
+                        SettingToggleRow(
+                            label = "边缘吸附",
+                            checked = magneticAssistEnabled,
+                            onCheckedChange = { magneticAssistEnabled = it },
+                            contentColor = contentColor,
+                            enableLiquidGlass = enableLiquidGlass,
+                            backdrop = sheetBackdrop,
+                            isLightTheme = isLightTheme
+                        )
+
+                        if (showLoopToggle) {
+                            Spacer(Modifier.height(12.dp))
+                            SettingToggleRow(
+                                label = "循环播放",
+                                checked = loopEnabled,
+                                onCheckedChange = { loopEnabled = it },
+                                contentColor = contentColor,
+                                enableLiquidGlass = enableLiquidGlass,
+                                backdrop = sheetBackdrop,
+                                isLightTheme = isLightTheme
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+
+                        SettingToggleRow(
+                            label = "独立时间",
+                            checked = independentTimeEnabled,
+                            onCheckedChange = { independentTimeEnabled = it },
+                            contentColor = contentColor,
+                            enableLiquidGlass = enableLiquidGlass,
+                            backdrop = sheetBackdrop,
+                            isLightTheme = isLightTheme
+                        )
+                        Spacer(Modifier.height(12.dp))
+
+                        AnimatedVisibility(
+                            visible = independentTimeEnabled,
+                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+                            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                    fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
                         ) {
-                            androidx.compose.foundation.text.BasicText(title, style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
-
-                            Spacer(Modifier.height(12.dp))
-
-                            SettingToggleRow(
-                                label = "边缘吸附",
-                                checked = magneticAssistEnabled,
-                                onCheckedChange = { magneticAssistEnabled = it },
-                                contentColor = contentColor,
-                                enableLiquidGlass = enableLiquidGlass,
-                                backdrop = sheetBackdrop,
-                                isLightTheme = isLightTheme
-                            )
-
-                            if (showLoopToggle) {
-                                Spacer(Modifier.height(12.dp))
-                                SettingToggleRow(
-                                    label = "循环播放",
-                                    checked = loopEnabled,
-                                    onCheckedChange = { loopEnabled = it },
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                TimePickerField(
+                                    label = "开始时间",
+                                    hour = startHour,
+                                    minute = startMinute,
+                                    isExpanded = showTimePicker == "start",
+                                    onToggle = { showTimePicker = if (showTimePicker == "start") null else "start" },
+                                    onHourSelected = { startHour = it },
+                                    onMinuteSelected = { startMinute = it },
                                     contentColor = contentColor,
-                                    enableLiquidGlass = enableLiquidGlass,
-                                    backdrop = sheetBackdrop,
-                                    isLightTheme = isLightTheme
-                                )
-                            }
-                            Spacer(Modifier.height(12.dp))
-
-                            SettingToggleRow(
-                                label = "独立时间",
-                                checked = independentTimeEnabled,
-                                onCheckedChange = { independentTimeEnabled = it },
-                                contentColor = contentColor,
-                                enableLiquidGlass = enableLiquidGlass,
-                                backdrop = sheetBackdrop,
-                                isLightTheme = isLightTheme
-                            )
-                            Spacer(Modifier.height(12.dp))
-
-                            AnimatedVisibility(
-                                visible = independentTimeEnabled,
-                                enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                        expandVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-                                exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                            ) {
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    TimePickerField(
-                                        label = "开始时间",
-                                        hour = startHour,
-                                        minute = startMinute,
-                                        isExpanded = showTimePicker == "start",
-                                        onToggle = { showTimePicker = if (showTimePicker == "start") null else "start" },
-                                        onHourSelected = { startHour = it },
-                                        onMinuteSelected = { startMinute = it },
-                                        contentColor = contentColor,
-                                        containerColor = containerColor,
-                                        formatHm = ::formatHm
-                                    )
-
-                                    Spacer(Modifier.height(12.dp))
-                                    TimePickerField(
-                                        label = "结束时间",
-                                        hour = endHour,
-                                        minute = endMinute,
-                                        isExpanded = showTimePicker == "end",
-                                        onToggle = { showTimePicker = if (showTimePicker == "end") null else "end" },
-                                        onHourSelected = { endHour = it },
-                                        onMinuteSelected = { endMinute = it },
-                                        contentColor = contentColor,
-                                        containerColor = containerColor,
-                                        formatHm = ::formatHm
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(12.dp))
-
-                            if (showVolumeSlider) {
-                                androidx.compose.foundation.text.BasicText(
-                                    text = "音量 ${(volume * 100f).toInt()}%",
-                                    style = TextStyle(contentColor, 14.sp)
-                                )
-
-                                Spacer(Modifier.height(8.dp))
-
-                                AdaptiveValueSlider(
-                                    value = volume,
-                                    onValueChange = { volume = it.coerceIn(0f, 1f) },
-                                    valueRange = 0f..1f,
-                                    onValueChangeFinished = { onVolumeAction(volume) },
-                                    enableLiquidGlass = enableLiquidGlass,
-                                    backdrop = sheetBackdrop,
-                                    isLightTheme = isLightTheme,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp)
+                                    containerColor = containerColor,
+                                    formatHm = ::formatHm
                                 )
 
                                 Spacer(Modifier.height(12.dp))
+                                TimePickerField(
+                                    label = "结束时间",
+                                    hour = endHour,
+                                    minute = endMinute,
+                                    isExpanded = showTimePicker == "end",
+                                    onToggle = { showTimePicker = if (showTimePicker == "end") null else "end" },
+                                    onHourSelected = { endHour = it },
+                                    onMinuteSelected = { endMinute = it },
+                                    contentColor = contentColor,
+                                    containerColor = containerColor,
+                                    formatHm = ::formatHm
+                                )
                             }
+                        }
+                        Spacer(Modifier.height(12.dp))
 
-                            androidx.compose.foundation.text.BasicText(
-                                text = "亮度 ${(((brightness - brightnessMin) / (brightnessMax - brightnessMin)) * 100f).toInt()}%",
-                                style = TextStyle(contentColor, 14.sp)
-                            )
+                        if (showVolumeSlider) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                androidx.compose.foundation.text.BasicText("音量", style = TextStyle(contentColor, 14.sp))
+                                androidx.compose.foundation.text.BasicText("${(volume * 100f).toInt()}%", style = TextStyle(contentColor, 14.sp))
+                            }
 
                             Spacer(Modifier.height(8.dp))
 
                             AdaptiveValueSlider(
-                                value = brightness,
-                                onValueChange = { brightness = it.coerceIn(brightnessMin, brightnessMax) },
-                                valueRange = brightnessMin..brightnessMax,
-                                onValueChangeFinished = { onBrightnessAction(brightness) },
+                                value = volume,
+                                onValueChange = { volume = it.coerceIn(0f, 1f) },
+                                valueRange = 0f..1f,
+                                onValueChangeFinished = { onVolumeAction(volume) },
                                 enableLiquidGlass = enableLiquidGlass,
                                 backdrop = sheetBackdrop,
                                 isLightTheme = isLightTheme,
@@ -1616,89 +1723,77 @@ internal fun WallpaperDetailScreen(
                             )
 
                             Spacer(Modifier.height(12.dp))
+                        }
 
-                            if (false) {
-                                androidx.compose.foundation.text.BasicText(
-                                    text = "旋转 ${(rotation).toInt()}°",
-                                    style = TextStyle(contentColor, 14.sp)
-                                )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            androidx.compose.foundation.text.BasicText("亮度", style = TextStyle(contentColor, 14.sp))
+                            androidx.compose.foundation.text.BasicText("${(((brightness - brightnessMin) / (brightnessMax - brightnessMin)) * 100f).toInt()}%", style = TextStyle(contentColor, 14.sp))
+                        }
 
-                                Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(8.dp))
 
-                                AdaptiveValueSlider(
-                                    value = rotation,
-                                    onValueChange = { rotation = it.coerceIn(-180f, 180f) },
-                                    valueRange = -180f..180f,
-                                    onValueChangeFinished = { onTransformAction(scale, offsetX, offsetY, rotation) },
-                                    enableLiquidGlass = enableLiquidGlass,
-                                    backdrop = sheetBackdrop,
-                                    isLightTheme = isLightTheme,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp)
-                                )
+                        AdaptiveValueSlider(
+                            value = brightness,
+                            onValueChange = { brightness = it.coerceIn(brightnessMin, brightnessMax) },
+                            valueRange = brightnessMin..brightnessMax,
+                            onValueChangeFinished = { onBrightnessAction(brightness) },
+                            enableLiquidGlass = enableLiquidGlass,
+                            backdrop = sheetBackdrop,
+                            isLightTheme = isLightTheme,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp)
+                        )
 
-                                Spacer(Modifier.height(12.dp))
-                            }
+                        Spacer(Modifier.height(12.dp))
 
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(Capsule())
-                                        .background(accentColor.copy(alpha = 0.75f))
-                                        .clickable {
-                                            onDismiss()
-                                            onReplace()
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    androidx.compose.foundation.text.BasicText(replaceText, style = TextStyle(Color.White, 15.sp))
-                                }
-
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(Capsule())
-                                        .background(containerColor.copy(0.2f))
-                                        .clickable {
-                                            scale = 1f
-                                            offsetX = 0f
-                                            offsetY = 0f
-                                            velocityX = 0f
-                                            velocityY = 0f
-                                            onTransformAction(scale, offsetX, offsetY, rotation)
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    androidx.compose.foundation.text.BasicText("重置位置", style = TextStyle(contentColor, 15.sp))
-                                }
-                            }
-
-
-
-                            Spacer(Modifier.height(12.dp))
-
-                            Row(
-                                Modifier
+                                modifier = Modifier
+                                    .weight(1f)
                                     .clip(Capsule())
-                                    .background(containerColor.copy(0.2f))
-                                    .clickable { saveAndClose() }
+                                    .background(accentColor.copy(alpha = 0.75f))
                                     .height(48.dp)
-                                    .fillMaxWidth(),
+                                    .clickable {
+                                        onDismiss()
+                                        onReplace()
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                androidx.compose.foundation.text.BasicText("关闭", style = TextStyle(contentColor, 16.sp))
+                                androidx.compose.foundation.text.BasicText(replaceText, style = TextStyle(Color.White, 16.sp))
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(Capsule())
+                                    .background(containerColor.copy(0.2f))
+                                    .height(48.dp)
+                                    .clickable {
+                                        scale = 1f
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                        velocityX = 0f
+                                        velocityY = 0f
+                                        onTransformAction(scale, offsetX, offsetY, rotation)
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                androidx.compose.foundation.text.BasicText("重置位置", style = TextStyle(contentColor, 16.sp))
                             }
                         }
+
                     }
                 }
             }
@@ -1707,7 +1802,7 @@ internal fun WallpaperDetailScreen(
         MediaSettingDialog(
             visible = showVideoDialog,
             title = "视频",
-            replaceText = "更换视频",
+            replaceText = "替换视频",
             showLoopToggle = true,
             showVolumeSlider = true,
             onReplace = { onReplaceAction(true) },
@@ -1717,7 +1812,7 @@ internal fun WallpaperDetailScreen(
         MediaSettingDialog(
             visible = showImageDialog,
             title = "图片",
-            replaceText = "更换图片",
+            replaceText = "替换图片",
             showLoopToggle = false,
             showVolumeSlider = false,
             onReplace = { onReplaceAction(false) },

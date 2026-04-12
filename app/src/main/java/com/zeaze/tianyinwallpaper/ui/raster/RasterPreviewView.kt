@@ -74,6 +74,7 @@ fun RasterPreviewView(
         group.narrowWavelength,
         group.narrowAmplitude,
         group.glassAnimEnabled,
+        group.glassBandWidth,
         group.deadZoneEnabled
     ) {
         if (isRendererStarted) {
