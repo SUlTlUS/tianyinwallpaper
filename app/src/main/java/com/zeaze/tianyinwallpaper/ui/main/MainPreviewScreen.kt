@@ -783,13 +783,13 @@ private fun DetailModeButton(
     } else {
         Surface(
             modifier = modifier
-                .height(44.dp)
+                //.height(44.dp)
                 .clickable(onClick = onClick),
             shape = Capsule(),
             color = buttonColor
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Text(text = label, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(text = label, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp))
             }
         }
     }
@@ -801,12 +801,11 @@ private fun SettingToggleRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     contentColor: Color,
-    enableLiquidGlass: Boolean,
-    backdrop: Backdrop,
     isLightTheme: Boolean
 ) {
     val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
     val currentChecked by rememberUpdatedState(checked)
+    val toggleBackdrop = rememberLayerBackdrop()
 
     Row(
         modifier = Modifier
@@ -816,19 +815,12 @@ private fun SettingToggleRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         androidx.compose.foundation.text.BasicText(label, style = TextStyle(contentColor, 15.sp))
-        if (enableLiquidGlass) {
-            LiquidToggle(
-                selected = { currentChecked },
-                onSelect = { currentOnCheckedChange(it) },
-                backdrop = backdrop,
-                isLightTheme = isLightTheme
-            )
-        } else {
-            androidx.compose.material.Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange
-            )
-        }
+        LiquidToggle(
+            selected = { currentChecked },
+            onSelect = { currentOnCheckedChange(it) },
+            backdrop = toggleBackdrop,
+            isLightTheme = isLightTheme
+        )
     }
 }
 
@@ -961,7 +953,6 @@ private fun AdaptiveValueSlider(
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
     onValueChangeFinished: () -> Unit,
-    enableLiquidGlass: Boolean,
     backdrop: Backdrop,
     isLightTheme: Boolean,
     modifier: Modifier = Modifier
@@ -970,26 +961,16 @@ private fun AdaptiveValueSlider(
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     val currentValue by rememberUpdatedState(value)
 
-    if (enableLiquidGlass) {
-        LiquidSlider(
-            value = { currentValue },
-            onValueChange = { currentOnValueChange(it) },
-            valueRange = valueRange,
-            visibilityThreshold = 0.001f,
-            backdrop = backdrop,
-            isLightTheme = isLightTheme,
-            onValueChangeFinished = { currentOnValueChangeFinished() },
-            modifier = modifier
-        )
-    } else {
-        androidx.compose.material.Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = valueRange,
-            onValueChangeFinished = onValueChangeFinished,
-            modifier = modifier
-        )
-    }
+    LiquidSlider(
+        value = { currentValue },
+        onValueChange = { currentOnValueChange(it) },
+        valueRange = valueRange,
+        visibilityThreshold = 0.001f,
+        backdrop = backdrop,
+        isLightTheme = isLightTheme,
+        onValueChangeFinished = { currentOnValueChangeFinished() },
+        modifier = modifier
+    )
 }
 
 private fun resolvedContentColor(
@@ -1630,8 +1611,6 @@ internal fun WallpaperDetailScreen(
                             checked = magneticAssistEnabled,
                             onCheckedChange = { magneticAssistEnabled = it },
                             contentColor = contentColor,
-                            enableLiquidGlass = enableLiquidGlass,
-                            backdrop = sheetBackdrop,
                             isLightTheme = isLightTheme
                         )
 
@@ -1642,8 +1621,6 @@ internal fun WallpaperDetailScreen(
                                 checked = loopEnabled,
                                 onCheckedChange = { loopEnabled = it },
                                 contentColor = contentColor,
-                                enableLiquidGlass = enableLiquidGlass,
-                                backdrop = sheetBackdrop,
                                 isLightTheme = isLightTheme
                             )
                         }
@@ -1654,8 +1631,6 @@ internal fun WallpaperDetailScreen(
                             checked = independentTimeEnabled,
                             onCheckedChange = { independentTimeEnabled = it },
                             contentColor = contentColor,
-                            enableLiquidGlass = enableLiquidGlass,
-                            backdrop = sheetBackdrop,
                             isLightTheme = isLightTheme
                         )
                         Spacer(Modifier.height(12.dp))
@@ -1714,7 +1689,6 @@ internal fun WallpaperDetailScreen(
                                 onValueChange = { volume = it.coerceIn(0f, 1f) },
                                 valueRange = 0f..1f,
                                 onValueChangeFinished = { onVolumeAction(volume) },
-                                enableLiquidGlass = enableLiquidGlass,
                                 backdrop = sheetBackdrop,
                                 isLightTheme = isLightTheme,
                                 modifier = Modifier
@@ -1740,7 +1714,6 @@ internal fun WallpaperDetailScreen(
                             onValueChange = { brightness = it.coerceIn(brightnessMin, brightnessMax) },
                             valueRange = brightnessMin..brightnessMax,
                             onValueChangeFinished = { onBrightnessAction(brightness) },
-                            enableLiquidGlass = enableLiquidGlass,
                             backdrop = sheetBackdrop,
                             isLightTheme = isLightTheme,
                             modifier = Modifier
