@@ -9,7 +9,9 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.service.wallpaper.WallpaperService
+import android.view.Surface
 import android.view.SurfaceHolder
+import android.view.WindowManager
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
@@ -150,6 +152,13 @@ class StaticRasterWallpaperService : WallpaperService() {
         // ────────────────────────────────────────────
 
         private fun registerSensor() {
+            // 设置实时获取屏幕旋转角度的 provider
+            val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            renderer?.displayRotationProvider = {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.rotation
+            }
+            
             gyroSensor?.let { sensor ->
                 renderer?.resetSensor()
                 sensorManager?.registerListener(

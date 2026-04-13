@@ -8,6 +8,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.view.Surface
 import android.view.TextureView
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -98,6 +99,13 @@ fun RasterPreviewView(
     DisposableEffect(context) {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+
+        // 设置实时获取屏幕旋转角度的 provider，用于陀螺仪轴映射
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        renderer.displayRotationProvider = {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.rotation
+        }
 
         val sensorListener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent?) {

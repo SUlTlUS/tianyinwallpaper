@@ -18,7 +18,9 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.service.wallpaper.WallpaperService
 import android.util.Log
+import android.view.Surface
 import android.view.SurfaceHolder
+import android.view.WindowManager
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.service.raster.KeyframeTranscoder
@@ -59,6 +61,9 @@ class VideoRasterWallpaperService : WallpaperService() {
         var mCurAngleSensorValue: Float = 0f
             private set
 
+        // 实时获取屏幕旋转角度的 provider
+        var displayRotationProvider: () -> Int = { Surface.ROTATION_0 }
+
         private var lastTimestamp = 0L
         private var accumulatedAngle = 0f
         private var filteredVelocity = 0f
@@ -71,6 +76,14 @@ class VideoRasterWallpaperService : WallpaperService() {
         fun registerSensor(context: Context) {
             sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
             gyroSensor    = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+            
+            // 设置实时获取屏幕旋转角度的 provider
+            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            displayRotationProvider = {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.rotation
+            }
+            
             Log.d(TAG, "AngleSensor.register: hasGyro=${gyroSensor != null}")
             gyroSensor?.let { sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
             reset()
@@ -99,7 +112,20 @@ class VideoRasterWallpaperService : WallpaperService() {
             lastTimestamp = e.timestamp
             if (dt <= 0f || dt > 0.5f) return
 
-            filteredVelocity  = FILTER_ALPHA * e.values[1] + (1f - FILTER_ALPHA) * filteredVelocity
+            // 获取角速度，根据屏幕旋转选择正确的轴
+            // ROTATION_0 (竖屏): Y轴
+            // ROTATION_90 (左横屏): X轴
+            // ROTATION_180 (倒竖屏): -Y轴
+            // ROTATION_270 (右横屏): -X轴
+            val rotation = displayRotationProvider()
+            val angularVelocity = when (rotation) {
+                Surface.ROTATION_90 -> e.values[0]    // 左横屏
+                Surface.ROTATION_180 -> -e.values[1]  // 倒竖屏
+                Surface.ROTATION_270 -> -e.values[0]  // 右横屏
+                else -> e.values[1]                   // 竖屏
+            }
+            
+            filteredVelocity  = FILTER_ALPHA * angularVelocity + (1f - FILTER_ALPHA) * filteredVelocity
             accumulatedAngle += filteredVelocity * dt
             accumulatedAngle  = accumulatedAngle.coerceIn(-MAX_ANGLE_RAD, MAX_ANGLE_RAD)
 

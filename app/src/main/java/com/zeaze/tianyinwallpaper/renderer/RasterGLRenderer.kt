@@ -9,6 +9,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.net.Uri
 import android.opengl.EGL14
+import android.view.Surface
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
 import android.opengl.EGLDisplay
@@ -17,7 +18,6 @@ import android.opengl.GLES20
 import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.util.Log
-import android.view.Surface
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -38,6 +38,11 @@ import kotlin.math.sign
  * - Bitmap 缓存机制
  */
 class RasterGLRenderer {
+
+    // ── 屏幕旋转 ──
+    // 实时获取屏幕旋转角度，用于根据屏幕方向选择正确的陀螺仪轴
+    // 返回 Surface.ROTATION_0/90/180/270
+    var displayRotationProvider: () -> Int = { Surface.ROTATION_0 }
 
     // ── 配置参数 ──
     var transitionBand: Float = 0.55f
@@ -485,8 +490,18 @@ class RasterGLRenderer {
         // 防止时间跳跃导致的大角度变化
         if (dt <= 0f || dt > 0.5f) return
 
-        // 获取 Y 轴角速度（设备左右倾斜）
-        val angularVelocity = e.values[1]
+        // 获取角速度，根据屏幕旋转选择正确的轴
+        // ROTATION_0 (竖屏): Y轴
+        // ROTATION_90 (左横屏): X轴
+        // ROTATION_180 (倒竖屏): -Y轴
+        // ROTATION_270 (右横屏): -X轴
+        val rotation = displayRotationProvider()
+        val angularVelocity = when (rotation) {
+            Surface.ROTATION_90 -> e.values[0]    // 左横屏
+            Surface.ROTATION_180 -> -e.values[1]  // 倒竖屏
+            Surface.ROTATION_270 -> -e.values[0]  // 右横屏
+            else -> e.values[1]                   // 竖屏
+        }
         val absVelocity = abs(angularVelocity)
 
         // 速度阈值过滤

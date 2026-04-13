@@ -558,73 +558,34 @@ class MainActivity : BaseActivity() {
                  if (showBottomBar && currentRoute == ROUTE_MAIN) {
                     val selectedIndex = pagerState.currentPage
 
-                    if (enableLiquidGlass && liquidBackdrop != null) {
-                        LiquidBottomTabs(
-                            selectedTabIndex = { selectedIndex },
-                            onTabSelected = { index ->
-                                scope.launch { pagerState.animateScrollToPage(index) }
-                            },
-                            backdrop = liquidBackdrop,
-                            tabsCount = tabItems.size,
-                            isLightTheme = !useDarkTheme,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(horizontal = 36.dp)
-                                .padding(bottom = 10.dp)
-                        ) {
-                            tabItems.forEachIndexed { index, (route, titleRes) ->
-                                LiquidBottomTab({
-                                    scope.launch {
-                                        pagerState.animateScrollToPage(
-                                            index
-                                        )
-                                    }
-                                }) {
-                                    val selected = selectedIndex == index
-                                    val selectedColor = BOTTOM_BAR_SELECTED_COLOR
-                                    Text(
-                                        text = getString(titleRes),
-                                        color = if (selected) selectedColor else MaterialTheme.colors.onSurface,
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                    LiquidBottomTabs(
+                        selectedTabIndex = { selectedIndex },
+                        onTabSelected = { index ->
+                            scope.launch { pagerState.animateScrollToPage(index) }
+                        },
+                        backdrop = if (enableLiquidGlass) liquidBackdrop else null,
+                        tabsCount = tabItems.size,
+                        isLightTheme = !useDarkTheme,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 36.dp)
+                            .padding(bottom = 10.dp)
+                    ) {
+                        tabItems.forEachIndexed { index, (route, titleRes) ->
+                            LiquidBottomTab({
+                                scope.launch {
+                                    pagerState.animateScrollToPage(
+                                        index
                                     )
                                 }
-                            }
-                        }
-                    } else {
-                        // Fallback manual bottom bar for older versions
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .height(84.dp)
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
-                                .clip(RoundedCornerShape(26.dp))
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(Color(0xCCFFFFFF), Color(0x66FFFFFF))
-                                    )
+                            }) {
+                                val selected = selectedIndex == index
+                                val selectedColor = BOTTOM_BAR_SELECTED_COLOR
+                                Text(
+                                    text = getString(titleRes),
+                                    color = if (selected) selectedColor else MaterialTheme.colors.onSurface,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                 )
-                                .border(1.dp, Color(0x80FFFFFF), RoundedCornerShape(26.dp))
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceAround,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                tabItems.forEachIndexed { index, (route, titleRes) ->
-                                    Text(
-                                        text = getString(titleRes),
-                                        color = if (selectedIndex == index) MaterialTheme.colors.primary else MaterialTheme.colors.onSurface,
-                                        fontWeight = if (selectedIndex == index) FontWeight.Bold else FontWeight.Normal,
-                                        modifier = Modifier
-                                            .clickable {
-                                                scope.launch { pagerState.animateScrollToPage(index) }
-                                            }
-                                            .padding(horizontal = 8.dp, vertical = 8.dp)
-                                    )
-                                }
                             }
                         }
                     }
