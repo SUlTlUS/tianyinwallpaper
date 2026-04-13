@@ -849,7 +849,7 @@ fun MainRouteScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(0.62f)
+                                .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
                                 .zIndex(if (isDragging) 1f else 0f)
                                 .graphicsLayer {
                                     scaleX = if (isDragging) 1.05f else 1f
@@ -898,7 +898,7 @@ fun MainRouteScreen(
                                 model = model
                             )
                             Text(
-                                text = if (model.type == 0) "静态" else "动态",
+                                text = if (model.type == 0) "图片" else "视频",
                                 color = Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,

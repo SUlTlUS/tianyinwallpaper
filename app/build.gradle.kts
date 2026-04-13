@@ -15,8 +15,8 @@ android {
         applicationId = "com.zeaze.tianyinwallpaper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 36
-        versionName = "3.6"
+        versionCode = 37
+        versionName = "3.6.1"
         multiDexEnabled = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

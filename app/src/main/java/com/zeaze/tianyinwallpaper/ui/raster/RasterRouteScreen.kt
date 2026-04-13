@@ -1369,14 +1369,15 @@ private fun RasterGroupCard(
         ) {
             RasterGroupThumbnail(group = group)
             Text(
-                text = if (group.type == RasterGroupModel.TYPE_STATIC) "静态" else "动态",
+                text = if (group.type == RasterGroupModel.TYPE_STATIC) "图集" else "视频",
+                fontSize = 12.sp,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .background(Color(0x66000000), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                    .padding(3.dp)
+                    .background(Color(0x66000000), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
             )
             if (selected) {
                 Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))

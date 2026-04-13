@@ -19,6 +19,7 @@ import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
 import android.view.TextureView
+import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -119,6 +120,13 @@ fun VideoRasterPreviewView(
     DisposableEffect(context) {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+
+        // 设置实时获取屏幕旋转角度的 provider
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        renderer.displayRotationProvider = {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.rotation
+        }
 
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent?) {
@@ -258,6 +266,9 @@ private class VideoRasterPreviewRenderer(
     private val FILTER_ALPHA = 0.4f
     @Volatile var maxAngleRad = Math.toRadians(45.0).toFloat()
 
+    // 实时获取屏幕旋转角度的 provider
+    var displayRotationProvider: () -> Int = { Surface.ROTATION_0 }
+
     // ── 帧控制 ──
     private var currentPlaybackPosition = 0f
     private var lastFrameIndex = -1
@@ -303,7 +314,16 @@ private class VideoRasterPreviewRenderer(
         lastTimestamp = e.timestamp
         if (dt <= 0f || dt > 0.5f) return
 
-        filteredVelocity = FILTER_ALPHA * e.values[1] + (1f - FILTER_ALPHA) * filteredVelocity
+        // 获取角速度，根据屏幕旋转选择正确的轴
+        val rotation = displayRotationProvider()
+        val angularVelocity = when (rotation) {
+            Surface.ROTATION_90 -> e.values[0]    // 左横屏
+            Surface.ROTATION_180 -> -e.values[1]  // 倒竖屏
+            Surface.ROTATION_270 -> -e.values[0]  // 右横屏
+            else -> e.values[1]                   // 竖屏
+        }
+        
+        filteredVelocity = FILTER_ALPHA * angularVelocity + (1f - FILTER_ALPHA) * filteredVelocity
         accumulatedAngle += filteredVelocity * dt
         accumulatedAngle = accumulatedAngle.coerceIn(-maxAngleRad, maxAngleRad)
 
