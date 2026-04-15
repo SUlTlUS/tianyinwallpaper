@@ -1,10 +1,10 @@
 {
-  "code": 37,
-  "name": "3.6.1",
+  "code": 38,
+  "name": "3.6.2",
   "filename": "app-release.apk",
-  "url": "https://github.com/SUlTlUS/tianyinwallpaper/releases/download/v3.6.1/app-release.apk",
-  "time": 1776057471234,
-  "des": "- 支持平板设备横屏",
-  "size": 16080656,
-  "md5": "02fab769131fac61cbe295a92a3ddeef"
+  "url": "https://github.com/SUlTlUS/tianyinwallpaper/releases/download/v3.6.2/app-release.apk",
+  "time": 1776264270551,
+  "des": "- 优化后台资源占用\n- 优化播放列表离开桌面切换逻辑",
+  "size": 16080660,
+  "md5": "54ca6f12d726a726b830c3c2bceb5e13"
 }
