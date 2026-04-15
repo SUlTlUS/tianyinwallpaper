@@ -1,10 +1,10 @@
 {
-  "code": 36,
-  "name": "3.6",
+  "code": 37,
+  "name": "3.6.1",
   "filename": "app-release.apk",
-  "url": "https://github.com/SUlTlUS/tianyinwallpaper/releases/download/v3.6/app-release.apk",
-  "time": 1775990442141,
-  "des": "- 添加视频光栅功能\n- 添加多种图集光栅效果,波浪,长虹,棱镜\n- 修改应用ui界面",
-  "size": 16080652,
-  "md5": "5b7ae966289812d16f526fcbabab46d8"
+  "url": "https://github.com/SUlTlUS/tianyinwallpaper/releases/download/v3.6.1/app-release.apk",
+  "time": 1776057471234,
+  "des": "- 支持平板设备横屏",
+  "size": 16080656,
+  "md5": "02fab769131fac61cbe295a92a3ddeef"
 }
