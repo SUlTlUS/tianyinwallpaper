@@ -161,7 +161,6 @@ class VideoRasterWallpaperService : WallpaperService() {
         private var isWaitingForSurface = false
         private var pref: SharedPreferences? = null
         private var effectCtrl: RVEffectPreCtrl? = null
-
         private var playbackRunnable: Runnable? = null
         private val PLAYBACK_INTERVAL_MS = 32L   // ~30fps，匹配视频帧率，减少 seek 压力
 
@@ -404,6 +403,13 @@ class VideoRasterWallpaperService : WallpaperService() {
 
         // ── 播放循环（EGL 线程）───────────────────────────────────────────────
 
+
+        /**
+         * ★ 根据当前位置计算目标帧并同步解码
+         *
+         * seekToFrame 现在是同步的（MediaCodec 直接解码），
+         * 前向 1~5 帧耗时 ~1~5ms，大跳转在 28ms 预算内解码尽可能多的帧。
+         */
         private fun startPlaybackLoop() {
             stopPlaybackLoop()
             if (!isVisible) return
@@ -426,12 +432,6 @@ class VideoRasterWallpaperService : WallpaperService() {
             playbackRunnable = null
         }
 
-        /**
-         * ★ 根据当前位置计算目标帧并同步解码
-         *
-         * seekToFrame 现在是同步的（MediaCodec 直接解码），
-         * 前向 1~5 帧耗时 ~1~5ms，大跳转在 28ms 预算内解码尽可能多的帧。
-         */
         private fun updateFrame() {
             val totalFrames = effectCtrl?.getFrameCount() ?: return
 
@@ -439,7 +439,6 @@ class VideoRasterWallpaperService : WallpaperService() {
                 .coerceIn(0, totalFrames - 1)
 
             if (pendingFrame == lastFrameIndex) {
-                // 帧稳定 → 暂停播放器防止自动前进
                 if (frameStableCount++ > 3) {
                     effectCtrl?.ensurePaused()
                 }
@@ -463,7 +462,6 @@ class VideoRasterWallpaperService : WallpaperService() {
             private var sW = 0
             private var sH = 0
             private var isEglReady = false
-            private var drawCounter = 0L
 
             fun onSizeChanged(w: Int, h: Int) {
                 sW = w; sH = h
@@ -527,7 +525,6 @@ class VideoRasterWallpaperService : WallpaperService() {
             private val drawRunnable = Runnable { draw() }
 
             private fun draw() {
-                drawCounter++
                 if (!isEglReady || eglSurface == EGL14.EGL_NO_SURFACE || sW <= 0 || sH <= 0) return
 
                 EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)
@@ -543,10 +540,6 @@ class VideoRasterWallpaperService : WallpaperService() {
                 effectCtrl?.onDrawFrame(sW, sH)
                 if (!EGL14.eglSwapBuffers(display, eglSurface)) {
                     Log.e(TAG, "eglSwapBuffers failed: ${EGL14.eglGetError()}")
-                }
-
-                if (drawCounter % 300 == 0L) {
-                    Log.d(TAG, "draw: frame $drawCounter, pos=${"%.2f".format(currentPlaybackPosition)}, vidFrame=$lastFrameIndex")
                 }
             }
 

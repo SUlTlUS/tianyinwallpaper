@@ -13,6 +13,7 @@ import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -35,7 +36,16 @@ class RVRes(
         private const val DECODE_BUDGET_MS = 28L
         /** 超过此帧距，使用 extractor.seekTo 而非顺序解码 */
         private const val FORWARD_THRESHOLD = 90
+        private val metadataCache = ConcurrentHashMap<String, VideoMetadata>()
     }
+
+    private data class VideoMetadata(
+        val durationMs: Long,
+        val frameCount: Int,
+        val frameRate: Float,
+        val width: Int,
+        val height: Int
+    )
 
     interface Callback {
         fun onVideoFrameReady(frameIndex: Int, textureId: Int, transformMatrix: FloatArray)
@@ -177,12 +187,18 @@ class RVRes(
             val mime = format.getString(MediaFormat.KEY_MIME)!!
             videoWidth = format.getInteger(MediaFormat.KEY_WIDTH)
             videoHeight = format.getInteger(MediaFormat.KEY_HEIGHT)
+            val cachedMetadata = metadataCache[path]
             // KEY_DURATION 在 MediaFormat 中是微秒
             videoDuration = if (format.containsKey(MediaFormat.KEY_DURATION))
                 format.getLong(MediaFormat.KEY_DURATION) / 1000 else 0L   // μs → ms
 
             // ── 3.5 扫描实际帧数（比 duration*fps 公式可靠）──
-            var actualFrameCount = 0
+            if (cachedMetadata == null ||
+                cachedMetadata.durationMs != videoDuration ||
+                cachedMetadata.width != videoWidth ||
+                cachedMetadata.height != videoHeight
+            ) {
+                var actualFrameCount = 0
             while (ext.getSampleTime() >= 0) {
                 actualFrameCount++
                 if (!ext.advance()) break
@@ -196,6 +212,17 @@ class RVRes(
             else if (format.containsKey(MediaFormat.KEY_FRAME_RATE))
                 format.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat()
             else 30f
+                metadataCache[path] = VideoMetadata(
+                    durationMs = videoDuration,
+                    frameCount = videoFrameCount,
+                    frameRate = videoFrameRate,
+                    width = videoWidth,
+                    height = videoHeight
+                )
+            } else {
+                videoFrameCount = cachedMetadata.frameCount
+                videoFrameRate = cachedMetadata.frameRate
+            }
 
             // ── 4. 创建 MediaCodec（输出到 SurfaceTexture）──
             codecSurface = Surface(st)
@@ -262,7 +289,6 @@ class RVRes(
 
         while (true) {
             if (SystemClock.elapsedRealtime() - startTime > DECODE_BUDGET_MS) {
-                Log.d(TAG, "seekToFrame: budget expired, codecPos=$codecPosition, target=$target")
                 break
             }
 

@@ -246,9 +246,7 @@ class RVEffectPreCtrl(
     fun onUpdateAnimationData() {
         if (!isPrepared) return
         
-        val frameIndex = rvRes?.getCurrentFrame() ?: 0
         
-        Log.d(TAG, "onUpdateAnimationData: process=$process, alpha=$alpha, visible=$isVisible, frameIndex=$frameIndex")
         
         // 更新渲染参数
         renderNode?.setProcess(process)
@@ -256,15 +254,9 @@ class RVEffectPreCtrl(
         renderNode?.setVisible(isVisible)
     }
     
-    private var frameCounter = 0L
-    private var lastTextureUpdate = false
     
     fun onDrawFrame(surfaceWidth: Int, surfaceHeight: Int) {
         if (!isPrepared) {
-            frameCounter++
-            if (frameCounter % 60 == 0L) {
-                Log.w(TAG, "onDrawFrame: not prepared yet (frame $frameCounter)")
-            }
             return
         }
         
@@ -272,8 +264,7 @@ class RVEffectPreCtrl(
         GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
         
         // 更新视频纹理帧
-        val textureUpdated = rvRes?.updateTexImage() ?: false
-        lastTextureUpdate = textureUpdated
+        rvRes?.updateTexImage()
         
         // 清除缓冲区
         GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -281,13 +272,6 @@ class RVEffectPreCtrl(
         
         val texId = rvRes?.getTextureId() ?: 0
         val transformMatrix = rvRes?.getTransformMatrix() ?: FloatArray(16)
-        val currentFrame = rvRes?.getCurrentFrame() ?: -1
-        
-        frameCounter++
-        if (frameCounter % 30 == 0L) {
-            Log.w(TAG, "onDrawFrame: frame=$frameCounter, texId=$texId, size=${surfaceWidth}x$surfaceHeight, textureUpdated=$textureUpdated, currentFrame=$currentFrame")
-        }
-        
         renderNode?.onDrawFrame(surfaceWidth, surfaceHeight, texId, transformMatrix)
     }
     

@@ -59,6 +59,7 @@ class TianYinWallpaperService : WallpaperService() {
         private var pendingContentLoad = false
         private var screenOffActive = false
         private var screenOffSwitchHandled = false
+        private var screenStateReceiverRegistered = false
         private var wallpaperListVersion = Long.MIN_VALUE
         private val autoSwitchHandler = Handler(mainLooper)
         private val autoSwitchRunnable = Runnable {
@@ -120,20 +121,21 @@ class TianYinWallpaperService : WallpaperService() {
                         renderer?.requestRender()
                     }
                     "pageChange" -> pageChangeEnabled = sharedPreferences.getBoolean(key, false)
-                    PREF_AUTO_SWITCH_MODE,
                     PREF_AUTO_SWITCH_INTERVAL_SECONDS,
                     PREF_AUTO_SWITCH_TIME_POINTS,
                     PREF_AUTO_SWITCH_LAST_SWITCH_AT,
                     PREF_AUTO_SWITCH_ANCHOR_AT -> scheduleNextAutoSwitchCheck()
+                    PREF_AUTO_SWITCH_MODE -> {
+                        updateScreenStateReceiverRegistration()
+                        scheduleNextAutoSwitchCheck()
+                    }
                 }
             }
             pref?.registerOnSharedPreferenceChangeListener(prefListener)
 
             list = loadWallpaperList(force = true)
             initialLoadCompleted.set(false)
-            screenOffActive = !isScreenInteractive()
-            screenOffSwitchHandled = false
-            registerScreenStateReceiver()
+            updateScreenStateReceiverRegistration()
             scheduleNextAutoSwitchCheck()
         }
 
@@ -202,6 +204,23 @@ class TianYinWallpaperService : WallpaperService() {
         private fun isScreenInteractive(): Boolean {
             val powerManager = applicationContext.getSystemService(POWER_SERVICE) as? PowerManager
             return powerManager?.isInteractive ?: true
+        }
+
+        private fun updateScreenStateReceiverRegistration() {
+            val shouldRegister = (pref?.getInt(PREF_AUTO_SWITCH_MODE, 0) ?: 0) == 0
+            if (shouldRegister == screenStateReceiverRegistered) return
+
+            if (shouldRegister) {
+                screenOffActive = !isScreenInteractive()
+                screenOffSwitchHandled = false
+                registerScreenStateReceiver()
+                screenStateReceiverRegistered = true
+            } else {
+                runCatching { unregisterReceiver(screenStateReceiver) }
+                screenStateReceiverRegistered = false
+                screenOffActive = false
+                screenOffSwitchHandled = false
+            }
         }
 
         private fun registerScreenStateReceiver() {
@@ -920,7 +939,10 @@ class TianYinWallpaperService : WallpaperService() {
             autoSwitchHandler.removeCallbacks(autoSwitchRunnable)
             prefListener?.let { pref?.unregisterOnSharedPreferenceChangeListener(it) }
             prefListener = null
-            runCatching { unregisterReceiver(screenStateReceiver) }
+            if (screenStateReceiverRegistered) {
+                runCatching { unregisterReceiver(screenStateReceiver) }
+                screenStateReceiverRegistered = false
+            }
             mediaPlayer?.release()
             mediaPlayer = null
             renderer?.stop()
