@@ -206,9 +206,18 @@ class VideoRasterWallpaperService : WallpaperService() {
             if (visible) {
                 angleSensor.registerSensor(applicationContext)
                 checkGroupChange()
+                eglHandler?.post {
+                    if (effectCtrl?.isPrepared() == true) {
+                        startPlaybackLoop()
+                        eglThread?.requestRender()
+                    }
+                }
             } else {
                 angleSensor.unregisterSensor()
-                eglHandler?.post { effectCtrl?.ensurePaused() }
+                eglHandler?.post {
+                    stopPlaybackLoop()
+                    effectCtrl?.ensurePaused()
+                }
             }
         }
 
@@ -219,7 +228,10 @@ class VideoRasterWallpaperService : WallpaperService() {
 
             val latch = CountDownLatch(1)
             eglThread?.post {
-                try { effectCtrl?.release() }
+                try {
+                    stopPlaybackLoop()
+                    effectCtrl?.release()
+                }
                 catch (e: Exception) { Log.e(TAG, "release error: ${e.message}") }
                 finally { latch.countDown() }
             }
@@ -345,7 +357,11 @@ class VideoRasterWallpaperService : WallpaperService() {
                         lastFrameIndex = -1
                         currentPlaybackPosition = 0f   // 初始位于第0帧
                         effectCtrl?.seekToFrame(0)
-                        startPlaybackLoop()
+                        if (isVisible) {
+                            startPlaybackLoop()
+                        } else {
+                            effectCtrl?.ensurePaused()
+                        }
                     }
                 }
 
@@ -390,6 +406,7 @@ class VideoRasterWallpaperService : WallpaperService() {
 
         private fun startPlaybackLoop() {
             stopPlaybackLoop()
+            if (!isVisible) return
             Log.w(TAG, "startPlaybackLoop")
 
             playbackRunnable = object : Runnable {

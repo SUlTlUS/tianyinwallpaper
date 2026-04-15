@@ -41,6 +41,7 @@ class SimpleGLRenderer {
     private var eglThread: EglRenderThread? = null
     private val isRunning = AtomicBoolean(false)
     private val isSurfaceValid = AtomicBoolean(false)
+    private val renderSignal = Object()
 
     // ── 消息队列 ──
     private val messageQueue = ConcurrentLinkedQueue<RenderMessage>()
@@ -83,6 +84,7 @@ class SimpleGLRenderer {
         isSurfaceValid.set(false)
         if (!isRunning.getAndSet(false)) return
         messageQueue.clear()
+        signalRenderThread()
         eglThread?.finish()
         eglThread = null
     }
@@ -94,6 +96,7 @@ class SimpleGLRenderer {
         isSurfaceValid.set(false)
         if (!isRunning.getAndSet(false)) return
         messageQueue.clear()
+        signalRenderThread()
         eglThread?.finishAndWait(timeoutMs)
         eglThread = null
     }
@@ -140,6 +143,7 @@ class SimpleGLRenderer {
         isVideoMode = false
         messageQueue.offer(RenderMessage.LoadBitmap(bitmap))
         messageQueue.offer(RenderMessage.Render)
+        signalRenderThread()
     }
 
     /**
@@ -156,6 +160,7 @@ class SimpleGLRenderer {
     fun setBrightness(b: Float) {
         messageQueue.offer(RenderMessage.SetBrightness(b))
         messageQueue.offer(RenderMessage.Render)
+        signalRenderThread()
     }
 
     /**
@@ -163,6 +168,7 @@ class SimpleGLRenderer {
      */
     fun updateVideoFrame() {
         messageQueue.offer(RenderMessage.UpdateVideoFrame)
+        signalRenderThread()
     }
 
     /**
@@ -170,6 +176,7 @@ class SimpleGLRenderer {
      */
     fun requestRender() {
         messageQueue.offer(RenderMessage.Render)
+        signalRenderThread()
     }
 
     /**
@@ -183,6 +190,12 @@ class SimpleGLRenderer {
      */
     fun setOnFrameAvailableListener(listener: SurfaceTexture.OnFrameAvailableListener?) {
         eglThread?.videoST?.setOnFrameAvailableListener(listener)
+    }
+
+    private fun signalRenderThread() {
+        synchronized(renderSignal) {
+            renderSignal.notifyAll()
+        }
     }
 
     // ── EGL 渲染线程 ──
@@ -247,6 +260,17 @@ class SimpleGLRenderer {
             initLatch.countDown()
 
             while (isRunning.get() && isSurfaceValid.get()) {
+                try {
+                    synchronized(renderSignal) {
+                        while (isRunning.get() && isSurfaceValid.get() && messageQueue.isEmpty()) {
+                            renderSignal.wait()
+                        }
+                    }
+                } catch (_: InterruptedException) {
+                    if (!isRunning.get() || !isSurfaceValid.get()) break
+                }
+
+                var needsDraw = false
                 while (isSurfaceValid.get()) {
                     val msg = messageQueue.poll() ?: break
                     if (!isSurfaceValid.get()) break
@@ -280,8 +304,9 @@ class SimpleGLRenderer {
                         }
                         is RenderMessage.UpdateVideoFrame -> {
                             frameAvailable = true
+                            needsDraw = true
                         }
-                        is RenderMessage.Render -> {
+                        is RenderMessage.Render -> { needsDraw = true
                             // 渲染在下面
                         }
                     }
@@ -289,12 +314,8 @@ class SimpleGLRenderer {
 
                 if (!isSurfaceValid.get()) break
 
-                draw()
-
-                try {
-                    Thread.sleep(16)
-                } catch (e: InterruptedException) {
-                    break
+                if (needsDraw) {
+                    draw()
                 }
             }
 
@@ -429,7 +450,6 @@ class SimpleGLRenderer {
             val prog = if (currentIsVideo) vProg else iProg
             GLES20.glUseProgram(prog)
 
-            Log.d(TAG, "draw: sW=$sW, sH=$sH, cW=$cW, cH=$cH, isVideo=$currentIsVideo")
 
             // 计算 MVP 矩阵（居中裁剪 + 滚动偏移）
             val mvp = FloatArray(16)

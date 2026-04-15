@@ -87,6 +87,7 @@ class StaticRasterWallpaperService : WallpaperService() {
 
             // 初始化渲染器（集成传感器处理）
             renderer = RasterGLRenderer()
+            renderer?.setRenderingEnabled(false)
 
             loadActiveGroup()
         }
@@ -112,6 +113,7 @@ class StaticRasterWallpaperService : WallpaperService() {
             isVisible = visible
 
             if (visible) {
+                renderer?.setRenderingEnabled(true)
                 registerSensor()
 
                 // 重新从 SharedPreferences 读取最新参数
@@ -132,6 +134,7 @@ class StaticRasterWallpaperService : WallpaperService() {
                 }
             } else {
                 unregisterSensor()
+                renderer?.setRenderingEnabled(false)
             }
         }
         

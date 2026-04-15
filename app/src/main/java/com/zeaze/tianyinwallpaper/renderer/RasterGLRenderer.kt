@@ -137,6 +137,8 @@ class RasterGLRenderer {
     private var eglThread: EglRenderThread? = null
     private val isRunning = AtomicBoolean(false)
     private val isSurfaceValid = AtomicBoolean(false)
+    @Volatile private var renderingEnabled = true
+    private val renderControl = Object()
 
     // ── 消息队列 ──
     private val messageQueue = ConcurrentLinkedQueue<RenderMessage>()
@@ -183,6 +185,9 @@ class RasterGLRenderer {
         isSurfaceValid.set(false)
         if (!isRunning.getAndSet(false)) return
         messageQueue.clear()
+        synchronized(renderControl) {
+            renderControl.notifyAll()
+        }
         eglThread?.finish()
         eglThread = null
         releaseBitmaps()
@@ -195,6 +200,9 @@ class RasterGLRenderer {
         isSurfaceValid.set(false)
         if (!isRunning.getAndSet(false)) return
         messageQueue.clear()
+        synchronized(renderControl) {
+            renderControl.notifyAll()
+        }
         eglThread?.finishAndWait(timeoutMs)
         eglThread = null
         releaseBitmaps()
@@ -424,6 +432,19 @@ class RasterGLRenderer {
      */
     fun requestRender() {
         messageQueue.offer(RenderMessage.Render)
+        synchronized(renderControl) {
+            renderControl.notifyAll()
+        }
+    }
+
+    fun setRenderingEnabled(enabled: Boolean) {
+        renderingEnabled = enabled
+        synchronized(renderControl) {
+            renderControl.notifyAll()
+        }
+        if (enabled) {
+            requestRender()
+        }
     }
     
     // ── 传感器处理接口 ──
@@ -751,6 +772,9 @@ class RasterGLRenderer {
 
         fun post(r: () -> Unit) {
             messageQueue.offer(RenderMessage.ExecuteTask(r))
+            synchronized(renderControl) {
+                renderControl.notifyAll()
+            }
         }
 
         fun uploadBitmapSync(b: Bitmap) {
@@ -779,6 +803,30 @@ class RasterGLRenderer {
             initGL()
 
             while (isRunning.get() && isSurfaceValid.get()) {
+                if (!renderingEnabled) {
+                    try {
+                        synchronized(renderControl) {
+                            while (isRunning.get() && isSurfaceValid.get() && !renderingEnabled) {
+                                renderControl.wait()
+                            }
+                        }
+                    } catch (_: InterruptedException) {
+                        if (!isRunning.get() || !isSurfaceValid.get()) break
+                    }
+                    if (!isRunning.get() || !isSurfaceValid.get()) break
+                }
+
+                try {
+                    synchronized(renderControl) {
+                        while (isRunning.get() && isSurfaceValid.get() && renderingEnabled && messageQueue.isEmpty()) {
+                            renderControl.wait()
+                        }
+                    }
+                } catch (_: InterruptedException) {
+                    if (!isRunning.get() || !isSurfaceValid.get()) break
+                }
+
+                var needsDraw = false
                 while (isSurfaceValid.get()) {
                     val msg = messageQueue.poll() ?: break
                     if (!isSurfaceValid.get()) break
@@ -824,17 +872,13 @@ class RasterGLRenderer {
                                 msg.task()
                             }
                         }
-                        is RenderMessage.Render -> { }
+                        is RenderMessage.Render -> needsDraw = true
                     }
                 }
 
                 if (!isSurfaceValid.get()) break
-                draw()
-
-                try {
-                    Thread.sleep(16)
-                } catch (e: InterruptedException) {
-                    break
+                if (needsDraw) {
+                    draw()
                 }
             }
 

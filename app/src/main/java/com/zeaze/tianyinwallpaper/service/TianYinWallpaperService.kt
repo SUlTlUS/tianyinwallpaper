@@ -16,9 +16,10 @@ import android.view.SurfaceHolder
 import com.alibaba.fastjson.JSON
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
+import com.zeaze.tianyinwallpaper.renderer.RenderBitmapCache
 import com.zeaze.tianyinwallpaper.renderer.SimpleGLRenderer
 import com.zeaze.tianyinwallpaper.utils.FileUtil
-import java.io.InputStream
+import java.io.File
 import java.util.Calendar
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
@@ -50,11 +51,13 @@ class TianYinWallpaperService : WallpaperService() {
         private var interruptedIndexForConditional: Int? = null
         private var activeConditionalIndex = -1
         private var mode2TimelineIndexDuringConditional: Int? = null
+        private var pendingContentLoad = false
+        private var wallpaperListVersion = Long.MIN_VALUE
         private val autoSwitchHandler = Handler(mainLooper)
         private val autoSwitchRunnable = Runnable {
             val mode = pref?.getInt(PREF_AUTO_SWITCH_MODE, 0) ?: 0
             if (initialLoadCompleted.get() && (mode != 0 || hasConditionalRules()) && checkAutoSwitch()) {
-                nextWallpaper()
+                nextWallpaper(loadContentNow = isVisible)
             }
             scheduleNextAutoSwitchCheck()
         }
@@ -88,10 +91,7 @@ class TianYinWallpaperService : WallpaperService() {
             }
             pref?.registerOnSharedPreferenceChangeListener(prefListener)
 
-            try {
-                val s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
-                list = JSON.parseArray(s, TianYinWallpaperModel::class.java)
-            } catch (_: Exception) {}
+            list = loadWallpaperList(force = true)
             initialLoadCompleted.set(false)
             scheduleNextAutoSwitchCheck()
         }
@@ -108,7 +108,7 @@ class TianYinWallpaperService : WallpaperService() {
             surfaceHeight = if (height > 0) height else 1
             renderer?.start(holder.surface, width, height)
             // 首次加载必须立即显示，不受最小切换时间限制。
-            if (index == -1) nextWallpaper(ignoreMinInterval = true) else loadContent()
+            if (index == -1) nextWallpaper(ignoreMinInterval = true, loadContentNow = true) else applyCurrentContent(loadContentNow = true)
             scheduleNextAutoSwitchCheck()
         }
 
@@ -122,44 +122,17 @@ class TianYinWallpaperService : WallpaperService() {
             val autoSwitchMode = pref?.getInt(PREF_AUTO_SWITCH_MODE, 0) ?: 0
             if (visible) {
                 Log.d(TAG, "onVisibilityChanged: visible=true, index=$index")
-                if (mediaPlayer != null && isMediaPlayerPrepared && !mediaPlayer!!.isPlaying) {
-                    mediaPlayer!!.start()
-                }
-                renderer?.requestRender()
-
-                try {
-                    val oldModel = list?.getOrNull(index)
-                    val oldUuid = oldModel?.uuid
-                    val oldImgUri = oldModel?.imgUri
-                    val oldVideoUri = oldModel?.videoUri
-                    val s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
-                    val newList = JSON.parseArray(s, TianYinWallpaperModel::class.java)
-                    if (newList != list) {
-                        Log.d(TAG, "onVisibilityChanged: list changed, oldSize=${list?.size ?: 0}, newSize=${newList?.size ?: 0}, oldIndex=$index, oldUuid=$oldUuid")
-                        list = newList
-                        shuffledIndices.clear()
-                        shuffledPointer = -1
-
-                        if (!newList.isNullOrEmpty()) {
-                            val mappedIndex = when {
-                                !oldUuid.isNullOrBlank() -> newList.indexOfFirst { it.uuid == oldUuid }
-                                !oldVideoUri.isNullOrBlank() -> newList.indexOfFirst { it.videoUri == oldVideoUri }
-                                !oldImgUri.isNullOrBlank() -> newList.indexOfFirst { it.imgUri == oldImgUri }
-                                else -> -1
-                            }
-                            index = when {
-                                mappedIndex >= 0 -> mappedIndex
-                                index in newList.indices -> index
-                                else -> 0
-                            }
-                            Log.d(TAG, "onVisibilityChanged: remap result mappedIndex=$mappedIndex, finalIndex=$index, finalUuid=${newList.getOrNull(index)?.uuid}")
-                            pref?.edit()?.putInt(PREF_CURRENT_INDEX, index)?.apply()
-                        }
-                    }
-                } catch (_: Exception) {}
+                syncPlaylistIfChanged()
 
                 if (checkAutoSwitch()) {
                     nextWallpaper()
+                } else if (pendingContentLoad) {
+                    applyCurrentContent(loadContentNow = true)
+                } else {
+                    if (mediaPlayer != null && isMediaPlayerPrepared && !mediaPlayer!!.isPlaying) {
+                        mediaPlayer!!.start()
+                    }
+                    renderer?.requestRender()
                 }
             } else {
                 if (mediaPlayer != null && mediaPlayer!!.isPlaying) {
@@ -168,13 +141,76 @@ class TianYinWallpaperService : WallpaperService() {
                 if (initialLoadCompleted.get()) {
                     if (autoSwitchMode == 0) {
                         Log.d(TAG, "onVisibilityChanged: visible=false, switch wallpaper now for mode=0")
-                        nextWallpaper()
+                        nextWallpaper(loadContentNow = false)
                     } else if (checkAutoSwitch()) {
-                        Handler(mainLooper).postDelayed({ nextWallpaper() }, 100)
+                        Handler(mainLooper).postDelayed({ nextWallpaper(loadContentNow = false) }, 100)
                     }
                 }
             }
             scheduleNextAutoSwitchCheck()
+        }
+
+        private fun wallpaperListFileVersion(): Long {
+            val file = File(applicationContext.getExternalFilesDir(null), FileUtil.wallpaperPath)
+            return if (file.exists()) file.lastModified() else -1L
+        }
+
+        private fun loadWallpaperList(force: Boolean = false): List<TianYinWallpaperModel>? {
+            val version = wallpaperListFileVersion()
+            if (!force && list != null && wallpaperListVersion == version) {
+                return list
+            }
+            return try {
+                val s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
+                JSON.parseArray(s, TianYinWallpaperModel::class.java).also {
+                    wallpaperListVersion = version
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private fun syncPlaylistIfChanged() {
+            val oldList = list
+            val newList = loadWallpaperList(force = false) ?: return
+            if (newList === oldList || newList == oldList) return
+
+            val oldModel = oldList?.getOrNull(index)
+            val oldUuid = oldModel?.uuid
+            val oldImgUri = oldModel?.imgUri
+            val oldVideoUri = oldModel?.videoUri
+
+            Log.d(TAG, "onVisibilityChanged: list changed, oldSize=${oldList?.size ?: 0}, newSize=${newList.size}, oldIndex=$index, oldUuid=$oldUuid")
+            list = newList
+            shuffledIndices.clear()
+            shuffledPointer = -1
+
+            if (newList.isNotEmpty()) {
+                val mappedIndex = when {
+                    !oldUuid.isNullOrBlank() -> newList.indexOfFirst { it.uuid == oldUuid }
+                    !oldVideoUri.isNullOrBlank() -> newList.indexOfFirst { it.videoUri == oldVideoUri }
+                    !oldImgUri.isNullOrBlank() -> newList.indexOfFirst { it.imgUri == oldImgUri }
+                    else -> -1
+                }
+                index = when {
+                    mappedIndex >= 0 -> mappedIndex
+                    index in newList.indices -> index
+                    else -> 0
+                }
+                Log.d(TAG, "onVisibilityChanged: remap result mappedIndex=$mappedIndex, finalIndex=$index, finalUuid=${newList.getOrNull(index)?.uuid}")
+                pref?.edit()?.putInt(PREF_CURRENT_INDEX, index)?.apply()
+            }
+        }
+
+        private fun applyCurrentContent(loadContentNow: Boolean) {
+            if (loadContentNow) {
+                pendingContentLoad = false
+                loadContent()
+            } else {
+                pendingContentLoad = true
+                isMediaPlayerPrepared = false
+                mediaPlayer?.pause()
+            }
         }
 
         private fun hasConditionalRules(): Boolean {
@@ -364,7 +400,7 @@ class TianYinWallpaperService : WallpaperService() {
 
                 if (index != conditionalIndex) {
                     index = conditionalIndex
-                    loadContent()
+                    applyCurrentContent(loadContentNow = isVisible)
                     markSwitchTimestamp()
                     pref.edit().putInt(PREF_CURRENT_INDEX, index).apply()
                 }
@@ -378,7 +414,7 @@ class TianYinWallpaperService : WallpaperService() {
                     interruptedIndexForConditional = null
                     if (resumeIndex != null && resumeIndex in list.indices && index != resumeIndex) {
                         index = resumeIndex
-                        loadContent()
+                        applyCurrentContent(loadContentNow = isVisible)
                         markSwitchTimestamp()
                         pref.edit().putInt(PREF_CURRENT_INDEX, index).apply()
                         return false
@@ -389,7 +425,7 @@ class TianYinWallpaperService : WallpaperService() {
                     mode2TimelineIndexDuringConditional = null
                     if (mode2ResumeIndex != null && mode2ResumeIndex in list.indices && index != mode2ResumeIndex) {
                         index = mode2ResumeIndex
-                        loadContent()
+                        applyCurrentContent(loadContentNow = isVisible)
                         markSwitchTimestamp()
                         pref.edit().putInt(PREF_CURRENT_INDEX, index).apply()
                         return false
@@ -508,10 +544,10 @@ class TianYinWallpaperService : WallpaperService() {
             pref?.edit()?.putLong(PREF_MIN_SWITCH_LAST_AT, System.currentTimeMillis())?.apply()
         }
 
-        fun next() = nextWallpaper(ignoreMinInterval = true)
-        fun prev() = prevWallpaper(ignoreMinInterval = true)
+        fun next() = nextWallpaper(ignoreMinInterval = true, loadContentNow = true)
+        fun prev() = prevWallpaper(ignoreMinInterval = true, loadContentNow = true)
 
-        private fun nextWallpaper(ignoreMinInterval: Boolean = false) {
+        private fun nextWallpaper(ignoreMinInterval: Boolean = false, loadContentNow: Boolean = true) {
             val list = this.list ?: return
             if (list.isEmpty()) return
 
@@ -519,7 +555,7 @@ class TianYinWallpaperService : WallpaperService() {
             if (list.size == 1) {
                 if (index != 0) {
                     index = 0
-                    loadContent()
+                    applyCurrentContent(loadContentNow)
                     markSwitchTimestamp()
                     pref?.edit()?.putInt(PREF_CURRENT_INDEX, index)?.apply()
                 }
@@ -545,7 +581,7 @@ class TianYinWallpaperService : WallpaperService() {
                 Log.d(TAG, "nextWallpaper: seq selected index=$index")
             }
             Log.d(TAG, "nextWallpaper: loading index=$index, uuid=${list.getOrNull(index)?.uuid}, type=${list.getOrNull(index)?.type}")
-            loadContent()
+            applyCurrentContent(loadContentNow)
             markSwitchTimestamp()
             pref?.edit()?.putInt(PREF_CURRENT_INDEX, index)?.apply()
         }
@@ -553,19 +589,18 @@ class TianYinWallpaperService : WallpaperService() {
         fun updateIndex(newIndex: Int) {
              if (newIndex in 0 until (list?.size ?: 0)) {
                  index = newIndex
-                 loadContent()
+                 applyCurrentContent(loadContentNow = isVisible)
                  markSwitchTimestamp()
              }
         }
 
         fun refreshCurrentFromStorage() {
             try {
-                val s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
-                val newList = JSON.parseArray(s, TianYinWallpaperModel::class.java)
+                val newList = loadWallpaperList(force = true)
                 if (!newList.isNullOrEmpty()) {
                     list = newList
                     if (index !in newList.indices) index = 0
-                    loadContent()
+                    applyCurrentContent(loadContentNow = isVisible)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "refreshCurrentFromStorage error", e)
@@ -579,8 +614,7 @@ class TianYinWallpaperService : WallpaperService() {
                 val oldUuid = oldModel?.uuid
                 val oldVideoUri = oldModel?.videoUri
                 val oldImgUri = oldModel?.imgUri
-                val s = FileUtil.loadData(applicationContext, FileUtil.wallpaperPath)
-                val newList = JSON.parseArray(s, TianYinWallpaperModel::class.java)
+                val newList = loadWallpaperList(force = true)
                 if (!newList.isNullOrEmpty()) {
                     Log.d(TAG, "syncPlaylist: oldSize=${list?.size ?: 0}, newSize=${newList.size}, oldIndex=$index, oldUuid=$oldUuid")
                     list = newList
@@ -634,7 +668,7 @@ class TianYinWallpaperService : WallpaperService() {
             mediaPlayer?.setVolume(volume, volume)
         }
 
-        private fun prevWallpaper(ignoreMinInterval: Boolean = false) {
+        private fun prevWallpaper(ignoreMinInterval: Boolean = false, loadContentNow: Boolean = true) {
             val list = this.list ?: return
             if (list.isEmpty()) return
 
@@ -658,7 +692,7 @@ class TianYinWallpaperService : WallpaperService() {
                 count++
             }
             index = nextIndex
-            loadContent()
+            applyCurrentContent(loadContentNow)
             markSwitchTimestamp()
             pref?.edit()?.putInt(PREF_CURRENT_INDEX, index)?.apply()
         }
@@ -699,7 +733,7 @@ class TianYinWallpaperService : WallpaperService() {
                 if (videoST == null) {
                     Log.e(TAG, "videoSurfaceTexture is null!")
                     initialLoadCompleted.set(true)
-                    Handler(mainLooper).post { nextWallpaper() }
+                    Handler(mainLooper).post { nextWallpaper(loadContentNow = isVisible) }
                     return
                 }
 
@@ -730,7 +764,7 @@ class TianYinWallpaperService : WallpaperService() {
                 mediaPlayer!!.setOnErrorListener { _, what, extra ->
                     Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
                     isMediaPlayerPrepared = false
-                    Handler(mainLooper).post { nextWallpaper() }
+                    Handler(mainLooper).post { nextWallpaper(loadContentNow = isVisible) }
                     true
                 }
 
@@ -758,7 +792,7 @@ class TianYinWallpaperService : WallpaperService() {
             } catch (e: Exception) {
                 Log.e(TAG, "Video error", e)
                 initialLoadCompleted.set(true)
-                Handler(mainLooper).post { nextWallpaper() }
+                Handler(mainLooper).post { nextWallpaper(loadContentNow = isVisible) }
             }
         }
 
@@ -771,9 +805,7 @@ class TianYinWallpaperService : WallpaperService() {
             renderer?.setVideoMode(false)
             renderer?.setUserTransform(model.scale, model.offsetX, model.offsetY, model.rotation)
             try {
-                val `is`: InputStream? = applicationContext.contentResolver.openInputStream(Uri.parse(model.imgUri))
-                val bitmap = BitmapFactory.decodeStream(`is`)
-                `is`?.close()
+                val bitmap = loadCachedWallpaperBitmap(model)
                 if (bitmap != null) {
                     Log.d(TAG, "prepareImage: ${bitmap.width}x${bitmap.height}")
                     currentContentWidth = if (bitmap.width > 0) bitmap.width else 1
@@ -786,18 +818,32 @@ class TianYinWallpaperService : WallpaperService() {
                 } else {
                     Log.e(TAG, "prepareImage: bitmap is null")
                     initialLoadCompleted.set(true)
-                    Handler(mainLooper).post { nextWallpaper() }
+                    Handler(mainLooper).post { nextWallpaper(loadContentNow = isVisible) }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Image error", e)
                 initialLoadCompleted.set(true)
-                Handler(mainLooper).post { nextWallpaper() }
+                Handler(mainLooper).post { nextWallpaper(loadContentNow = isVisible) }
             }
+        }
+
+        private fun loadCachedWallpaperBitmap(model: TianYinWallpaperModel): Bitmap? {
+            val uri = Uri.parse(model.imgUri)
+            val scaledWidth = (surfaceWidth * maxOf(currentUserScale, 1f)).roundToInt().coerceAtLeast(1)
+            val scaledHeight = (surfaceHeight * maxOf(currentUserScale, 1f)).roundToInt().coerceAtLeast(1)
+            val targetWidth = maxOf(scaledWidth, surfaceWidth * 2).coerceAtLeast(1)
+            val targetHeight = maxOf(scaledHeight, surfaceHeight * 2).coerceAtLeast(1)
+
+            return RenderBitmapCache.loadSync(
+                context = applicationContext,
+                uri = uri,
+                targetWidth = targetWidth,
+                targetHeight = targetHeight
+            )?.takeIf { !it.isRecycled }?.copy(Bitmap.Config.ARGB_8888, false)
         }
 
         override fun onFrameAvailable(surfaceTexture: SurfaceTexture) {
             renderer?.updateVideoFrame()
-            renderer?.requestRender()
         }
 
         override fun onDestroy() {
