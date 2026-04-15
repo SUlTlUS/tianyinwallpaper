@@ -1,6 +1,9 @@
 package com.zeaze.tianyinwallpaper.service
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -8,7 +11,9 @@ import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
+import android.os.PowerManager
 import android.os.SystemClock
 import android.service.wallpaper.WallpaperService
 import android.util.Log
@@ -52,6 +57,8 @@ class TianYinWallpaperService : WallpaperService() {
         private var activeConditionalIndex = -1
         private var mode2TimelineIndexDuringConditional: Int? = null
         private var pendingContentLoad = false
+        private var screenOffActive = false
+        private var screenOffSwitchHandled = false
         private var wallpaperListVersion = Long.MIN_VALUE
         private val autoSwitchHandler = Handler(mainLooper)
         private val autoSwitchRunnable = Runnable {
@@ -60,6 +67,37 @@ class TianYinWallpaperService : WallpaperService() {
                 nextWallpaper(loadContentNow = isVisible)
             }
             scheduleNextAutoSwitchCheck()
+        }
+        private val screenStateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    Intent.ACTION_SCREEN_OFF -> {
+                        screenOffActive = true
+                        if ((pref?.getInt(PREF_AUTO_SWITCH_MODE, 0) ?: 0) == 0 && initialLoadCompleted.get()) {
+                            when {
+                                pendingContentLoad -> {
+                                    Log.d(TAG, "screen turned off with pending content, loading now")
+                                    applyCurrentContent(loadContentNow = true)
+                                    screenOffSwitchHandled = true
+                                }
+                                !screenOffSwitchHandled && isVisible -> {
+                                    Log.d(TAG, "screen turned off while wallpaper visible, switching now")
+                                    nextWallpaper(loadContentNow = true)
+                                    screenOffSwitchHandled = true
+                                }
+                            }
+                        }
+                    }
+                    Intent.ACTION_SCREEN_ON -> {
+                        screenOffActive = false
+                        screenOffSwitchHandled = false
+                    }
+                    Intent.ACTION_USER_PRESENT -> {
+                        screenOffActive = false
+                        screenOffSwitchHandled = false
+                    }
+                }
+            }
         }
         private var prefListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
@@ -93,6 +131,9 @@ class TianYinWallpaperService : WallpaperService() {
 
             list = loadWallpaperList(force = true)
             initialLoadCompleted.set(false)
+            screenOffActive = !isScreenInteractive()
+            screenOffSwitchHandled = false
+            registerScreenStateReceiver()
             scheduleNextAutoSwitchCheck()
         }
 
@@ -140,14 +181,41 @@ class TianYinWallpaperService : WallpaperService() {
                 }
                 if (initialLoadCompleted.get()) {
                     if (autoSwitchMode == 0) {
-                        Log.d(TAG, "onVisibilityChanged: visible=false, switch wallpaper now for mode=0")
-                        nextWallpaper(loadContentNow = false)
+                        if (screenOffSwitchHandled) {
+                            Log.d(TAG, "onVisibilityChanged: visible=false, skip mode=0 switch because screen-off already handled")
+                        } else {
+                            val loadContentNow = screenOffActive || !isScreenInteractive()
+                            Log.d(TAG, "onVisibilityChanged: visible=false, switch wallpaper for mode=0, loadNow=$loadContentNow")
+                            nextWallpaper(loadContentNow = loadContentNow)
+                            if (loadContentNow) {
+                                screenOffSwitchHandled = true
+                            }
+                        }
                     } else if (checkAutoSwitch()) {
                         Handler(mainLooper).postDelayed({ nextWallpaper(loadContentNow = false) }, 100)
                     }
                 }
             }
             scheduleNextAutoSwitchCheck()
+        }
+
+        private fun isScreenInteractive(): Boolean {
+            val powerManager = applicationContext.getSystemService(POWER_SERVICE) as? PowerManager
+            return powerManager?.isInteractive ?: true
+        }
+
+        private fun registerScreenStateReceiver() {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(screenStateReceiver, filter)
+            }
         }
 
         private fun wallpaperListFileVersion(): Long {
@@ -852,6 +920,7 @@ class TianYinWallpaperService : WallpaperService() {
             autoSwitchHandler.removeCallbacks(autoSwitchRunnable)
             prefListener?.let { pref?.unregisterOnSharedPreferenceChangeListener(it) }
             prefListener = null
+            runCatching { unregisterReceiver(screenStateReceiver) }
             mediaPlayer?.release()
             mediaPlayer = null
             renderer?.stop()
