@@ -17,7 +17,6 @@ android {
         targetSdk = 36
         versionCode = 38
         versionName = "3.6.3"
-        multiDexEnabled = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -126,6 +125,5 @@ dependencies {
     implementation(libs.mediaplayer.extended)
 
     // 其他
-    implementation(libs.androidx.multidex)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

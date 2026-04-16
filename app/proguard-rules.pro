@@ -19,3 +19,10 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# OkHttp can probe optional TLS providers at runtime. We don't ship these
+# provider implementations, so R8 should not treat them as required classes.
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.jsse.**
+-dontwarn org.bouncycastle.jsse.provider.**
+-dontwarn org.openjsse.**
