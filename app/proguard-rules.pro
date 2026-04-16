@@ -26,3 +26,15 @@
 -dontwarn org.bouncycastle.jsse.**
 -dontwarn org.bouncycastle.jsse.provider.**
 -dontwarn org.openjsse.**
+
+# Fastjson reflects over model fields stored in SharedPreferences / local files.
+# If R8 renames these fields, release builds can deserialize empty/default models
+# and wallpaper services may render a black frame.
+-keep class com.zeaze.tianyinwallpaper.model.** { *; }
+-keep class com.zeaze.tianyinwallpaper.ui.commom.SaveData { *; }
+-keep class com.zeaze.tianyinwallpaper.update.UpdateInfo { *; }
+
+# Wallpaper services are referenced by the system and app-side component lookups.
+-keep class com.zeaze.tianyinwallpaper.service.TianYinWallpaperService { *; }
+-keep class com.zeaze.tianyinwallpaper.service.VideoRasterWallpaperService { *; }
+-keep class com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService { *; }
