@@ -77,10 +77,13 @@ import com.zeaze.tianyinwallpaper.base.BaseActivity
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.about.AboutRouteScreen
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
+import com.zeaze.tianyinwallpaper.ui.depth.DepthRouteScreen
 import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
 import com.zeaze.tianyinwallpaper.ui.raster.RasterRouteScreen
 import com.zeaze.tianyinwallpaper.ui.test.CorrugatedTestRouteScreen
+import com.zeaze.tianyinwallpaper.ui.test.DepthModelTestRouteScreen
+import com.zeaze.tianyinwallpaper.ui.test.PlyModelTestRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
 import kotlinx.coroutines.launch
@@ -107,7 +110,8 @@ import com.zeaze.tianyinwallpaper.update.UpdateDialogState
 class MainActivity : BaseActivity() {
     private val tabItems: List<Pair<String, Int>> = listOf(
         ROUTE_MAIN to R.string.main_tab_wallpaper,
-        ROUTE_RASTER to R.string.main_tab_raster
+        ROUTE_RASTER to R.string.main_tab_raster,
+        ROUTE_DEPTH to R.string.main_tab_depth
     )
     private var showBottomBar by mutableStateOf(true)
     private var pendingRoute by mutableStateOf<String?>(null)
@@ -119,8 +123,11 @@ class MainActivity : BaseActivity() {
         private const val ROUTE_ABOUT = "about"
         private const val ROUTE_APP_INFO = "app_info"
         private const val ROUTE_RASTER = "raster"
+        private const val ROUTE_DEPTH = "depth"
         private const val ROUTE_SETTING = "setting"
         private const val ROUTE_CORRUGATED_TEST = "corrugated_test"
+        private const val ROUTE_DEPTH_MODEL_TEST = "depth_model_test"
+        private const val ROUTE_PLY_MODEL_TEST = "ply_model_test"
         const val PREF_THEME_MODE = "themeMode"
         const val THEME_MODE_FOLLOW_SYSTEM = 0
         const val THEME_MODE_LIGHT = 1
@@ -298,7 +305,9 @@ class MainActivity : BaseActivity() {
                                 themeMode = mode
                             },
                             onOpenAppInfo = { openAppInfoPage() },
-                            onOpenCorrugatedTest = { openCorrugatedTestPage() }
+                            onOpenCorrugatedTest = { openCorrugatedTestPage() },
+                            onOpenDepthModelTest = { openDepthModelTestPage() },
+                            onOpenPlyModelTest = { openPlyModelTestPage() }
                         )
                     }
                     composable(
@@ -337,6 +346,40 @@ class MainActivity : BaseActivity() {
                     ) {
                         CorrugatedTestRouteScreen(useDarkTheme = useDarkTheme)
                     }
+                    composable(
+                        route = ROUTE_DEPTH_MODEL_TEST,
+                        enterTransition = {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Left,
+                                animationSpec = tween(280)
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Right,
+                                animationSpec = tween(280)
+                            )
+                        }
+                    ) {
+                        DepthModelTestRouteScreen(useDarkTheme = useDarkTheme)
+                    }
+                    composable(
+                        route = ROUTE_PLY_MODEL_TEST,
+                        enterTransition = {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Left,
+                                animationSpec = tween(280)
+                            )
+                        },
+                        popExitTransition = {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Right,
+                                animationSpec = tween(280)
+                            )
+                        }
+                    ) {
+                        PlyModelTestRouteScreen(useDarkTheme = useDarkTheme)
+                    }
                 }
 
 
@@ -345,6 +388,7 @@ class MainActivity : BaseActivity() {
                     else currentRoute
                 val isWallpaperPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_MAIN
                 val isRasterPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_RASTER
+                val isDepthPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_DEPTH
                 val shouldShowTopBar = currentRoute == ROUTE_MAIN
                 var showMoreMenu by remember { mutableStateOf(false) }
 
@@ -418,30 +462,30 @@ class MainActivity : BaseActivity() {
                             backdrop = liquidBackdrop,
                             isLightTheme = !useDarkTheme,
                             onAdd = {
-                                if (isRasterPage) {
-                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_RASTER, Unit)
-                                } else {
-                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit)
+                                when {
+                                    isDepthPage -> RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_DEPTH, Unit)
+                                    isRasterPage -> RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_RASTER, Unit)
+                                    else -> RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit)
                                 }
                             },
                             onApply = {
-                                if (isRasterPage) {
-                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_RASTER, Unit)
-                                } else {
-                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_WALLPAPER, Unit)
+                                when {
+                                    isDepthPage -> RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_DEPTH, Unit)
+                                    isRasterPage -> RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_RASTER, Unit)
+                                    else -> RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_WALLPAPER, Unit)
                                 }
                             },
                             onMoreClick = { showMoreMenu = true },
                             onPreview = {
-                                if (isRasterPage) {
-                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_RASTER, Unit)
-                                } else {
-                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit)
+                                when {
+                                    isDepthPage -> RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_DEPTH, Unit)
+                                    isRasterPage -> RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_RASTER, Unit)
+                                    else -> RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit)
                                 }
                             },
-                            showAddButton = isWallpaperPage || isRasterPage,
-                            showPreviewButton = isWallpaperPage,
-                            showApplyButton = isWallpaperPage,
+                            showAddButton = isWallpaperPage || isRasterPage || isDepthPage,
+                            showPreviewButton = isWallpaperPage || isDepthPage,
+                            showApplyButton = isWallpaperPage || isDepthPage,
                             showMoreButton = true,
                             keepSlotWhenHidden = true
                         )
@@ -686,6 +730,11 @@ class MainActivity : BaseActivity() {
                     useDarkTheme = useDarkTheme,
                     onBottomBarVisibleChange = onBottomBarVisibleChange
                 )
+
+                ROUTE_DEPTH -> DepthRouteScreen(
+                    useDarkTheme = useDarkTheme,
+                    onBottomBarVisibleChange = onBottomBarVisibleChange
+                )
             }
         }
     }
@@ -714,6 +763,14 @@ class MainActivity : BaseActivity() {
 
     fun openCorrugatedTestPage() {
         pendingRoute = ROUTE_CORRUGATED_TEST
+    }
+
+    fun openDepthModelTestPage() {
+        pendingRoute = ROUTE_DEPTH_MODEL_TEST
+    }
+
+    fun openPlyModelTestPage() {
+        pendingRoute = ROUTE_PLY_MODEL_TEST
     }
 
     fun setBottomBarVisible(visible: Boolean) {

@@ -30,6 +30,7 @@ multidex = "2.0.1"
 media3 = "1.5.1"  # ExoPlayer (Media3) 版本
 mediaplayer-extended = "4.5.0"  # MediaPlayer-Extended (帧精确seek)
 reorderable = "3.0.0"
+tensorflow-lite = "2.17.0"
 
 [libraries]
 # --- 第一部分合并过来的库 ---
@@ -72,6 +73,7 @@ androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graph
 androidx-compose-material-ripple = { group = "androidx.compose.material", name = "material-ripple", version.ref = "compose" }
 kyant-shapes = { group = "io.github.kyant0", name = "shapes", version.ref = "kyantShapes" }
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }
+tensorflow-lite = { group = "org.tensorflow", name = "tensorflow-lite", version.ref = "tensorflow-lite" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

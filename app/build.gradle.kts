@@ -71,6 +71,10 @@ android {
         compose = true
         buildConfig = true
     }
+
+    androidResources {
+        noCompress += listOf("tflite", "lite")
+    }
 }
 
 tasks.withType<KotlinCompile>().configureEach {
@@ -123,6 +127,7 @@ dependencies {
 
     // MediaPlayer-Extended - 用于视频光栅的帧精确seek
     implementation(libs.mediaplayer.extended)
+    implementation(libs.tensorflow.lite)
 
     // 其他
     debugImplementation(libs.androidx.compose.ui.tooling)

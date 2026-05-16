@@ -98,7 +98,9 @@ fun SettingRouteScreen(
     useDarkTheme: Boolean,
     onThemeModeChange: (Int) -> Unit = {},
     onOpenAppInfo: () -> Unit = {},
-    onOpenCorrugatedTest: () -> Unit = {}
+    onOpenCorrugatedTest: () -> Unit = {},
+    onOpenDepthModelTest: () -> Unit = {},
+    onOpenPlyModelTest: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
@@ -416,6 +418,12 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
+                    SettingTextItem("景深模型测试页", contentColor) {
+                        onOpenDepthModelTest()
+                    }
+                    SettingTextItem("PLY 模型测试页", contentColor) {
+                        onOpenPlyModelTest()
+                    }
                     if (corrugatedTestVisible) {
                         SettingTextItem("波纹玻璃测试页", contentColor) {
                             onOpenCorrugatedTest()

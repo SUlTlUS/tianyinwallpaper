@@ -22,6 +22,7 @@
     <string name="main_tab_wallpaper">壁纸</string>
     <string name="main_tab_groups">壁纸组</string>
     <string name="main_tab_raster">光栅</string>
+    <string name="main_tab_depth">景深</string>
     <string name="main_tab_settings">设置</string>
     <string name="main_select_wallpaper_type_tip">请选择壁纸类型</string>
     <string name="main_wallpaper_type_static">静态</string>
@@ -32,4 +33,13 @@
     <string name="main_set_wallpaper_failed_permission_title">设置失败</string>
     <string name="main_set_wallpaper_failed_permission_tip">可能是没有设置动态壁纸权限，是否去设置？</string>
     <string name="overwrite_wallpaper_group_confirm">壁纸组名称已存在，是否覆盖保存？</string>
+    <string name="depth_empty_tip">点击顶部 + 添加景深壁纸</string>
+    <string name="depth_add_success">景深壁纸已添加</string>
+    <string name="depth_set_success">景深壁纸设置成功</string>
+    <string name="depth_set_cancelled">已取消设置景深壁纸</string>
+    <string name="depth_select_image_first">请先添加或选择一张景深壁纸</string>
+    <string name="depth_detail_title">景深壁纸</string>
+    <string name="depth_strength">景深强度</string>
+    <string name="depth_sensitivity">陀螺灵敏度</string>
+    <string name="depth_blur">背景柔化</string>
 </resources>

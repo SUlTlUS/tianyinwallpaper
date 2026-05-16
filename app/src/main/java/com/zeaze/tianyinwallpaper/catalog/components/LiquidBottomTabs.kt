@@ -52,7 +52,6 @@ import com.zeaze.tianyinwallpaper.backdrop.shadow.InnerShadow
 import com.zeaze.tianyinwallpaper.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
@@ -104,6 +103,9 @@ fun LiquidBottomTabs(
         var currentIndex by remember {
             mutableIntStateOf(selectedTabIndex())
         }
+        var pendingSelectionIndex by remember {
+            mutableIntStateOf(-1)
+        }
         val dampedDragAnimation = remember(animationScope) {
             DampedDragAnimation(
                 animationScope = animationScope,
@@ -115,8 +117,14 @@ fun LiquidBottomTabs(
                 onDragStarted = {},
                 onDragStopped = {
                     val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
-                    currentIndex = targetIndex
-                    animateToValue(targetIndex.toFloat())
+                    if (currentIndex != targetIndex) {
+                        currentIndex = targetIndex
+                        pendingSelectionIndex = targetIndex
+                        animateToValue(targetIndex.toFloat())
+                        onTabSelected(targetIndex)
+                    } else {
+                        animateToValue(targetIndex.toFloat())
+                    }
                     animationScope.launch {
                         offsetAnimation.animateTo(
                             0f,
@@ -138,17 +146,18 @@ fun LiquidBottomTabs(
         LaunchedEffect(selectedTabIndex) {
             snapshotFlow { selectedTabIndex() }
                 .collectLatest { index ->
-                    if (index != currentIndex) {
-                        currentIndex = index
+                    val targetIndex = index.fastCoerceIn(0, tabsCount - 1)
+                    if (pendingSelectionIndex != -1) {
+                        if (targetIndex == pendingSelectionIndex) {
+                            pendingSelectionIndex = -1
+                        } else {
+                            return@collectLatest
+                        }
                     }
-                }
-        }
-        LaunchedEffect(dampedDragAnimation) {
-            snapshotFlow { currentIndex }
-                .drop(1)
-                .collectLatest { index ->
-                    dampedDragAnimation.animateToValue(index.toFloat())
-                    onTabSelected(index)
+                    if (targetIndex != currentIndex) {
+                        currentIndex = targetIndex
+                        dampedDragAnimation.animateToValue(targetIndex.toFloat())
+                    }
                 }
         }
 

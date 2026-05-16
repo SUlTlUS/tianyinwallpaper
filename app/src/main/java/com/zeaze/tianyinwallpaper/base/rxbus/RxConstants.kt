@@ -24,4 +24,8 @@ object RxConstants {
     const val RX_RASTER_SELECTION_CANCEL = 0x25
     const val RX_RASTER_SELECTION_DELETE = 0x26
     const val RX_RASTER_SELECTION_TOGGLE_ALL = 0x27
+
+    const val RX_TRIGGER_ADD_DEPTH = 0x30
+    const val RX_TRIGGER_APPLY_DEPTH = 0x31
+    const val RX_TRIGGER_PREVIEW_DEPTH = 0x32
 }
