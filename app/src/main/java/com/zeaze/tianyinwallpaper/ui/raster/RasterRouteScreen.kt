@@ -37,7 +37,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -1980,7 +1979,6 @@ private fun RasterDetailScreen(
                                             }
                                             .longPressDraggableHandle()
                                             .clip(RoundedCornerShape(12.dp))
-                                            .border(1.dp, if (index == 0) Color(0xFF2A83FF) else Color.Transparent, RoundedCornerShape(12.dp))
                                             .clickable { onStaticEditorReplaceSingle(currentEditorGroup, index) }
                                     ) {
                                         val bmp by produceState<android.graphics.Bitmap?>(initialValue = null, uri) {
@@ -2005,7 +2003,19 @@ private fun RasterDetailScreen(
                                         if (index == 0) {
                                             BasicText("封面", style = TextStyle(Color.White, 12.sp), modifier = Modifier.align(Alignment.BottomCenter).background(Color(0x66000000)).padding(horizontal = 6.dp, vertical = 2.dp))
                                         }
-                                        Text(text = "×", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.TopStart).padding(4.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFE53935)).clickable { onStaticEditorDeleteSingle(currentEditorGroup, index) }.padding(horizontal = 7.dp, vertical = 0.dp))
+                                        Text(
+                                            text = "×",
+                                            color = Color.White,
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(6.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFE53935))
+                                                .clickable { onStaticEditorDeleteSingle(currentEditorGroup, index) }
+                                                .padding(horizontal = 5.dp)
+                                        )
                                     }
                                 }
                             }

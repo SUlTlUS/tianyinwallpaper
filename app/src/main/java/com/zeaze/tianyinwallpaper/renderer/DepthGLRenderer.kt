@@ -19,13 +19,17 @@ import java.nio.FloatBuffer
 import java.nio.ShortBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.sqrt
 
 class DepthGLRenderer {
     private var eglThread: EglRenderThread? = null
     private val isRunning = AtomicBoolean(false)
     private val isSurfaceValid = AtomicBoolean(false)
+    private val surfaceGeneration = AtomicInteger(0)
+    private val lifecycleLock = Object()
     private val renderSignal = Object()
     @Volatile private var renderingEnabled = true
     @Volatile private var pendingTiltX = 0f
@@ -46,12 +50,18 @@ class DepthGLRenderer {
     private sealed class RenderMessage {
         data class SetSurfaceSize(val width: Int, val height: Int) : RenderMessage()
         data class LoadTextures(val textures: DepthImageProcessor.TextureSet) : RenderMessage()
+        data class LoadLayeredTextures(val textures: DepthImageProcessor.LayeredTextureSet) : RenderMessage()
         data class LoadGaussians(val scene: GaussianPlyLoader.GaussianScene) : RenderMessage()
         data class LoadMesh(val scene: PhotoMeshPlyLoader.MeshScene) : RenderMessage()
         data class SetParams(val parallaxStrength: Float, val blurStrength: Float) : RenderMessage()
         data class SetGaussianParams(val params: GaussianRenderParams) : RenderMessage()
         object Render : RenderMessage()
     }
+
+    private data class DepthLayerTexture(
+        val textureId: Int,
+        val depth: Float
+    )
 
     private data class GaussianLayerTexture(
         val textureId: Int,
@@ -67,8 +77,7 @@ class DepthGLRenderer {
     )
 
     private data class MeshVboChunk(
-        val positionBuffer: Int,
-        val colorBuffer: Int,
+        val vertexBuffer: Int,
         val indexBuffer: Int,
         val vertexCount: Int,
         val indexCount: Int
@@ -80,37 +89,54 @@ class DepthGLRenderer {
     )
 
     fun start(surface: Surface) {
-        Log.d(TAG, "start running=${isRunning.get()} surfaceValid=${isSurfaceValid.get()}")
-        if (isRunning.get()) {
-            stopAndWait(300)
+        synchronized(lifecycleLock) {
+            Log.d(TAG, "start running=${isRunning.get()} surfaceValid=${isSurfaceValid.get()} threadAlive=${eglThread?.isAlive == true}")
+            if (isRunning.get() || eglThread?.isAlive == true) {
+                stopAndWaitLocked(RENDER_THREAD_STOP_TIMEOUT_MS)
+            }
+            val generation = surfaceGeneration.incrementAndGet()
+            isSurfaceValid.set(true)
+            isRunning.set(true)
+            eglThread = EglRenderThread(surface, generation)
+            eglThread?.start()
         }
-        isSurfaceValid.set(true)
-        isRunning.set(true)
-        eglThread = EglRenderThread(surface)
-        eglThread?.start()
     }
 
     fun stop() {
-        Log.d(TAG, "stop running=${isRunning.get()} queue=${messageQueue.size}")
-        isSurfaceValid.set(false)
-        if (!isRunning.getAndSet(false)) return
-        messageQueue.clear()
-        renderQueued.set(false)
-        tiltQueued.set(false)
-        signalRenderThread()
-        eglThread?.finish()
-        eglThread = null
+        synchronized(lifecycleLock) {
+            Log.d(TAG, "stop running=${isRunning.get()} queue=${messageQueue.size}")
+            surfaceGeneration.incrementAndGet()
+            isSurfaceValid.set(false)
+            if (!isRunning.getAndSet(false) && eglThread == null) return
+            messageQueue.clear()
+            renderQueued.set(false)
+            tiltQueued.set(false)
+            signalRenderThread()
+            eglThread?.finish()
+            eglThread = null
+        }
     }
 
     fun stopAndWait(timeoutMs: Long = 500) {
-        Log.d(TAG, "stopAndWait running=${isRunning.get()} queue=${messageQueue.size}")
+        synchronized(lifecycleLock) {
+            stopAndWaitLocked(timeoutMs)
+        }
+    }
+
+    private fun stopAndWaitLocked(timeoutMs: Long) {
+        Log.d(TAG, "stopAndWait running=${isRunning.get()} queue=${messageQueue.size} threadAlive=${eglThread?.isAlive == true}")
+        surfaceGeneration.incrementAndGet()
         isSurfaceValid.set(false)
-        if (!isRunning.getAndSet(false)) return
+        if (!isRunning.getAndSet(false) && eglThread == null) return
         messageQueue.clear()
         renderQueued.set(false)
         tiltQueued.set(false)
         signalRenderThread()
-        eglThread?.finishAndWait(timeoutMs)
+        val oldThread = eglThread
+        oldThread?.finishAndWait(timeoutMs)
+        if (oldThread?.isAlive == true) {
+            Log.w(TAG, "render thread did not stop within ${timeoutMs}ms; invalidated by generation=${surfaceGeneration.get()}")
+        }
         eglThread = null
     }
 
@@ -123,6 +149,15 @@ class DepthGLRenderer {
     fun loadTextures(textures: DepthImageProcessor.TextureSet) {
         Log.d(TAG, "loadTextures color=${textures.color.width}x${textures.color.height} depth=${textures.depth.width}x${textures.depth.height}")
         messageQueue.offer(RenderMessage.LoadTextures(textures))
+        requestRender()
+    }
+
+    fun loadLayeredTextures(textures: DepthImageProcessor.LayeredTextureSet) {
+        Log.d(
+            TAG,
+            "loadLayeredTextures count=${textures.layers.size} image=${textures.imageWidth}x${textures.imageHeight}"
+        )
+        messageQueue.offer(RenderMessage.LoadLayeredTextures(textures))
         requestRender()
     }
 
@@ -148,8 +183,17 @@ class DepthGLRenderer {
     }
 
     fun updateTilt(x: Float, y: Float) {
-        pendingTiltX = x.coerceIn(-1f, 1f)
-        pendingTiltY = y.coerceIn(-1f, 1f)
+        var nextX = x.coerceIn(-1f, 1f)
+        var nextY = y.coerceIn(-1f, 1f)
+        val tiltLengthSq = nextX * nextX + nextY * nextY
+        val maxTiltLengthSq = MAX_VIEW_TILT * MAX_VIEW_TILT
+        if (tiltLengthSq > maxTiltLengthSq) {
+            val scale = MAX_VIEW_TILT / sqrt(tiltLengthSq)
+            nextX *= scale
+            nextY *= scale
+        }
+        pendingTiltX = nextX
+        pendingTiltY = nextY
         tiltQueued.set(true)
         requestRender()
     }
@@ -157,7 +201,7 @@ class DepthGLRenderer {
     fun updateParams(parallaxStrength: Float, blurStrength: Float) {
         messageQueue.offer(
             RenderMessage.SetParams(
-                parallaxStrength.coerceIn(0.005f, 0.075f),
+                parallaxStrength.coerceIn(0.001f, 0.075f),
                 blurStrength.coerceIn(0f, 0.02f)
             )
         )
@@ -199,7 +243,10 @@ class DepthGLRenderer {
         }
     }
 
-    private inner class EglRenderThread(private val surface: Surface) : Thread("DepthGLRenderer") {
+    private inner class EglRenderThread(
+        private val surface: Surface,
+        private val generation: Int
+    ) : Thread("DepthGLRenderer") {
         private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
         private var context: EGLContext = EGL14.EGL_NO_CONTEXT
         private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
@@ -212,6 +259,7 @@ class DepthGLRenderer {
         private var depthTexId: Int = 0
         private var vBuf: FloatBuffer
         private var tBuf: FloatBuffer
+        private var tFlipBuf: FloatBuffer
         private var gaussianScene: GaussianPlyLoader.GaussianScene? = null
         private var gaussianVboSet: GaussianVboSet? = null
         private var meshScene: PhotoMeshPlyLoader.MeshScene? = null
@@ -225,7 +273,7 @@ class DepthGLRenderer {
         private var tiltX = 0f
         private var tiltY = 0f
         private var parallaxStrength = 0.045f
-        private var blurStrength = 0.004f
+        private var blurStrength = 0f
         private var gaussianParams = GaussianRenderParams()
         private var gaussianLayerTextures: List<GaussianLayerTexture> = emptyList()
         private var gaussianLayerScene: GaussianPlyLoader.GaussianScene? = null
@@ -233,6 +281,7 @@ class DepthGLRenderer {
         private var gaussianLayerBuildFailedScene: GaussianPlyLoader.GaussianScene? = null
         private var gaussianLayerTextureWidth = 1
         private var gaussianLayerTextureHeight = 1
+        private var depthLayerTextures: List<DepthLayerTexture> = emptyList()
         private var drawCount = 0L
         private var lastDrawLogMs = 0L
         private var lastNoContentLogMs = 0L
@@ -253,35 +302,41 @@ class DepthGLRenderer {
                 .asFloatBuffer()
                 .put(tData)
             tBuf.position(0)
+
+            val flippedTData = floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
+            tFlipBuf = ByteBuffer.allocateDirect(flippedTData.size * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+                .put(flippedTData)
+            tFlipBuf.position(0)
         }
 
         override fun run() {
-            Log.d(TAG, "thread run start")
+            Log.d(TAG, "thread run start generation=$generation")
             if (!initEGL()) {
                 Log.e(TAG, "Failed to init EGL")
                 return
             }
             initGL()
-            Log.d(TAG, "thread initGL done")
+            Log.d(TAG, "thread initGL done generation=$generation")
 
-            while (isRunning.get() && isSurfaceValid.get()) {
+            while (isThreadActive()) {
                 if (!renderingEnabled) {
                     try {
                         synchronized(renderSignal) {
-                            while (isRunning.get() && isSurfaceValid.get() && !renderingEnabled) {
+                            while (isThreadActive() && !renderingEnabled) {
                                 renderSignal.wait()
                             }
                         }
                     } catch (_: InterruptedException) {
-                        if (!isRunning.get() || !isSurfaceValid.get()) break
+                        if (!isThreadActive()) break
                     }
                 }
 
                 try {
                     synchronized(renderSignal) {
                         while (
-                            isRunning.get() &&
-                            isSurfaceValid.get() &&
+                            isThreadActive() &&
                             renderingEnabled &&
                             messageQueue.isEmpty()
                         ) {
@@ -289,12 +344,12 @@ class DepthGLRenderer {
                         }
                     }
                 } catch (_: InterruptedException) {
-                    if (!isRunning.get() || !isSurfaceValid.get()) break
+                    if (!isThreadActive()) break
                 }
 
                 var needsDraw = false
                 var processedMessages = 0
-                while (isSurfaceValid.get()) {
+                while (isThreadActive()) {
                     val message = messageQueue.poll() ?: break
                     processedMessages++
                     when (message) {
@@ -307,6 +362,7 @@ class DepthGLRenderer {
                             cH = message.textures.color.height.coerceAtLeast(1)
                             uploadTexture(colorTexId, message.textures.color)
                             uploadTexture(depthTexId, message.textures.depth)
+                            deleteDepthLayerTextures()
                             deleteGaussianLayerTextures()
                             deleteGaussianBuffers()
                             deleteMeshBuffers()
@@ -316,7 +372,21 @@ class DepthGLRenderer {
                             needsDraw = true
                             Log.d(TAG, "thread loaded textures ${cW}x$cH")
                         }
+                        is RenderMessage.LoadLayeredTextures -> {
+                            cW = message.textures.imageWidth.coerceAtLeast(1)
+                            cH = message.textures.imageHeight.coerceAtLeast(1)
+                            uploadDepthLayerTextures(message.textures)
+                            deleteGaussianLayerTextures()
+                            deleteGaussianBuffers()
+                            deleteMeshBuffers()
+                            gaussianScene = null
+                            meshScene = null
+                            hasTexture = false
+                            needsDraw = true
+                            Log.d(TAG, "thread loaded depth layers count=${depthLayerTextures.size} ${cW}x$cH")
+                        }
                         is RenderMessage.LoadGaussians -> {
+                            deleteDepthLayerTextures()
                             deleteGaussianLayerTextures()
                             deleteGaussianBuffers()
                             deleteMeshBuffers()
@@ -330,6 +400,7 @@ class DepthGLRenderer {
                             Log.d(TAG, "thread loaded gaussians count=${message.scene.count}")
                         }
                         is RenderMessage.LoadMesh -> {
+                            deleteDepthLayerTextures()
                             deleteGaussianLayerTextures()
                             deleteGaussianBuffers()
                             deleteMeshBuffers()
@@ -366,7 +437,7 @@ class DepthGLRenderer {
                     Log.w(TAG, "processed many messages count=$processedMessages remaining=${messageQueue.size} renderQueued=${renderQueued.get()} tiltQueued=${tiltQueued.get()}")
                 }
 
-                if (!isSurfaceValid.get()) break
+                if (!isThreadActive()) break
                 if (consumePendingTilt()) {
                     needsDraw = true
                 }
@@ -375,8 +446,18 @@ class DepthGLRenderer {
                 }
             }
 
-            Log.d(TAG, "thread exiting running=${isRunning.get()} surfaceValid=${isSurfaceValid.get()}")
+            Log.d(
+                TAG,
+                "thread exiting generation=$generation currentGeneration=${surfaceGeneration.get()} " +
+                    "running=${isRunning.get()} surfaceValid=${isSurfaceValid.get()}"
+            )
             destroyEGL()
+        }
+
+        private fun isThreadActive(): Boolean {
+            return isRunning.get() &&
+                isSurfaceValid.get() &&
+                generation == surfaceGeneration.get()
         }
 
         private fun initEGL(): Boolean {
@@ -459,6 +540,42 @@ class DepthGLRenderer {
             )
         }
 
+        private fun uploadDepthLayerTextures(textures: DepthImageProcessor.LayeredTextureSet) {
+            deleteDepthLayerTextures()
+            if (textures.layers.isEmpty()) return
+            val textureIds = IntArray(textures.layers.size)
+            GLES20.glGenTextures(textureIds.size, textureIds, 0)
+            if (textureIds.any { it == 0 }) {
+                Log.w(TAG, "glGenTextures failed for depth layers")
+                GLES20.glDeleteTextures(textureIds.size, textureIds, 0)
+                return
+            }
+
+            val uploadedLayers = ArrayList<DepthLayerTexture>(textures.layers.size)
+            for ((index, layer) in textures.layers.withIndex()) {
+                val textureId = textureIds[index]
+                configureTexture(textureId)
+                layer.texture.rgba.position(0)
+                GLES20.glTexImage2D(
+                    GLES20.GL_TEXTURE_2D,
+                    0,
+                    GLES20.GL_RGBA,
+                    layer.texture.width,
+                    layer.texture.height,
+                    0,
+                    GLES20.GL_RGBA,
+                    GLES20.GL_UNSIGNED_BYTE,
+                    layer.texture.rgba
+                )
+                uploadedLayers += DepthLayerTexture(
+                    textureId = textureId,
+                    depth = layer.depth.coerceIn(0f, 1f)
+                )
+            }
+            depthLayerTextures = uploadedLayers
+            logGlError("depth layer upload")
+        }
+
         private fun consumePendingTilt(): Boolean {
             if (!tiltQueued.getAndSet(false)) return false
             val nextX = pendingTiltX
@@ -470,7 +587,7 @@ class DepthGLRenderer {
         }
 
         private fun draw() {
-            if (!isSurfaceValid.get()) {
+            if (!isThreadActive()) {
                 logNoContent("skip draw: surface invalid")
                 return
             }
@@ -486,7 +603,7 @@ class DepthGLRenderer {
             val scene = gaussianScene
             if (scene != null) {
                 drawGaussianScene(scene)
-                if (isSurfaceValid.get()) {
+                if (isThreadActive()) {
                     val swapped = EGL14.eglSwapBuffers(display, eglSurface)
                     logDraw("gaussian", swapped)
                 }
@@ -496,9 +613,18 @@ class DepthGLRenderer {
             val mesh = meshScene
             if (mesh != null) {
                 drawMeshScene(mesh)
-                if (isSurfaceValid.get()) {
+                if (isThreadActive()) {
                     val swapped = EGL14.eglSwapBuffers(display, eglSurface)
                     logDraw("mesh", swapped)
+                }
+                return
+            }
+
+            if (depthLayerTextures.isNotEmpty()) {
+                drawDepthLayers()
+                if (isThreadActive()) {
+                    val swapped = EGL14.eglSwapBuffers(display, eglSurface)
+                    logDraw("layers", swapped)
                 }
                 return
             }
@@ -558,10 +684,70 @@ class DepthGLRenderer {
 
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
-            if (isSurfaceValid.get()) {
+            if (isThreadActive()) {
                 val swapped = EGL14.eglSwapBuffers(display, eglSurface)
                 logDraw("texture", swapped)
             }
+        }
+
+        private fun drawDepthLayers() {
+            if (gaussianLayerProg == 0) {
+                logNoContent("skip depth layer draw: program invalid")
+                return
+            }
+            GLES20.glViewport(0, 0, sW, sH)
+            GLES20.glClearColor(0f, 0f, 0f, 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+            GLES20.glDisable(GLES20.GL_DITHER)
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            GLES20.glUseProgram(gaussianLayerProg)
+
+            val imageAspect = cW.toFloat() / cH.coerceAtLeast(1).toFloat()
+            val screenAspect = sW.toFloat() / sH.coerceAtLeast(1).toFloat()
+            val fillX: Float
+            val fillY: Float
+            if (imageAspect > screenAspect) {
+                fillX = imageAspect / screenAspect
+                fillY = 1f
+            } else {
+                fillX = 1f
+                fillY = screenAspect / imageAspect
+            }
+
+            val aPos = GLES20.glGetAttribLocation(gaussianLayerProg, "aPos")
+            val aTex = GLES20.glGetAttribLocation(gaussianLayerProg, "aTex")
+            vBuf.position(0)
+            tFlipBuf.position(0)
+            GLES20.glEnableVertexAttribArray(aPos)
+            GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 8, vBuf)
+            GLES20.glEnableVertexAttribArray(aTex)
+            GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 8, tFlipBuf)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianLayerProg, "uOpacity"), 1f)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(gaussianLayerProg, "sLayer"), 0)
+
+            val mvp = FloatArray(16)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            for (layer in depthLayerTextures) {
+                val depth = layer.depth.coerceIn(0f, 1f)
+                val motion = depth * depth * (3f - 2f * depth)
+                val coverScale = 1f + motion * parallaxStrength * 2.25f
+                val offsetX = -tiltX * parallaxStrength * motion * 4.1f
+                val offsetY = tiltY * parallaxStrength * motion * 4.1f
+
+                Matrix.setIdentityM(mvp, 0)
+                Matrix.scaleM(mvp, 0, fillX * coverScale, fillY * coverScale, 1f)
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(gaussianLayerProg, "uMVP"), 1, false, mvp, 0)
+                GLES20.glUniform2f(GLES20.glGetUniformLocation(gaussianLayerProg, "uOffset"), offsetX, offsetY)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, layer.textureId)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            }
+
+            GLES20.glDisableVertexAttribArray(aPos)
+            GLES20.glDisableVertexAttribArray(aTex)
+            GLES20.glDisable(GLES20.GL_BLEND)
+            logGlError("depth layer draw")
         }
 
         private fun logNoContent(message: String) {
@@ -719,18 +905,21 @@ class DepthGLRenderer {
             GLES20.glEnable(GLES20.GL_DEPTH_TEST)
             GLES20.glDepthMask(true)
             GLES20.glDepthFunc(GLES20.GL_LEQUAL)
+            GLES20.glEnable(GLES20.GL_POLYGON_OFFSET_FILL)
+            GLES20.glPolygonOffset(0.75f, 1.0f)
             GLES20.glDisable(GLES20.GL_BLEND)
             GLES20.glDisable(GLES20.GL_DITHER)
             GLES20.glUseProgram(meshProg)
 
             val projection = FloatArray(16)
             val screenAspect = sW.toFloat() / sH.coerceAtLeast(1).toFloat()
-            val near = max(0.01f, scene.nearDepth * 0.05f)
-            val far = max(scene.farDepth * 3.5f, near + 50f)
+            val near = max(0.05f, scene.nearDepth * 0.45f)
+            val far = max(scene.farDepth * 1.35f, near + 5f)
+            val projectionVFovRad = meshProjectionVerticalFovRad(scene, screenAspect)
             Matrix.perspectiveM(
                 projection,
                 0,
-                Math.toDegrees(scene.vFovRad.toDouble()).toFloat().coerceIn(15f, 150f),
+                Math.toDegrees(projectionVFovRad.toDouble()).toFloat().coerceIn(15f, 150f),
                 screenAspect,
                 near,
                 far
@@ -744,17 +933,6 @@ class DepthGLRenderer {
             val model = FloatArray(16)
             Matrix.setIdentityM(model, 0)
             Matrix.rotateM(model, 0, 180f, 1f, 0f, 0f)
-            val imageAspect = scene.imageWidth.toFloat() / scene.imageHeight.coerceAtLeast(1).toFloat()
-            val fillX: Float
-            val fillY: Float
-            if (imageAspect > screenAspect) {
-                fillX = imageAspect / screenAspect
-                fillY = 1f
-            } else {
-                fillX = 1f
-                fillY = screenAspect / imageAspect
-            }
-            Matrix.scaleM(model, 0, fillX, fillY, 1f)
 
             val modelView = FloatArray(16)
             val mvp = FloatArray(16)
@@ -765,6 +943,8 @@ class DepthGLRenderer {
             val aColor = GLES20.glGetAttribLocation(meshProg, "aColor")
             if (aPos < 0 || aColor < 0) {
                 logNoContent("skip mesh draw: missing attributes pos=$aPos color=$aColor")
+                GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
+                GLES20.glDisable(GLES20.GL_DEPTH_TEST)
                 return
             }
             GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(meshProg, "uMVP"), 1, false, mvp, 0)
@@ -772,10 +952,9 @@ class DepthGLRenderer {
             GLES20.glEnableVertexAttribArray(aColor)
 
             vboSet.chunks.forEach { chunk ->
-                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, chunk.positionBuffer)
-                GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, 0)
-                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, chunk.colorBuffer)
-                GLES20.glVertexAttribPointer(aColor, 4, GLES20.GL_FLOAT, false, 0, 0)
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, chunk.vertexBuffer)
+                GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, MESH_VERTEX_STRIDE_BYTES, 0)
+                GLES20.glVertexAttribPointer(aColor, 4, GLES20.GL_FLOAT, false, MESH_VERTEX_STRIDE_BYTES, MESH_COLOR_OFFSET_BYTES)
                 GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, chunk.indexBuffer)
                 GLES20.glDrawElements(GLES20.GL_TRIANGLES, chunk.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
             }
@@ -784,8 +963,28 @@ class DepthGLRenderer {
             GLES20.glDisableVertexAttribArray(aColor)
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
             GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
+            GLES20.glDisable(GLES20.GL_POLYGON_OFFSET_FILL)
             GLES20.glDisable(GLES20.GL_DEPTH_TEST)
             logGlError("mesh draw")
+        }
+
+        private fun meshProjectionVerticalFovRad(
+            scene: PhotoMeshPlyLoader.MeshScene,
+            screenAspect: Float
+        ): Float {
+            val safeScreenAspect = screenAspect.coerceAtLeast(0.01f)
+            val tanHalfH = Math.tan((scene.hFovRad * 0.5f).toDouble()).toFloat()
+            val tanHalfV = Math.tan((scene.vFovRad * 0.5f).toDouble()).toFloat()
+            val fovAspect = if (tanHalfV > 0.0001f) {
+                tanHalfH / tanHalfV
+            } else {
+                scene.imageWidth.toFloat() / scene.imageHeight.coerceAtLeast(1).toFloat()
+            }
+            return if (safeScreenAspect > fovAspect && tanHalfH > 0.0001f) {
+                (2.0 * Math.atan((tanHalfH / safeScreenAspect).toDouble())).toFloat()
+            } else {
+                scene.vFovRad
+            }.coerceIn(0.2f, 2.7f)
         }
 
         private fun ensureGaussianLayerTextures(scene: GaussianPlyLoader.GaussianScene): Boolean {
@@ -951,31 +1150,33 @@ class DepthGLRenderer {
             drainGlErrors("before mesh VBO upload")
             val uploadedChunks = ArrayList<MeshVboChunk>(scene.chunks.size)
             for ((index, chunk) in scene.chunks.withIndex()) {
-                val ids = IntArray(3)
-                GLES20.glGenBuffers(3, ids, 0)
+                val ids = IntArray(2)
+                GLES20.glGenBuffers(2, ids, 0)
                 if (ids.any { it == 0 }) {
                     Log.w(TAG, "glGenBuffers failed for mesh chunk=$index")
-                    GLES20.glDeleteBuffers(3, ids, 0)
+                    GLES20.glDeleteBuffers(2, ids, 0)
                     continue
                 }
                 val uploaded =
-                    uploadFloatBuffer(ids[0], chunk.positions, chunk.vertexCount * 3 * FLOAT_SIZE_BYTES, "mesh positions") &&
-                        uploadFloatBuffer(ids[1], chunk.colors, chunk.vertexCount * 4 * FLOAT_SIZE_BYTES, "mesh colors") &&
-                        uploadShortElementBuffer(ids[2], chunk.indices, chunk.indexCount * SHORT_SIZE_BYTES, "mesh indices")
+                    uploadFloatBuffer(
+                        ids[0],
+                        chunk.vertices,
+                        chunk.vertexCount * MESH_VERTEX_STRIDE_BYTES,
+                        "mesh vertices"
+                    ) &&
+                        uploadShortElementBuffer(ids[1], chunk.indices, chunk.indexCount * SHORT_SIZE_BYTES, "mesh indices")
                 GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
                 GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
-                chunk.positions.position(0)
-                chunk.colors.position(0)
+                chunk.vertices.position(0)
                 chunk.indices.position(0)
                 if (!uploaded) {
-                    GLES20.glDeleteBuffers(3, ids, 0)
+                    GLES20.glDeleteBuffers(2, ids, 0)
                     Log.w(TAG, "mesh VBO upload failed for chunk=$index")
                     continue
                 }
                 uploadedChunks += MeshVboChunk(
-                    positionBuffer = ids[0],
-                    colorBuffer = ids[1],
-                    indexBuffer = ids[2],
+                    vertexBuffer = ids[0],
+                    indexBuffer = ids[1],
                     vertexCount = chunk.vertexCount,
                     indexCount = chunk.indexCount
                 )
@@ -1135,6 +1336,14 @@ class DepthGLRenderer {
             }
         }
 
+        private fun deleteDepthLayerTextures() {
+            if (depthLayerTextures.isNotEmpty()) {
+                val ids = depthLayerTextures.map { it.textureId }.toIntArray()
+                GLES20.glDeleteTextures(ids.size, ids, 0)
+            }
+            depthLayerTextures = emptyList()
+        }
+
         private fun deleteGaussianLayerTextures() {
             if (gaussianLayerTextures.isNotEmpty()) {
                 val ids = gaussianLayerTextures.map { it.textureId }.toIntArray()
@@ -1159,12 +1368,11 @@ class DepthGLRenderer {
         private fun deleteMeshBuffers() {
             val chunks = meshVboSet?.chunks.orEmpty()
             if (chunks.isNotEmpty()) {
-                val ids = IntArray(chunks.size * 3)
+                val ids = IntArray(chunks.size * 2)
                 chunks.forEachIndexed { index, chunk ->
-                    val base = index * 3
-                    ids[base] = chunk.positionBuffer
-                    ids[base + 1] = chunk.colorBuffer
-                    ids[base + 2] = chunk.indexBuffer
+                    val base = index * 2
+                    ids[base] = chunk.vertexBuffer
+                    ids[base + 1] = chunk.indexBuffer
                 }
                 GLES20.glDeleteBuffers(ids.size, ids, 0)
             }
@@ -1205,6 +1413,7 @@ class DepthGLRenderer {
 
         private fun destroyEGL() {
             if (display != EGL14.EGL_NO_DISPLAY) {
+                deleteDepthLayerTextures()
                 deleteGaussianLayerTextures()
                 deleteGaussianBuffers()
                 deleteMeshBuffers()
@@ -1247,11 +1456,16 @@ class DepthGLRenderer {
 
     companion object {
         private const val TAG = "DepthGLRenderer"
+        private const val RENDER_THREAD_STOP_TIMEOUT_MS = 1_500L
         private const val DRAW_LOG_INTERVAL_MS = 1_000L
+        private const val MAX_VIEW_TILT = 0.72f
         private const val GAUSSIAN_SPLAT_SCALE = 5.2f
         private const val GAUSSIAN_LAYER_TEXTURE_MAX_SIZE = 768
         private const val FLOAT_SIZE_BYTES = 4
         private const val SHORT_SIZE_BYTES = 2
+        private const val MESH_VERTEX_STRIDE_FLOATS = 7
+        private const val MESH_VERTEX_STRIDE_BYTES = MESH_VERTEX_STRIDE_FLOATS * FLOAT_SIZE_BYTES
+        private const val MESH_COLOR_OFFSET_BYTES = 3 * FLOAT_SIZE_BYTES
         private const val ENABLE_GAUSSIAN_LAYER_CACHE = false
 
         private const val VERTEX_SHADER = """

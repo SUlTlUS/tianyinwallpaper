@@ -73,7 +73,7 @@ class DepthWallpaperService : WallpaperService() {
             if (key == DepthPrefs.PREF_DEPTH_WALLPAPERS || key == DepthPrefs.PREF_DEPTH_ACTIVE_ID) {
                 loadActiveModel()
                 model?.let {
-                    renderer?.updateParams(it.parallaxStrength, it.blurStrength)
+                    renderer?.updateParams(it.renderParallaxStrength(), 0f)
                 }
                 if (isVisible && surfaceReady && model?.contentKey() != loadedImageKey) {
                     loadContent()
@@ -153,7 +153,7 @@ class DepthWallpaperService : WallpaperService() {
                 renderer?.setRenderingEnabled(true)
                 loadActiveModel()
                 model?.let {
-                    renderer?.updateParams(it.parallaxStrength, it.blurStrength)
+                    renderer?.updateParams(it.renderParallaxStrength(), 0f)
                 }
                 registerSensor()
                 if (surfaceReady && model?.contentKey() != loadedImageKey) {
@@ -199,7 +199,7 @@ class DepthWallpaperService : WallpaperService() {
                 "loadContent start key=$targetKey gaussian=${target.isGaussian()} mesh=${target.isMesh()} " +
                     "visible=$isVisible surface=$surfaceWidth x $surfaceHeight loaded=$loadedImageKey"
             )
-            renderer?.updateParams(target.parallaxStrength, target.blurStrength)
+            renderer?.updateParams(target.renderParallaxStrength(), 0f)
             val currentVersion = ++loadVersion
             Thread {
                 if (target.isGaussian()) {
@@ -228,7 +228,8 @@ class DepthWallpaperService : WallpaperService() {
                 } else if (target.isMesh()) {
                     val scene = PhotoMeshPlyLoader.loadScene(
                         context = applicationContext,
-                        uriString = target.meshUri
+                        uriString = target.meshUri,
+                        maxFaces = WALLPAPER_MESH_FACE_LIMIT
                     )
                     if (scene != null && currentVersion == loadVersion && isVisible && surfaceReady) {
                         loadedImageKey = targetKey
@@ -247,26 +248,50 @@ class DepthWallpaperService : WallpaperService() {
                         )
                     }
                 } else {
-                    val textures = DepthImageProcessor.loadTextureSet(
+                    val layeredTextures = DepthImageProcessor.loadLayeredTextureSet(
                         context = applicationContext,
                         model = target,
                         targetWidth = surfaceWidth * 2,
                         targetHeight = surfaceHeight * 2
                     )
-                    if (textures != null && currentVersion == loadVersion && isVisible && surfaceReady) {
-                        loadedImageKey = targetKey
-                        Log.d(
-                            TAG,
-                            "loadContent texture loaded color=${textures.color.width}x${textures.color.height} " +
-                                "depth=${textures.depth.width}x${textures.depth.height}"
-                        )
-                        renderer?.loadTextures(textures)
+                    if (layeredTextures != null) {
+                        if (currentVersion == loadVersion && isVisible && surfaceReady) {
+                            loadedImageKey = targetKey
+                            Log.d(
+                                TAG,
+                                "loadContent layered texture loaded count=${layeredTextures.layers.size} " +
+                                    "image=${layeredTextures.imageWidth}x${layeredTextures.imageHeight}"
+                            )
+                            renderer?.loadLayeredTextures(layeredTextures)
+                        } else {
+                            Log.w(
+                                TAG,
+                                "loadContent layered texture skipped current=$currentVersion loadVersion=$loadVersion " +
+                                    "visible=$isVisible surfaceReady=$surfaceReady"
+                            )
+                        }
                     } else {
-                        Log.w(
-                            TAG,
-                            "loadContent texture skipped textures=${textures != null} current=$currentVersion loadVersion=$loadVersion " +
-                                "visible=$isVisible surfaceReady=$surfaceReady"
+                        val textures = DepthImageProcessor.loadTextureSet(
+                            context = applicationContext,
+                            model = target,
+                            targetWidth = surfaceWidth * 2,
+                            targetHeight = surfaceHeight * 2
                         )
+                        if (textures != null && currentVersion == loadVersion && isVisible && surfaceReady) {
+                            loadedImageKey = targetKey
+                            Log.d(
+                                TAG,
+                                "loadContent texture fallback loaded color=${textures.color.width}x${textures.color.height} " +
+                                    "depth=${textures.depth.width}x${textures.depth.height}"
+                            )
+                            renderer?.loadTextures(textures)
+                        } else {
+                            Log.w(
+                                TAG,
+                                "loadContent texture fallback skipped textures=${textures != null} current=$currentVersion loadVersion=$loadVersion " +
+                                    "visible=$isVisible surfaceReady=$surfaceReady"
+                            )
+                        }
                     }
                 }
             }.also { it.name = "DepthContentLoader" }.start()
@@ -277,9 +302,17 @@ class DepthWallpaperService : WallpaperService() {
                 return "$id|$gaussianUri"
             }
             if (isMesh()) {
-                return "$id|$meshUri"
+                return "$id|$meshUri|faces=$WALLPAPER_MESH_FACE_LIMIT"
             }
-            return "$id|$imageUri|${DepthModelRunner.modelCacheKey(applicationContext)}"
+            return "$id|$imageUri|layered-v2|${DepthModelRunner.modelCacheKey(applicationContext)}"
+        }
+
+        private fun DepthWallpaperModel.renderParallaxStrength(): Float {
+            return parallaxStrength
+        }
+
+        private fun DepthWallpaperModel.renderSensorSensitivity(): Float {
+            return sensorSensitivity
         }
 
         private fun registerSensor() {
@@ -449,12 +482,17 @@ class DepthWallpaperService : WallpaperService() {
             filteredTiltX += (targetX - filteredTiltX) * TILT_FILTER_ALPHA
             filteredTiltY += (targetY - filteredTiltY) * TILT_FILTER_ALPHA
 
-            val sensitivity = model?.sensorSensitivity ?: 4.5f
+            val sensitivity = model?.renderSensorSensitivity() ?: 4.5f
             val threshold = (0.78f - sensitivity.coerceIn(1f, 9f) * 0.055f).coerceIn(0.26f, 0.72f)
             val tiltX = (filteredTiltX / threshold).coerceIn(-1f, 1f)
             val tiltY = (filteredTiltY / threshold).coerceIn(-1f, 1f)
+            val minDispatchIntervalNs = if (model?.isMesh() == true) {
+                MESH_MIN_DISPATCH_INTERVAL_NS
+            } else {
+                MIN_DISPATCH_INTERVAL_NS
+            }
             if (
-                timestampNs - lastDispatchNs > MIN_DISPATCH_INTERVAL_NS &&
+                timestampNs - lastDispatchNs > minDispatchIntervalNs &&
                 (abs(tiltX - lastTiltX) > MIN_TILT_CHANGE || abs(tiltY - lastTiltY) > MIN_TILT_CHANGE)
             ) {
                 lastDispatchNs = timestampNs
@@ -543,6 +581,8 @@ class DepthWallpaperService : WallpaperService() {
         private const val GRAVITY_FILTER_ALPHA = 0.32f
         private const val MIN_TILT_CHANGE = 0.002f
         private const val MIN_DISPATCH_INTERVAL_NS = 16_000_000L
+        private const val MESH_MIN_DISPATCH_INTERVAL_NS = 33_000_000L
+        private const val WALLPAPER_MESH_FACE_LIMIT = PhotoMeshPlyLoader.MAX_FACE_LIMIT
         private const val SENSOR_WATCHDOG_INTERVAL_MS = 3_000L
         private const val SENSOR_STALE_TIMEOUT_MS = 4_500L
         private const val SENSOR_LOG_INTERVAL_MS = 1_000L

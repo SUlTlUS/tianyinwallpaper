@@ -183,6 +183,20 @@ fun PlyModelTestRouteScreen(
                 }
             )
 
+            MeshFaceLimitCard(
+                maxFaces = maxFaces,
+                sliderValue = maxFacesSlider,
+                enabled = selectedUri != null && !isLoading,
+                panelColor = panelColor,
+                contentColor = contentColor,
+                onSliderChange = { maxFacesSlider = it },
+                onCommit = {
+                    val nextLimit = quantizeFaceLimit(maxFacesSlider)
+                    maxFacesSlider = nextLimit.toFloat()
+                    maxFaces = nextLimit
+                }
+            )
+
             if (isLoading) {
                 LoadingCard(panelColor, contentColor, accentColor)
             }
@@ -200,8 +214,23 @@ fun PlyModelTestRouteScreen(
                 )
             }
 
-            scene?.let { loadedScene ->
+            gaussianScene?.let { loadedScene ->
                 GaussianPreviewCard(
+                    scene = loadedScene,
+                    panelColor = panelColor,
+                    contentColor = contentColor
+                )
+
+                SceneInfoCard(
+                    fileName = displayName.ifBlank { selectedUri?.lastPathSegment.orEmpty() },
+                    scene = loadedScene,
+                    panelColor = panelColor,
+                    contentColor = contentColor
+                )
+            }
+
+            meshScene?.let { loadedScene ->
+                MeshPreviewCard(
                     scene = loadedScene,
                     panelColor = panelColor,
                     contentColor = contentColor
@@ -255,6 +284,47 @@ private fun SplatLimitCard(
             onValueChange = onSliderChange,
             onValueChangeFinished = onCommit,
             valueRange = MIN_TEST_SPLATS.toFloat()..MAX_TEST_SPLATS.toFloat(),
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun MeshFaceLimitCard(
+    maxFaces: Int,
+    sliderValue: Float,
+    enabled: Boolean,
+    panelColor: Color,
+    contentColor: Color,
+    onSliderChange: (Float) -> Unit,
+    onCommit: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(panelColor)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Max mesh faces", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "${formatFaces(quantizeFaceLimit(sliderValue))} / ${formatFaces(maxFaces)}",
+                color = contentColor.copy(alpha = 0.62f),
+                fontSize = 13.sp
+            )
+        }
+        Slider(
+            value = sliderValue,
+            onValueChange = onSliderChange,
+            onValueChangeFinished = onCommit,
+            valueRange = MIN_TEST_FACES.toFloat()..MAX_TEST_FACES.toFloat(),
             enabled = enabled,
             modifier = Modifier.fillMaxWidth()
         )
@@ -476,6 +546,114 @@ private fun GaussianPreviewCard(
 }
 
 @Composable
+private fun MeshPreviewCard(
+    scene: PhotoMeshPlyLoader.MeshScene,
+    panelColor: Color,
+    contentColor: Color
+) {
+    val renderer = remember { DepthGLRenderer() }
+    val previewTilt = remember { FloatArray(2) }
+    var parallaxStrength by remember { mutableStateOf(0.045f) }
+
+    fun applyParams() {
+        renderer.updateParams(parallaxStrength, 0f)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            renderer.stopAndWait(300)
+        }
+    }
+
+    LaunchedEffect(scene) {
+        renderer.loadMesh(scene)
+        applyParams()
+        renderer.updateTilt(previewTilt[0], previewTilt[1])
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(panelColor)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Mesh preview", color = contentColor, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = "Drag to test parallax",
+                color = contentColor.copy(alpha = 0.55f),
+                fontSize = 12.sp
+            )
+        }
+
+        AndroidView(
+            factory = { viewContext ->
+                SurfaceView(viewContext).apply {
+                    holder.addCallback(object : SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: SurfaceHolder) = Unit
+
+                        override fun surfaceChanged(
+                            holder: SurfaceHolder,
+                            format: Int,
+                            width: Int,
+                            height: Int
+                        ) {
+                            renderer.start(holder.surface)
+                            renderer.resize(width, height)
+                            renderer.loadMesh(scene)
+                            applyParams()
+                            renderer.updateTilt(previewTilt[0], previewTilt[1])
+                        }
+
+                        override fun surfaceDestroyed(holder: SurfaceHolder) {
+                            renderer.stopAndWait(300)
+                        }
+                    })
+                }
+            },
+            update = { view ->
+                if (view.holder.surface.isValid && view.width > 0 && view.height > 0) {
+                    renderer.resize(view.width, view.height)
+                    applyParams()
+                    renderer.updateTilt(previewTilt[0], previewTilt[1])
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(9f / 16f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black)
+                .pointerInput(scene) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        previewTilt[0] = (previewTilt[0] + dragAmount.x / 360f).coerceIn(-1f, 1f)
+                        previewTilt[1] = (previewTilt[1] + dragAmount.y / 520f).coerceIn(-1f, 1f)
+                        renderer.updateTilt(previewTilt[0], previewTilt[1])
+                    }
+                }
+        )
+
+        GaussianParamSlider(
+            label = "Parallax strength",
+            value = parallaxStrength,
+            valueRange = 0.005f..0.075f,
+            contentColor = contentColor,
+            onValueChange = {
+                parallaxStrength = it
+                applyParams()
+            },
+            onValueChangeFinished = { applyParams() }
+        )
+    }
+}
+
+@Composable
 private fun GaussianParamSlider(
     label: String,
     value: Float,
@@ -538,6 +716,33 @@ private fun SceneInfoCard(
 }
 
 @Composable
+private fun SceneInfoCard(
+    fileName: String,
+    scene: PhotoMeshPlyLoader.MeshScene,
+    panelColor: Color,
+    contentColor: Color
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(panelColor)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(fileName.ifBlank { "Mesh PLY" }, color = contentColor, fontWeight = FontWeight.SemiBold)
+        InfoLine("Type", "3D-photo mesh", contentColor)
+        InfoLine("Faces", "${formatFaces(scene.faceCount)} / ${formatFaces(scene.sourceFaceCount)}", contentColor)
+        InfoLine("Vertices", formatFaces(scene.vertexCount), contentColor)
+        InfoLine("Chunks", scene.chunks.size.toString(), contentColor)
+        InfoLine("Image", "${scene.imageWidth} x ${scene.imageHeight}", contentColor)
+        InfoLine("FOV", "${fmt(scene.hFovRad)} / ${fmt(scene.vFovRad)} rad", contentColor)
+        InfoLine("Depth", "${fmt(scene.nearDepth)} / ${fmt(scene.focusDepth)} / ${fmt(scene.farDepth)}", contentColor)
+        InfoLine("Stride", scene.faceStride.toString(), contentColor)
+    }
+}
+
+@Composable
 private fun InfoLine(
     label: String,
     value: String,
@@ -568,9 +773,82 @@ private fun formatSplats(value: Int): String {
     }
 }
 
+private fun quantizeFaceLimit(value: Float): Int {
+    return ((value / FACE_LIMIT_STEP).roundToInt() * FACE_LIMIT_STEP)
+        .coerceIn(MIN_TEST_FACES, MAX_TEST_FACES)
+}
+
+private fun formatFaces(value: Int): String {
+    return if (value >= 1_000_000) {
+        String.format("%.2fM", value / 1_000_000f)
+    } else {
+        "${value / 1_000}K"
+    }
+}
+
+private sealed class PlyLoadResult {
+    data class Gaussian(val scene: GaussianPlyLoader.GaussianScene) : PlyLoadResult()
+    data class Mesh(val scene: PhotoMeshPlyLoader.MeshScene) : PlyLoadResult()
+}
+
+private enum class PlyKind {
+    Gaussian,
+    Mesh,
+    Unknown
+}
+
+private fun detectPlyKind(context: Context, uri: Uri): PlyKind {
+    return runCatching {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            InputStreamReader(input, StandardCharsets.US_ASCII).buffered(16 * 1024).use { reader ->
+                var hasFaceElement = false
+                var hasFaceList = false
+                var hasGaussianField = false
+                var hasColorField = false
+                var currentElement = ""
+                var line = reader.readLine()
+                var lines = 0
+                while (line != null && lines < 512) {
+                    val trimmed = line.trim()
+                    if (trimmed == "end_header") break
+                    val parts = trimmed.split(Regex("\\s+"))
+                    when (parts.firstOrNull()) {
+                        "element" -> {
+                            currentElement = parts.getOrNull(1).orEmpty()
+                            if (currentElement == "face") hasFaceElement = true
+                        }
+                        "property" -> {
+                            val propertyName = parts.lastOrNull().orEmpty()
+                            if (currentElement == "face" && parts.getOrNull(1) == "list") {
+                                hasFaceList = true
+                            }
+                            if (currentElement == "vertex" && propertyName in setOf("red", "green", "blue", "r", "g", "b")) {
+                                hasColorField = true
+                            }
+                            if (currentElement == "vertex" && propertyName in setOf("f_dc_0", "opacity", "scale_0")) {
+                                hasGaussianField = true
+                            }
+                        }
+                    }
+                    line = reader.readLine()
+                    lines++
+                }
+                when {
+                    hasFaceElement && hasFaceList && hasColorField -> PlyKind.Mesh
+                    hasGaussianField -> PlyKind.Gaussian
+                    else -> PlyKind.Unknown
+                }
+            }
+        } ?: PlyKind.Unknown
+    }.getOrDefault(PlyKind.Unknown)
+}
+
 private const val MIN_TEST_SPLATS = 60_000
 private const val MAX_TEST_SPLATS = 800_000
 private const val SPLAT_LIMIT_STEP = 10_000
+private const val MIN_TEST_FACES = 40_000
+private const val MAX_TEST_FACES = 1_600_000
+private const val FACE_LIMIT_STEP = 20_000
 private const val PLY_PREVIEW_ASPECT = 9f / 16f
 
 private fun queryDisplayName(context: Context, uri: Uri): String? {

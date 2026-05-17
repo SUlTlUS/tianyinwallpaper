@@ -11,7 +11,7 @@ data class DepthWallpaperModel(
     var createdAt: Long = 0L,
     var sensorSensitivity: Float = 4.5f,
     var parallaxStrength: Float = 0.045f,
-    var blurStrength: Float = 0.004f
+    var blurStrength: Float = 0f
 ) {
     @JSONField(serialize = false, deserialize = false)
     fun isGaussian(): Boolean = gaussianUri.isNotBlank()

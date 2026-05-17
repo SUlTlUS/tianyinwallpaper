@@ -13,7 +13,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -22,7 +21,10 @@ import kotlin.math.sqrt
 object DepthImageProcessor {
     private const val TAG = "DepthImageProcessor"
     private const val MAX_TEXTURE_EDGE = 2048
+    private const val MAX_LAYER_TEXTURE_EDGE = 960
     private const val MAX_DEPTH_EDGE = 384
+    private const val DEPTH_LAYER_COUNT = 18
+    private const val LAYER_CACHE_VERSION = "layered-v2"
 
     data class TextureBitmap(
         val width: Int,
@@ -33,6 +35,17 @@ object DepthImageProcessor {
     data class TextureSet(
         val color: TextureBitmap,
         val depth: TextureBitmap
+    )
+
+    data class LayerTexture(
+        val texture: TextureBitmap,
+        val depth: Float
+    )
+
+    data class LayeredTextureSet(
+        val imageWidth: Int,
+        val imageHeight: Int,
+        val layers: List<LayerTexture>
     )
 
     fun loadTextureSet(
@@ -59,6 +72,60 @@ object DepthImageProcessor {
         }
     }
 
+    fun loadLayeredTextureSet(
+        context: Context,
+        model: DepthWallpaperModel,
+        targetWidth: Int,
+        targetHeight: Int
+    ): LayeredTextureSet? {
+        if (model.imageUri.isBlank()) return null
+        val colorBitmap = loadOwnedColorBitmap(
+            context = context,
+            uriString = model.imageUri,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            maxTextureEdge = MAX_LAYER_TEXTURE_EDGE
+        ) ?: return null
+        var depthBitmap: Bitmap? = null
+        var scaledDepthBitmap: Bitmap? = null
+        var hadOutOfMemory = false
+        return try {
+            depthBitmap = loadOrCreateDepthMap(context, model, colorBitmap)
+            val depthForLayers = if (depthBitmap.width == colorBitmap.width && depthBitmap.height == colorBitmap.height) {
+                depthBitmap
+            } else {
+                Bitmap.createScaledBitmap(depthBitmap, colorBitmap.width, colorBitmap.height, true)
+                    .also { scaledDepthBitmap = it }
+            }
+
+            val cacheDir = layeredCacheDir(context, model, targetWidth, targetHeight)
+            loadCachedLayeredTextureSet(cacheDir, colorBitmap.width, colorBitmap.height)?.let { cached ->
+                return cached
+            }
+
+            val layers = createLayerTextures(colorBitmap, depthForLayers, cacheDir)
+            LayeredTextureSet(
+                imageWidth = colorBitmap.width,
+                imageHeight = colorBitmap.height,
+                layers = layers
+            )
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "Out of memory while building layered depth texture set", e)
+            hadOutOfMemory = true
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to build layered depth texture set", e)
+            null
+        } finally {
+            scaledDepthBitmap?.let { if (!it.isRecycled) it.recycle() }
+            depthBitmap?.let { if (it !== colorBitmap && !it.isRecycled) it.recycle() }
+            if (!colorBitmap.isRecycled) colorBitmap.recycle()
+            if (hadOutOfMemory) {
+                System.gc()
+            }
+        }
+    }
+
     fun ensureDepthCache(context: Context, model: DepthWallpaperModel) {
         if (model.imageUri.isBlank()) return
         val colorBitmap = loadOwnedColorBitmap(context, model.imageUri, 720, 1280) ?: return
@@ -75,7 +142,7 @@ object DepthImageProcessor {
         val prefix = model.id.takeIf { it.isNotBlank() } ?: return
         dir.listFiles()?.forEach { file ->
             if (file.name.startsWith("$prefix-")) {
-                file.delete()
+                file.deleteRecursively()
             }
         }
     }
@@ -105,11 +172,12 @@ object DepthImageProcessor {
         context: Context,
         uriString: String,
         targetWidth: Int,
-        targetHeight: Int
+        targetHeight: Int,
+        maxTextureEdge: Int = MAX_TEXTURE_EDGE
     ): Bitmap? {
         return try {
             val uri = Uri.parse(uriString)
-            val (reqWidth, reqHeight) = textureRequestSize(targetWidth, targetHeight)
+            val (reqWidth, reqHeight) = textureRequestSize(targetWidth, targetHeight, maxTextureEdge)
             val cached = RenderBitmapCache.loadSync(context, uri, reqWidth, reqHeight)
                 ?: return null
             cached.toSoftwareArgbCopy()
@@ -119,11 +187,11 @@ object DepthImageProcessor {
         }
     }
 
-    private fun textureRequestSize(width: Int, height: Int): Pair<Int, Int> {
+    private fun textureRequestSize(width: Int, height: Int, maxTextureEdge: Int): Pair<Int, Int> {
         val safeWidth = width.takeIf { it > 0 } ?: FileUtil.width.takeIf { it > 0 } ?: 1080
         val safeHeight = height.takeIf { it > 0 } ?: FileUtil.height.takeIf { it > 0 } ?: 1920
         val maxEdge = max(safeWidth, safeHeight).coerceAtLeast(1)
-        val scale = min(1f, MAX_TEXTURE_EDGE.toFloat() / maxEdge.toFloat())
+        val scale = min(1f, maxTextureEdge.toFloat() / maxEdge.toFloat())
         return max(1, (safeWidth * scale).roundToInt()) to
             max(1, (safeHeight * scale).roundToInt())
     }
@@ -181,6 +249,171 @@ object DepthImageProcessor {
         }.onFailure {
             Log.w(TAG, "Failed to save depth cache: ${cacheFile.absolutePath}", it)
         }
+    }
+
+    private fun layeredCacheDir(
+        context: Context,
+        model: DepthWallpaperModel,
+        targetWidth: Int,
+        targetHeight: Int
+    ): File? {
+        val dir = depthCacheDir(context) ?: return null
+        val hash = Integer.toHexString(
+            "${model.imageUri}|${DepthModelRunner.modelCacheKey(context)}|$targetWidth|$targetHeight|$LAYER_CACHE_VERSION"
+                .hashCode()
+        )
+        return File(dir, "${model.id}-$hash-layers")
+    }
+
+    private fun loadCachedLayeredTextureSet(
+        cacheDir: File?,
+        expectedWidth: Int,
+        expectedHeight: Int
+    ): LayeredTextureSet? {
+        if (cacheDir == null || !cacheDir.isDirectory) return null
+        val layers = ArrayList<LayerTexture>(DEPTH_LAYER_COUNT)
+        for (index in 0 until DEPTH_LAYER_COUNT) {
+            val file = File(cacheDir, layerFileName(index))
+            if (!file.exists() || file.length() <= 0L) return null
+            val bitmap = BitmapFactory.decodeFile(
+                file.absolutePath,
+                BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+            )?.toSoftwareArgbCopy() ?: return null
+            if (bitmap.width != expectedWidth || bitmap.height != expectedHeight) {
+                if (!bitmap.isRecycled) bitmap.recycle()
+                cacheDir.deleteRecursively()
+                return null
+            }
+            try {
+                layers += LayerTexture(bitmap.toTextureBitmap(), layerDepth(index))
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        }
+        Log.d(TAG, "Loaded cached layered depth textures count=${layers.size} ${expectedWidth}x$expectedHeight")
+        return LayeredTextureSet(expectedWidth, expectedHeight, layers)
+    }
+
+    private fun createLayerTextures(
+        colorBitmap: Bitmap,
+        depthBitmap: Bitmap,
+        cacheDir: File?
+    ): List<LayerTexture> {
+        val width = colorBitmap.width
+        val height = colorBitmap.height
+        val pixelCount = width * height
+        val colorPixels = IntArray(pixelCount)
+        val depthPixels = IntArray(pixelCount)
+        colorBitmap.getPixels(colorPixels, 0, width, 0, 0, width, height)
+        depthBitmap.getPixels(depthPixels, 0, width, 0, 0, width, height)
+
+        val thresholds = computeLayerThresholds(depthPixels)
+        if (cacheDir != null) {
+            cacheDir.deleteRecursively()
+            cacheDir.mkdirs()
+        }
+
+        val layers = ArrayList<LayerTexture>(DEPTH_LAYER_COUNT)
+        for (index in 0 until DEPTH_LAYER_COUNT) {
+            val layerBitmap = createLayerBitmap(index, colorPixels, depthPixels, thresholds, width, height)
+            try {
+                saveLayerBitmap(cacheDir, index, layerBitmap)
+                layers += LayerTexture(layerBitmap.toTextureBitmap(), layerDepth(index))
+            } finally {
+                if (!layerBitmap.isRecycled) layerBitmap.recycle()
+            }
+        }
+        Log.d(TAG, "Generated layered depth textures count=${layers.size} ${width}x$height")
+        return layers
+    }
+
+    private fun computeLayerThresholds(depthPixels: IntArray): FloatArray {
+        var sum = 0f
+        var count = 0
+        for (pixel in depthPixels) {
+            val value = (pixel and 0xff) / 255f
+            if (value > 0.01f) {
+                sum += value
+                count++
+            }
+        }
+        val averageDepth = if (count > 0) sum / count else 0.5f
+        val exponent = when {
+            averageDepth < 0.3f -> 3.9
+            averageDepth > 0.7f -> 1.8
+            else -> 3.8
+        }
+        val thresholds = FloatArray(DEPTH_LAYER_COUNT + 1)
+        thresholds[0] = 0f
+        for (index in 1 until DEPTH_LAYER_COUNT) {
+            val normalized = index.toDouble() / (DEPTH_LAYER_COUNT - 1).toDouble()
+            thresholds[index] = Math.pow(normalized, exponent).toFloat()
+                .coerceAtLeast(thresholds[index - 1] + 0.001f)
+        }
+        thresholds[DEPTH_LAYER_COUNT] = 1.01f
+        return thresholds
+    }
+
+    private fun createLayerBitmap(
+        index: Int,
+        colorPixels: IntArray,
+        depthPixels: IntArray,
+        thresholds: FloatArray,
+        width: Int,
+        height: Int
+    ): Bitmap {
+        if (index == 0) {
+            return Bitmap.createBitmap(colorPixels, width, height, Bitmap.Config.ARGB_8888)
+        }
+
+        val lower = thresholds[index]
+        val upper = thresholds[index + 1]
+        val softness = 0.018f
+        val output = IntArray(colorPixels.size)
+        for (i in colorPixels.indices) {
+            val depth = (depthPixels[i] and 0xff) / 255f
+            val alpha =
+                smoothStep(lower - softness, lower + softness, depth) *
+                    (1f - smoothStep(upper - softness, upper + softness, depth))
+            if (alpha > 0.003f) {
+                val a = (alpha * 255f).roundToInt().coerceIn(0, 255)
+                output[i] = (a shl 24) or (colorPixels[i] and 0x00ffffff)
+            }
+        }
+        return Bitmap.createBitmap(output, width, height, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun saveLayerBitmap(cacheDir: File?, index: Int, bitmap: Bitmap) {
+        if (cacheDir == null || (!cacheDir.exists() && !cacheDir.mkdirs())) return
+        val file = File(cacheDir, layerFileName(index))
+        runCatching {
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+        }.onFailure {
+            Log.w(TAG, "Failed to save layer cache: ${file.absolutePath}", it)
+        }
+    }
+
+    private fun layerFileName(index: Int): String = "layer_${index.toString().padStart(2, '0')}.png"
+
+    private fun layerDepth(index: Int): Float {
+        return (index.toFloat() / (DEPTH_LAYER_COUNT - 1).coerceAtLeast(1).toFloat())
+            .coerceIn(0f, 1f)
+    }
+
+    private fun smoothStep(edge0: Float, edge1: Float, value: Float): Float {
+        val range = edge1 - edge0
+        if (range > -0.00001f && range < 0.00001f) {
+            return if (value >= edge1) 1f else 0f
+        }
+        val raw = (value - edge0) / range
+        val t = when {
+            raw <= 0f -> 0f
+            raw >= 1f -> 1f
+            else -> raw
+        }
+        return t * t * (3f - 2f * t)
     }
 
     private fun estimateDepthMap(source: Bitmap): Bitmap {
