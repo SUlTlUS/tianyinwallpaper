@@ -507,7 +507,10 @@ fun SettingRouteScreen(
                             updateDialogState = updateDialogState.copy(isDownloading = false)
                             // 验证 MD5
                             val md5 = AppUpdateManager.calculateMD5(file)
-                            if (md5 != null && md5.equals(info.md5, ignoreCase = true)) {
+                            val apkVersionCode = AppUpdateManager.getApkVersionCode(context, file)
+                            if (apkVersionCode != info.code.toLong()) {
+                                Toast.makeText(context, "下载的安装包版本不匹配，请重新检查更新", Toast.LENGTH_SHORT).show()
+                            } else if (md5 != null && md5.equals(info.md5, ignoreCase = true)) {
                                 AppUpdateManager.installApk(context, file)
                             } else {
                                 Toast.makeText(context, "文件校验失败，请重新下载", Toast.LENGTH_SHORT).show()

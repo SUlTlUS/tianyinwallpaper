@@ -258,6 +258,10 @@ object AppUpdateManager {
         callback: DownloadCallback
     ): Long {
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val targetFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), updateInfo.filename)
+        if (targetFile.exists() && !targetFile.delete()) {
+            Log.w(TAG, "Failed to delete existing apk before download: ${targetFile.absolutePath}")
+        }
         
         // 创建下载请求
         val request = DownloadManager.Request(Uri.parse(updateInfo.url))
@@ -384,6 +388,14 @@ object AppUpdateManager {
             @Suppress("DEPRECATION")
             packageInfo.versionCode.toLong()
         }
+    }
+
+    fun getApkVersionCode(context: Context, file: File): Long? {
+        if (!file.exists() || !file.isFile) return null
+        val packageInfo = runCatching {
+            context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+        }.getOrNull() ?: return null
+        return getArchiveVersionCode(packageInfo)
     }
 
     /**
