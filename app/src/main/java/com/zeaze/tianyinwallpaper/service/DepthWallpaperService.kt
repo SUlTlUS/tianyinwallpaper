@@ -226,24 +226,47 @@ class DepthWallpaperService : WallpaperService() {
                         )
                     }
                 } else if (target.isMesh()) {
-                    val scene = PhotoMeshPlyLoader.loadScene(
+                    val previewScene = PhotoMeshPlyLoader.loadScene(
                         context = applicationContext,
                         uriString = target.meshUri,
-                        maxFaces = WALLPAPER_MESH_FACE_LIMIT
+                        maxFaces = WALLPAPER_MESH_LOW_FACE_LIMIT
                     )
-                    if (scene != null && currentVersion == loadVersion && isVisible && surfaceReady) {
+                    if (previewScene != null && currentVersion == loadVersion && isVisible && surfaceReady) {
                         loadedImageKey = targetKey
                         Log.d(
                             TAG,
-                            "loadContent mesh loaded faces=${scene.faceCount}/${scene.sourceFaceCount} " +
-                                "chunks=${scene.chunks.size} image=${scene.imageWidth}x${scene.imageHeight} " +
-                                "depth=${scene.nearDepth}/${scene.focusDepth}/${scene.farDepth}"
+                            "loadContent mesh preview loaded faces=${previewScene.faceCount}/${previewScene.sourceFaceCount} " +
+                                "chunks=${previewScene.chunks.size} image=${previewScene.imageWidth}x${previewScene.imageHeight} " +
+                                "depth=${previewScene.nearDepth}/${previewScene.focusDepth}/${previewScene.farDepth}"
                         )
-                        renderer?.loadMesh(scene)
+                        renderer?.loadMesh(previewScene)
                     } else {
                         Log.w(
                             TAG,
-                            "loadContent mesh skipped scene=${scene != null} current=$currentVersion loadVersion=$loadVersion " +
+                            "loadContent mesh preview skipped scene=${previewScene != null} current=$currentVersion loadVersion=$loadVersion " +
+                                "visible=$isVisible surfaceReady=$surfaceReady"
+                        )
+                        return@Thread
+                    }
+
+                    val lods = PhotoMeshPlyLoader.loadSceneLods(
+                        context = applicationContext,
+                        uriString = target.meshUri,
+                        fullFaces = WALLPAPER_MESH_FACE_LIMIT,
+                        motionFaces = WALLPAPER_MESH_MOTION_FACE_LIMIT,
+                        lowFaces = WALLPAPER_MESH_LOW_FACE_LIMIT
+                    )
+                    if (lods != null && currentVersion == loadVersion && isVisible && surfaceReady) {
+                        Log.d(
+                            TAG,
+                            "loadContent mesh lods loaded faces=${lods.scenes.joinToString { "${it.faceCount}/${it.sourceFaceCount}" }} " +
+                                "full=${lods.full.faceCount} motion=${lods.motion.faceCount} low=${lods.low.faceCount}"
+                        )
+                        renderer?.loadMeshLods(lods)
+                    } else {
+                        Log.w(
+                            TAG,
+                            "loadContent mesh lods skipped lods=${lods != null} current=$currentVersion loadVersion=$loadVersion " +
                                 "visible=$isVisible surfaceReady=$surfaceReady"
                         )
                     }
@@ -302,7 +325,7 @@ class DepthWallpaperService : WallpaperService() {
                 return "$id|$gaussianUri"
             }
             if (isMesh()) {
-                return "$id|$meshUri|faces=$WALLPAPER_MESH_FACE_LIMIT"
+                return "$id|$meshUri|faces=$WALLPAPER_MESH_LOW_FACE_LIMIT,$WALLPAPER_MESH_MOTION_FACE_LIMIT,$WALLPAPER_MESH_FACE_LIMIT"
             }
             return "$id|$imageUri|layered-v2|${DepthModelRunner.modelCacheKey(applicationContext)}"
         }
@@ -581,7 +604,9 @@ class DepthWallpaperService : WallpaperService() {
         private const val GRAVITY_FILTER_ALPHA = 0.32f
         private const val MIN_TILT_CHANGE = 0.002f
         private const val MIN_DISPATCH_INTERVAL_NS = 16_000_000L
-        private const val MESH_MIN_DISPATCH_INTERVAL_NS = 33_000_000L
+        private const val MESH_MIN_DISPATCH_INTERVAL_NS = 50_000_000L
+        private const val WALLPAPER_MESH_LOW_FACE_LIMIT = PhotoMeshPlyLoader.LOW_LOD_FACE_LIMIT
+        private const val WALLPAPER_MESH_MOTION_FACE_LIMIT = PhotoMeshPlyLoader.MOTION_LOD_FACE_LIMIT
         private const val WALLPAPER_MESH_FACE_LIMIT = PhotoMeshPlyLoader.MAX_FACE_LIMIT
         private const val SENSOR_WATCHDOG_INTERVAL_MS = 3_000L
         private const val SENSOR_STALE_TIMEOUT_MS = 4_500L

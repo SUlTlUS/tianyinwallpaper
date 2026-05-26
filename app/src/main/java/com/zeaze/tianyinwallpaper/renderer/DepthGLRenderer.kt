@@ -53,6 +53,7 @@ class DepthGLRenderer {
         data class LoadLayeredTextures(val textures: DepthImageProcessor.LayeredTextureSet) : RenderMessage()
         data class LoadGaussians(val scene: GaussianPlyLoader.GaussianScene) : RenderMessage()
         data class LoadMesh(val scene: PhotoMeshPlyLoader.MeshScene) : RenderMessage()
+        data class LoadMeshLods(val lods: PhotoMeshPlyLoader.MeshLodSet) : RenderMessage()
         data class SetParams(val parallaxStrength: Float, val blurStrength: Float) : RenderMessage()
         data class SetGaussianParams(val params: GaussianRenderParams) : RenderMessage()
         object Render : RenderMessage()
@@ -182,6 +183,16 @@ class DepthGLRenderer {
         requestRender()
     }
 
+    fun loadMeshLods(lods: PhotoMeshPlyLoader.MeshLodSet) {
+        Log.d(
+            TAG,
+            "loadMeshLods faces=${lods.scenes.joinToString { "${it.faceCount}/${it.sourceFaceCount}" }} " +
+                "full=${lods.full.faceCount} motion=${lods.motion.faceCount} low=${lods.low.faceCount}"
+        )
+        messageQueue.offer(RenderMessage.LoadMeshLods(lods))
+        requestRender()
+    }
+
     fun updateTilt(x: Float, y: Float) {
         var nextX = x.coerceIn(-1f, 1f)
         var nextY = y.coerceIn(-1f, 1f)
@@ -264,6 +275,7 @@ class DepthGLRenderer {
         private var gaussianVboSet: GaussianVboSet? = null
         private var meshScene: PhotoMeshPlyLoader.MeshScene? = null
         private var meshVboSet: MeshVboSet? = null
+        private var meshVboSets: List<MeshVboSet> = emptyList()
 
         private var sW: Int = 1
         private var sH: Int = 1
@@ -287,6 +299,8 @@ class DepthGLRenderer {
         private var lastNoContentLogMs = 0L
         private var lastQueueLogMs = 0L
         private var lastGlErrorLogMs = 0L
+        private var meshMotionUntilMs = 0L
+        private var meshHighQualityRenderAtMs = 0L
 
         init {
             val vData = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
@@ -333,6 +347,7 @@ class DepthGLRenderer {
                     }
                 }
 
+                var timedRenderDue = false
                 try {
                     synchronized(renderSignal) {
                         while (
@@ -340,14 +355,24 @@ class DepthGLRenderer {
                             renderingEnabled &&
                             messageQueue.isEmpty()
                         ) {
-                            renderSignal.wait()
+                            val timedDelayMs = nextTimedRenderDelayMs()
+                            if (timedDelayMs <= 0L) {
+                                timedRenderDue = true
+                                meshHighQualityRenderAtMs = 0L
+                                break
+                            }
+                            if (timedDelayMs == Long.MAX_VALUE) {
+                                renderSignal.wait()
+                            } else {
+                                renderSignal.wait(timedDelayMs)
+                            }
                         }
                     }
                 } catch (_: InterruptedException) {
                     if (!isThreadActive()) break
                 }
 
-                var needsDraw = false
+                var needsDraw = timedRenderDue
                 var processedMessages = 0
                 while (isThreadActive()) {
                     val message = messageQueue.poll() ?: break
@@ -410,8 +435,26 @@ class DepthGLRenderer {
                             hasTexture = false
                             cW = message.scene.imageWidth.coerceAtLeast(1)
                             cH = message.scene.imageHeight.coerceAtLeast(1)
+                            meshMotionUntilMs = 0L
+                            meshHighQualityRenderAtMs = 0L
                             needsDraw = true
                             Log.d(TAG, "thread loaded mesh faces=${message.scene.faceCount} chunks=${message.scene.chunks.size}")
+                        }
+                        is RenderMessage.LoadMeshLods -> {
+                            deleteDepthLayerTextures()
+                            deleteGaussianLayerTextures()
+                            deleteGaussianBuffers()
+                            deleteMeshBuffers()
+                            gaussianScene = null
+                            meshScene = message.lods.full
+                            uploadMeshBuffers(message.lods.scenes)
+                            hasTexture = false
+                            cW = message.lods.full.imageWidth.coerceAtLeast(1)
+                            cH = message.lods.full.imageHeight.coerceAtLeast(1)
+                            meshMotionUntilMs = 0L
+                            meshHighQualityRenderAtMs = 0L
+                            needsDraw = true
+                            Log.d(TAG, "thread loaded mesh lods=${message.lods.scenes.joinToString { it.faceCount.toString() }}")
                         }
                         is RenderMessage.SetParams -> {
                             parallaxStrength = message.parallaxStrength
@@ -583,7 +626,18 @@ class DepthGLRenderer {
             if (abs(tiltX - nextX) <= 0.001f && abs(tiltY - nextY) <= 0.001f) return false
             tiltX = nextX
             tiltY = nextY
+            if (meshVboSets.size > 1) {
+                val now = SystemClock.elapsedRealtime()
+                meshMotionUntilMs = now + MESH_MOTION_LOD_HOLD_MS
+                meshHighQualityRenderAtMs = meshMotionUntilMs
+            }
             return true
+        }
+
+        private fun nextTimedRenderDelayMs(): Long {
+            val target = meshHighQualityRenderAtMs
+            if (target <= 0L) return Long.MAX_VALUE
+            return (target - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
         }
 
         private fun draw() {
@@ -610,7 +664,7 @@ class DepthGLRenderer {
                 return
             }
 
-            val mesh = meshScene
+            val mesh = activeMeshVboSet()
             if (mesh != null) {
                 drawMeshScene(mesh)
                 if (isThreadActive()) {
@@ -892,10 +946,29 @@ class DepthGLRenderer {
             GLES20.glDisable(GLES20.GL_BLEND)
         }
 
-        private fun drawMeshScene(scene: PhotoMeshPlyLoader.MeshScene) {
-            val vboSet = meshVboSet?.takeIf { it.scene === scene }
-            if (meshProg == 0 || vboSet == null) {
-                logNoContent("skip mesh draw: program=$meshProg vbo=${vboSet != null}")
+        private fun activeMeshVboSet(): MeshVboSet? {
+            val sets = if (meshVboSets.isNotEmpty()) {
+                meshVboSets
+            } else {
+                meshVboSet?.let { listOf(it) }.orEmpty()
+            }
+            if (sets.isEmpty()) return null
+            if (sets.size == 1) return sets[0]
+            val ordered = sets.sortedBy { it.scene.faceCount }
+            val now = SystemClock.elapsedRealtime()
+            if (now >= meshMotionUntilMs) return ordered.last()
+            val tiltLength = sqrt(tiltX * tiltX + tiltY * tiltY)
+            return if (tiltLength > 0.46f && ordered.size >= 3) {
+                ordered.first()
+            } else {
+                ordered.getOrElse(ordered.lastIndex / 2) { ordered.first() }
+            }
+        }
+
+        private fun drawMeshScene(vboSet: MeshVboSet) {
+            val scene = vboSet.scene
+            if (meshProg == 0) {
+                logNoContent("skip mesh draw: program=$meshProg")
                 return
             }
 
@@ -1147,7 +1220,25 @@ class DepthGLRenderer {
         }
 
         private fun uploadMeshBuffers(scene: PhotoMeshPlyLoader.MeshScene) {
+            uploadMeshBuffers(listOf(scene))
+        }
+
+        private fun uploadMeshBuffers(scenes: List<PhotoMeshPlyLoader.MeshScene>) {
             drainGlErrors("before mesh VBO upload")
+            val uploadedSets = ArrayList<MeshVboSet>(scenes.size)
+            for (scene in scenes) {
+                uploadMeshVboSet(scene)?.let { uploadedSets += it }
+            }
+            meshVboSets = uploadedSets.sortedBy { it.scene.faceCount }
+            meshVboSet = meshVboSets.firstOrNull()
+            Log.d(
+                TAG,
+                "uploaded mesh VBO sets=${meshVboSets.map { it.scene.faceCount }} " +
+                    "chunks=${meshVboSets.sumOf { it.chunks.size }}"
+            )
+        }
+
+        private fun uploadMeshVboSet(scene: PhotoMeshPlyLoader.MeshScene): MeshVboSet? {
             val uploadedChunks = ArrayList<MeshVboChunk>(scene.chunks.size)
             for ((index, chunk) in scene.chunks.withIndex()) {
                 val ids = IntArray(2)
@@ -1181,12 +1272,13 @@ class DepthGLRenderer {
                     indexCount = chunk.indexCount
                 )
             }
-            meshVboSet = if (uploadedChunks.isNotEmpty()) {
+            val vboSet = if (uploadedChunks.isNotEmpty()) {
                 MeshVboSet(scene = scene, chunks = uploadedChunks)
             } else {
                 null
             }
             Log.d(TAG, "uploaded mesh VBO chunks=${uploadedChunks.size}/${scene.chunks.size} faces=${scene.faceCount}")
+            return vboSet
         }
 
         private fun uploadFloatBuffer(
@@ -1366,7 +1458,11 @@ class DepthGLRenderer {
         }
 
         private fun deleteMeshBuffers() {
-            val chunks = meshVboSet?.chunks.orEmpty()
+            val chunks = if (meshVboSets.isNotEmpty()) {
+                meshVboSets.flatMap { it.chunks }
+            } else {
+                meshVboSet?.chunks.orEmpty()
+            }
             if (chunks.isNotEmpty()) {
                 val ids = IntArray(chunks.size * 2)
                 chunks.forEachIndexed { index, chunk ->
@@ -1377,6 +1473,7 @@ class DepthGLRenderer {
                 GLES20.glDeleteBuffers(ids.size, ids, 0)
             }
             meshVboSet = null
+            meshVboSets = emptyList()
         }
 
         private fun createProg(vertex: String, fragment: String): Int {
@@ -1459,6 +1556,7 @@ class DepthGLRenderer {
         private const val RENDER_THREAD_STOP_TIMEOUT_MS = 1_500L
         private const val DRAW_LOG_INTERVAL_MS = 1_000L
         private const val MAX_VIEW_TILT = 0.72f
+        private const val MESH_MOTION_LOD_HOLD_MS = 280L
         private const val GAUSSIAN_SPLAT_SCALE = 5.2f
         private const val GAUSSIAN_LAYER_TEXTURE_MAX_SIZE = 768
         private const val FLOAT_SIZE_BYTES = 4

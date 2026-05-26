@@ -29,6 +29,8 @@ object PhotoMeshPlyLoader {
     const val DEFAULT_MAX_FACES = 8_000_000
     const val MIN_FACE_LIMIT = 40_000
     const val MAX_FACE_LIMIT = 8_000_000
+    const val LOW_LOD_FACE_LIMIT = 180_000
+    const val MOTION_LOD_FACE_LIMIT = 650_000
     private const val MAX_CHUNK_VERTICES = 60_000
     private const val MAX_CHUNK_INDICES = 180_000
     private val cacheWriteLock = Any()
@@ -58,6 +60,16 @@ object PhotoMeshPlyLoader {
         val vertexCount: Int,
         val indexCount: Int
     )
+
+    data class MeshLodSet(
+        val full: MeshScene,
+        val motion: MeshScene,
+        val low: MeshScene
+    ) {
+        val scenes: List<MeshScene> = listOf(low, motion, full)
+            .distinctBy { it.faceCount }
+            .sortedBy { it.faceCount }
+    }
 
     private data class Header(
         val format: String,
@@ -91,6 +103,46 @@ object PhotoMeshPlyLoader {
         }.onFailure {
             Log.w(TAG, "Failed to load photo mesh PLY: $uriString", it)
         }.getOrNull()
+    }
+
+    fun loadSceneLods(
+        context: Context,
+        uriString: String,
+        fullFaces: Int = MAX_FACE_LIMIT,
+        motionFaces: Int = MOTION_LOD_FACE_LIMIT,
+        lowFaces: Int = LOW_LOD_FACE_LIMIT
+    ): MeshLodSet? {
+        if (uriString.isBlank()) return null
+        val lowLimit = lowFaces.coerceIn(MIN_FACE_LIMIT, MAX_FACE_LIMIT)
+        val motionLimit = motionFaces.coerceIn(lowLimit, MAX_FACE_LIMIT)
+        val fullLimit = fullFaces.coerceIn(motionLimit, MAX_FACE_LIMIT)
+        val low = loadScene(context, uriString, lowLimit) ?: return null
+        val motion = if (motionLimit == lowLimit) {
+            low
+        } else {
+            loadScene(context, uriString, motionLimit) ?: low
+        }
+        val full = if (fullLimit == motionLimit) {
+            motion
+        } else {
+            loadScene(context, uriString, fullLimit) ?: motion
+        }
+        return MeshLodSet(full = full, motion = motion, low = low)
+    }
+
+    fun prewarmLodCaches(
+        context: Context,
+        uriString: String,
+        faceLimits: List<Int> = listOf(LOW_LOD_FACE_LIMIT, MOTION_LOD_FACE_LIMIT, MAX_FACE_LIMIT)
+    ) {
+        faceLimits
+            .map { it.coerceIn(MIN_FACE_LIMIT, MAX_FACE_LIMIT) }
+            .distinct()
+            .sorted()
+            .forEach { limit ->
+                runCatching { loadScene(context, uriString, limit) }
+                    .onFailure { Log.w(TAG, "Failed to prewarm mesh lod cache faces=$limit", it) }
+            }
     }
 
     private fun meshCacheFile(context: Context, uriString: String, faceLimit: Int): File? {
@@ -352,7 +404,7 @@ object PhotoMeshPlyLoader {
         repeat(header.faceCount) { faceIndex ->
             val line = reader.readLine() ?: error("Unexpected EOF while reading faces")
             if (!parseTriangleFace(line, triangle, header.vertexCount)) return@repeat
-            if (!shouldKeepFace(faceIndex, header.faceCount, faceLimit, triangle, sourceVertices)) return@repeat
+            if (!shouldKeepFace(faceIndex, header.faceCount, faceLimit, triangle, sourceVertices, nearDepth, farDepth)) return@repeat
             if (!builder.canAdd(triangle[0], triangle[1], triangle[2])) {
                 builder.build()?.let { chunks += it }
                 builder.reset()
@@ -651,18 +703,27 @@ object PhotoMeshPlyLoader {
         faceCount: Int,
         faceLimit: Int,
         triangle: IntArray,
-        vertices: FloatArray
+        vertices: FloatArray,
+        nearDepth: Float,
+        farDepth: Float
     ): Boolean {
         if (faceLimit >= faceCount) return true
         val baseThreshold = (faceLimit.toDouble() / faceCount.toDouble()).coerceIn(0.0, 1.0)
-        val importance = faceImportance(triangle, vertices)
+        val importance = faceImportance(triangle, vertices, nearDepth, farDepth)
         val threshold = (baseThreshold * importance).coerceIn(0.0, 1.0)
         return unitHash(faceIndex) < threshold
     }
 
-    private fun faceImportance(triangle: IntArray, vertices: FloatArray): Double {
+    private fun faceImportance(
+        triangle: IntArray,
+        vertices: FloatArray,
+        nearDepth: Float,
+        farDepth: Float
+    ): Double {
         var minZ = Float.POSITIVE_INFINITY
         var maxZ = 0f
+        var zSum = 0.0
+        var zCount = 0
         var maxSemanticAlpha = 1f
         for (globalIndex in triangle) {
             val base = globalIndex * MESH_VERTEX_STRIDE_FLOATS
@@ -670,13 +731,21 @@ object PhotoMeshPlyLoader {
             if (z.isFinite() && z > 0f) {
                 minZ = min(minZ, z)
                 maxZ = max(maxZ, z)
+                zSum += z.toDouble()
+                zCount++
             }
             maxSemanticAlpha = max(maxSemanticAlpha, vertices[base + 6])
         }
-        if (maxSemanticAlpha >= 4f) return 5.0
-        if (maxSemanticAlpha > 1f) return 3.0
-        if (minZ.isFinite() && maxZ > minZ * 1.18f) return 2.5
-        return 1.0
+        var importance = 1.0
+        if (maxSemanticAlpha >= 4f) importance *= 5.0
+        else if (maxSemanticAlpha > 1f) importance *= 3.0
+        if (minZ.isFinite() && maxZ > minZ * 1.18f) importance *= 2.5
+        if (zCount > 0 && farDepth > nearDepth) {
+            val avgZ = (zSum / zCount.toDouble()).toFloat()
+            val distance = ((avgZ - nearDepth) / (farDepth - nearDepth)).coerceIn(0f, 1f)
+            importance *= 0.55 + (1.0 - distance.toDouble()) * 2.45
+        }
+        return importance
     }
 
     private fun unitHash(value: Int): Double {
@@ -728,7 +797,7 @@ object PhotoMeshPlyLoader {
 
     private val WHITESPACE = Regex("\\s+")
     private const val MESH_CACHE_MAGIC = 0x54594d53
-    private const val MESH_CACHE_VERSION = 4
+    private const val MESH_CACHE_VERSION = 5
     private const val ENABLE_EXPERIMENTAL_RESAMPLED_MESH = false
     private const val MESH_VERTEX_STRIDE_FLOATS = 7
     private const val FLOAT_SIZE_BYTES = 4

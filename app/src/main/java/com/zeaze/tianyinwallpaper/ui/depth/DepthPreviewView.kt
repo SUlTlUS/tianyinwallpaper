@@ -221,13 +221,15 @@ private fun DepthGLRenderer.loadFromDepthModel(
             }
         }
         model.isMesh() -> {
-            val scene = PhotoMeshPlyLoader.loadScene(
+            val lods = PhotoMeshPlyLoader.loadSceneLods(
                 context = context,
                 uriString = model.meshUri,
-                maxFaces = PhotoMeshPlyLoader.MAX_FACE_LIMIT
+                fullFaces = PhotoMeshPlyLoader.MAX_FACE_LIMIT,
+                motionFaces = PhotoMeshPlyLoader.MOTION_LOD_FACE_LIMIT,
+                lowFaces = PhotoMeshPlyLoader.LOW_LOD_FACE_LIMIT
             )
-            if (scene != null) {
-                loadMesh(scene)
+            if (lods != null) {
+                loadMeshLods(lods)
             }
         }
         else -> {
