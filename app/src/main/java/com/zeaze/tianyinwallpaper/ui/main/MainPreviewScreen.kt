@@ -21,8 +21,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -64,6 +62,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.IntOffset
@@ -109,7 +108,10 @@ import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSamp
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimationMode
 import com.zeaze.tianyinwallpaper.utils.FileUtil
+import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -991,7 +993,8 @@ internal fun WallpaperDetailScreen(
     onTimeAction: (startTime: Int, endTime: Int, loop: Boolean, independentTime: Boolean) -> Unit,
     onTransformAction: (scale: Float, offsetX: Float, offsetY: Float, rotation: Float) -> Unit,
     onBrightnessAction: (brightness: Float) -> Unit,
-    onVolumeAction: (volume: Float) -> Unit
+    onVolumeAction: (volume: Float) -> Unit,
+    onClockColorModeAction: (mode: Int) -> Unit
 ) {
     val context = LocalContext.current
     val isLightTheme = MaterialTheme.colors.isLight
@@ -1020,6 +1023,7 @@ internal fun WallpaperDetailScreen(
     val brightnessMax = 0f
     var brightness by remember { mutableStateOf(model.brightness.coerceIn(brightnessMin, brightnessMax)) }
     var volume by remember { mutableStateOf(model.volume.coerceIn(0f, 1f)) }
+    var clockColorMode by remember { mutableStateOf(model.clockColorMode) }
     var sourceWidth by remember { mutableStateOf(0f) }
     var sourceHeight by remember { mutableStateOf(0f) }
     val transformScope = rememberCoroutineScope()
@@ -1185,6 +1189,7 @@ internal fun WallpaperDetailScreen(
         onTransformAction(scale, offsetX, offsetY, rotation)
         onBrightnessAction(brightness)
         onVolumeAction(volume)
+        onClockColorModeAction(clockColorMode)
     }
 
     // 预览页返回时先保存当前缩放/位置/亮度。
@@ -1466,6 +1471,7 @@ internal fun WallpaperDetailScreen(
                 if (!saveTimeSettings()) return
                 onBrightnessAction(brightness)
                 onVolumeAction(volume)
+                onClockColorModeAction(clockColorMode)
                 sheetCoroutineScope.launch {
                     animatedOffset.animateTo(2000f, animationSpec = tween(250))
                     onDismiss()
@@ -1501,22 +1507,10 @@ internal fun WallpaperDetailScreen(
             val sheetOuterBottomPadding =
                 with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 16.dp
 
-            AnimatedVisibility(
+            LiquidWindowAnimatedVisibility(
                 visible = visible,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    )
-                ) + fadeIn(),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    )
-                ) + fadeOut(),
+                mode = LiquidWindowAnimationMode.BottomSheet,
+                label = "MediaSettingDialog",
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(start = 16.dp, end = 16.dp, bottom = sheetOuterBottomPadding)
@@ -1679,6 +1673,41 @@ internal fun WallpaperDetailScreen(
                                 )
                             }
                         }
+                        Spacer(Modifier.height(12.dp))
+
+                        BasicText("锁屏时钟颜色", style = TextStyle(contentColor, 14.sp))
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                WallpaperClockColorMode.FOLLOW_GLOBAL,
+                                WallpaperClockColorMode.LIGHT_CLOCK,
+                                WallpaperClockColorMode.DARK_CLOCK
+                            ).forEach { mode ->
+                                val selected = clockColorMode == mode
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(if (selected) accentColor else contentColor.copy(alpha = 0.1f))
+                                        .clickable {
+                                            clockColorMode = mode
+                                            onClockColorModeAction(mode)
+                                        },
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    BasicText(
+                                        WallpaperClockColorMode.label(mode),
+                                        style = TextStyle(if (selected) Color.White else contentColor, 13.sp)
+                                    )
+                                }
+                            }
+                        }
+
                         Spacer(Modifier.height(12.dp))
 
                         if (showVolumeSlider) {

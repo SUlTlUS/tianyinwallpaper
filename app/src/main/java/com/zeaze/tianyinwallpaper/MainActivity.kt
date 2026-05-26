@@ -16,9 +16,6 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -35,6 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
@@ -45,6 +43,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +55,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -94,6 +94,8 @@ import java.io.File
 import kotlinx.coroutines.launch
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTab
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabs
+import com.zeaze.tianyinwallpaper.catalog.utils.LiquidMorphPhysics
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberLiquidMorphController
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
@@ -450,7 +452,7 @@ class MainActivity : BaseActivity() {
                             showAddButton = isWallpaperPage || isRasterPage,
                             showPreviewButton = isWallpaperPage,
                             showApplyButton = isWallpaperPage,
-                            showMoreButton = !showMoreMenu,
+                            showMoreButton = true,
                             keepSlotWhenHidden = true
                         )
                     }
@@ -804,6 +806,10 @@ private fun lerpFloat(start: Float, stop: Float, fraction: Float): Float {
     return start + (stop - start) * fraction
 }
 
+private fun lerpDp(start: Dp, stop: Dp, fraction: Float): Dp {
+    return (start.value + (stop.value - start.value) * fraction).dp
+}
+
 @Composable
 private fun LiquidMoreMenuOverlay(
     visible: Boolean,
@@ -816,99 +822,158 @@ private fun LiquidMoreMenuOverlay(
     onDismiss: () -> Unit
 ) {
     var mounted by remember { mutableStateOf(visible) }
-    val progress = remember { Animatable(if (visible) 1f else 0f) }
+    val morph = rememberLiquidMorphController(if (visible) 1f else 0f)
     val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(visible) {
         if (visible) {
             mounted = true
-            progress.animateTo(
-                targetValue = 1f,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessLow
-                )
-            )
+            morph.open()
         } else if (mounted) {
-            progress.animateTo(
-                targetValue = 0f,
-                animationSpec = spring(
-                    dampingRatio = 0.78f,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
+            morph.close()
             mounted = false
         }
     }
 
     if (!mounted) return
 
-    val p = progress.value.coerceIn(0f, 1f)
-    val menuSurfaceColor = if (useDarkTheme) Color(0xCC1E1E1E) else Color(0xEFFFFFFF)
+    morph.updateHandoff()
+    val p = morph.value.coerceIn(0f, 1f)
+    val menuSurfaceColor = if (enableLiquidGlass) {
+        if (useDarkTheme) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
+    } else {
+        if (useDarkTheme) Color(0x33000000) else Color(0xAAFFFFFF)
+    }
+    val menuBorderColor = if (useDarkTheme) Color(0x33FFFFFF) else Color(0x88FFFFFF)
     val textColor = if (useDarkTheme) Color.White else Color.Black
     val menuWidth = 140.dp
     val menuHeight = (menuItems.size * 44 + (menuItems.size - 1) * 4 + 16).dp
-    val startScaleX = with(density) { 48.dp.toPx() / menuWidth.toPx() }
-    val startScaleY = with(density) { 48.dp.toPx() / menuHeight.toPx() }
-    val scaleX = lerpFloat(startScaleX, 1f, p)
-    val scaleY = lerpFloat(startScaleY, 1f, p)
-    val translateY = with(density) { (-56).dp.toPx() * (1f - p) }
-    val itemAlpha = ((p - 0.52f) / 0.48f).coerceIn(0f, 1f)
-    val neckAlpha = (1f - kotlin.math.abs(p - 0.45f) / 0.45f).coerceIn(0f, 1f) * 0.65f
+    val triggerSize = 48.dp
+    val triggerTopPadding = statusBarTopPaddingDp + 10.dp
+    val triggerEndPadding = 8.dp
+    val menuTopPadding = statusBarTopPaddingDp + 66.dp
+    val menuEndPadding = 12.dp
+    val triggerCenterTop = triggerTopPadding + triggerSize / 2f
+    val triggerCenterEnd = triggerEndPadding + triggerSize / 2f
+    val menuCenterTop = menuTopPadding + menuHeight / 2f
+    val menuCenterEnd = menuEndPadding + menuWidth / 2f
+    val morphState = LiquidMorphPhysics.compute(
+        rawValue = morph.value,
+        finalDx = with(density) { (triggerCenterEnd - menuCenterEnd).toPx() },
+        finalDy = with(density) { (menuCenterTop - triggerCenterTop).toPx() }
+    )
+    val sizeT = morphState.sizeT.coerceIn(0f, 1f)
+    val pathT = morphState.pathT.coerceIn(-0.16f, 1.12f)
+    val bodyWidth = lerpDp(triggerSize, menuWidth, sizeT)
+    val bodyHeight = lerpDp(triggerSize, menuHeight, sizeT)
+    val bodyCenterTop = lerpDp(triggerCenterTop, menuCenterTop, pathT)
+    val bodyCenterEnd = lerpDp(triggerCenterEnd, menuCenterEnd, pathT)
+    val bodyTopPadding = bodyCenterTop - bodyHeight / 2f
+    val bodyEndPadding = bodyCenterEnd - bodyWidth / 2f
+    val radiusT = ((sizeT - 0.72f) / 0.28f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
+    val menuBodyCorner = lerpFloat(minOf(bodyWidth.value, bodyHeight.value) / 2f, 20f, radiusT).dp
+    val menuBodyAlpha = when {
+        morph.hasHandedOff -> 0f
+        morph.isClosing -> (p / 0.22f).coerceIn(0f, 1f)
+        else -> 1f
+    }
+    val itemAlpha = ((p - 0.50f) / 0.50f).coerceIn(0f, 1f)
+    val triggerAlpha = when {
+        morph.hasHandedOff -> 0f
+        morph.isClosing -> 0f
+        else -> morphState.anchorScale
+    }
+    val triggerScale = morphState.anchorScale
+    val menuItemsEnabled = p >= 0.995f && !morph.isClosing && !morph.hasHandedOff
+    val overlayBlocksInput = p > 0.30f && !morph.isClosing && !morph.hasHandedOff
+
+    fun closeThen(action: () -> Unit) {
+        scope.launch {
+            morph.close()
+            mounted = false
+            action()
+        }
+    }
+
+    fun triggerMenuItem(action: () -> Unit) {
+        if (menuItemsEnabled) {
+            action()
+        }
+    }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(currentPageRoute) {
-                detectTapGestures { onDismiss() }
+        modifier = Modifier.fillMaxSize().let {
+            if (overlayBlocksInput) {
+                it.pointerInput(currentPageRoute) {
+                    detectTapGestures { closeThen(onDismiss) }
+                }
+            } else {
+                it
             }
+        }
     ) {
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = statusBarTopPaddingDp + 44.dp, end = 22.dp)
-                .width(28.dp)
-                .height(38.dp)
+                .zIndex(3f)
+                .padding(top = triggerTopPadding, end = triggerEndPadding)
+                .width(triggerSize)
+                .height(triggerSize)
                 .graphicsLayer {
-                    alpha = neckAlpha
-                    this.scaleY = lerpFloat(0.4f, 1f, p)
-                    transformOrigin = TransformOrigin(0.5f, 0f)
+                    alpha = if (morph.hasHandedOff) 0f else triggerAlpha
+                    this.scaleX = triggerScale
+                    this.scaleY = triggerScale
+                    translationY = morphState.pushDy
+                    transformOrigin = TransformOrigin(0.5f, 0.5f)
                 }
-                .clip(RoundedCornerShape(14.dp))
                 .let {
                     if (enableLiquidGlass && liquidBackdrop != null) {
-                        it.drawBackdrop(
-                            backdrop = liquidBackdrop,
-                            shape = { RoundedRectangle(14f.dp) },
-                            effects = {
-                                vibrancy()
-                                blur(if (useDarkTheme) 8f.dp.toPx() else 16f.dp.toPx())
-                                lens(14f.dp.toPx(), 28f.dp.toPx(), depthEffect = true)
-                            },
-                            onDrawSurface = { drawRect(menuSurfaceColor) }
-                        )
+                        it
+                            .clip(CircleShape)
+                            .drawBackdrop(
+                                backdrop = liquidBackdrop,
+                                shape = { Capsule() },
+                                effects = {
+                                    vibrancy()
+                                    blur(2f.dp.toPx())
+                                    lens(12f.dp.toPx(), 24f.dp.toPx())
+                                },
+                                onDrawSurface = { drawRect(menuSurfaceColor) }
+                            )
                     } else {
-                        it.background(menuSurfaceColor)
+                        it
+                            .clip(CircleShape)
+                            .background(menuSurfaceColor)
                     }
-                }
-        )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            BasicText("⋯", style = TextStyle(textColor, 18.sp))
+        }
 
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = statusBarTopPaddingDp + 66.dp, end = 12.dp)
-                .width(menuWidth)
-                .height(menuHeight)
+                .zIndex(2f)
+                .padding(top = bodyTopPadding, end = bodyEndPadding)
+                .width(bodyWidth)
+                .height(bodyHeight)
                 .graphicsLayer {
-                    this.scaleX = scaleX
-                    this.scaleY = scaleY
-                    this.translationY = translateY
+                    this.scaleX = morphState.containerScale
+                    this.scaleY = morphState.containerScale
                     this.transformOrigin = TransformOrigin(1f, 0f)
-                    this.alpha = lerpFloat(0.82f, 1f, p)
+                    this.alpha = menuBodyAlpha
                 }
-                .pointerInput(Unit) {
-                    detectTapGestures {
-                        // Consume taps inside the menu so the scrim does not dismiss first.
+                .let {
+                    if (overlayBlocksInput) {
+                        it.pointerInput(Unit) {
+                            detectTapGestures {
+                                // Consume taps inside the menu so the scrim does not dismiss first.
+                            }
+                        }
+                    } else {
+                        it
                     }
                 }
         ) {
@@ -919,22 +984,22 @@ private fun LiquidMoreMenuOverlay(
                         if (enableLiquidGlass && liquidBackdrop != null) {
                             it.drawBackdrop(
                                 backdrop = liquidBackdrop,
-                                shape = { RoundedRectangle(20f.dp) },
+                                shape = { RoundedRectangle(menuBodyCorner) },
                                 effects = {
                                     vibrancy()
-                                    blur(if (useDarkTheme) 8f.dp.toPx() else 16f.dp.toPx())
-                                    lens(14f.dp.toPx(), 28f.dp.toPx(), depthEffect = true)
+                                    blur(6f.dp.toPx())
+                                    lens(18f.dp.toPx(), 30f.dp.toPx())
                                 },
                                 onDrawSurface = { drawRect(menuSurfaceColor) }
                             )
                         } else {
                             it
-                                .clip(RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(menuBodyCorner))
                                 .background(menuSurfaceColor)
                                 .border(
                                     1.dp,
-                                    if (useDarkTheme) Color.White else Color.Black,
-                                    RoundedCornerShape(20.dp)
+                                    menuBorderColor,
+                                    RoundedCornerShape(menuBodyCorner)
                                 )
                         }
                     }
@@ -953,7 +1018,7 @@ private fun LiquidMoreMenuOverlay(
                             .fillMaxWidth()
                             .height(44.dp)
                             .clip(Capsule())
-                            .clickable { onClick() }
+                            .clickable(enabled = menuItemsEnabled) { triggerMenuItem(onClick) }
                             .padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center

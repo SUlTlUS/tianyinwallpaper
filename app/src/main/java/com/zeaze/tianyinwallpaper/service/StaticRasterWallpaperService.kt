@@ -3,7 +3,10 @@ package com.zeaze.tianyinwallpaper.service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.app.WallpaperColors
 import android.graphics.PixelFormat
+import android.os.Build
+import android.os.Handler
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -17,6 +20,7 @@ import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.renderer.RasterGLRenderer
 import com.zeaze.tianyinwallpaper.utils.RasterPrefs
+import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
 
 /**
  * 图集光栅壁纸服务 - 专门处理静态图片光栅
@@ -42,6 +46,7 @@ class StaticRasterWallpaperService : WallpaperService() {
         // ── 数据 ──
         private var group: RasterGroupModel? = null
         private var isVisible = false
+        private var currentWallpaperColors: WallpaperColors? = null
 
         // ── 渲染器（集成传感器处理）
         private var renderer: RasterGLRenderer? = null
@@ -56,10 +61,17 @@ class StaticRasterWallpaperService : WallpaperService() {
 
         // SharedPreferences 监听器 - 监听参数变化
         private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == RasterPrefs.PREF_RASTER_GROUPS || key == RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID) {
+            if (
+                key == RasterPrefs.PREF_RASTER_GROUPS ||
+                key == RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID ||
+                key == WallpaperClockColorMode.PREF_GLOBAL_MODE
+            ) {
                 // 参数变化，更新渲染器
                 loadActiveGroup()
                 val g = group
+                if (g != null && g.type == RasterGroupModel.TYPE_STATIC) {
+                    updateCurrentWallpaperColors(g)
+                }
                 if (g != null && g.type == RasterGroupModel.TYPE_STATIC && isVisible) {
                     renderer?.updateParamsFromModel(g)
                 }
@@ -90,6 +102,11 @@ class StaticRasterWallpaperService : WallpaperService() {
             renderer?.setRenderingEnabled(false)
 
             loadActiveGroup()
+            group?.takeIf { it.type == RasterGroupModel.TYPE_STATIC }?.let { updateCurrentWallpaperColors(it) }
+        }
+
+        override fun onComputeColors(): WallpaperColors? {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) currentWallpaperColors else null
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
@@ -120,6 +137,7 @@ class StaticRasterWallpaperService : WallpaperService() {
                 loadActiveGroup()
                 val g = group
                 if (g != null && g.type == RasterGroupModel.TYPE_STATIC) {
+                    updateCurrentWallpaperColors(g)
                     // 检查图片列表是否相同
                     val currentUris = g.imageUris.toSet()
                     val loadedUris = loadedImageUris.toSet()
@@ -197,8 +215,18 @@ class StaticRasterWallpaperService : WallpaperService() {
             if (g.type != RasterGroupModel.TYPE_STATIC) return
 
             // 使用集成的加载方法
+            updateCurrentWallpaperColors(g)
             renderer?.loadFromModel(applicationContext, g)
             loadedImageUris = g.imageUris
+        }
+
+        private fun updateCurrentWallpaperColors(group: RasterGroupModel) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
+            currentWallpaperColors = WallpaperClockColorMode.wallpaperColorsFor(
+                applicationContext,
+                group.clockColorMode
+            )
+            Handler(mainLooper).post { notifyColorsChanged() }
         }
     }
 

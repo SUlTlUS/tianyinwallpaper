@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.app.WallpaperColors
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
@@ -24,6 +25,7 @@ import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.renderer.RenderBitmapCache
 import com.zeaze.tianyinwallpaper.renderer.SimpleGLRenderer
 import com.zeaze.tianyinwallpaper.utils.FileUtil
+import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
 import java.io.File
 import java.util.Calendar
 import java.util.concurrent.atomic.AtomicBoolean
@@ -53,6 +55,7 @@ class TianYinWallpaperService : WallpaperService() {
         private var currentContentWidth = 1
         private var currentContentHeight = 1
         private var currentUserScale = 1f
+        private var currentWallpaperColors: WallpaperColors? = null
         private var interruptedIndexForConditional: Int? = null
         private var activeConditionalIndex = -1
         private var mode2TimelineIndexDuringConditional: Int? = null
@@ -121,6 +124,7 @@ class TianYinWallpaperService : WallpaperService() {
                         renderer?.requestRender()
                     }
                     "pageChange" -> pageChangeEnabled = sharedPreferences.getBoolean(key, false)
+                    WallpaperClockColorMode.PREF_GLOBAL_MODE -> updateCurrentWallpaperColors()
                     PREF_AUTO_SWITCH_INTERVAL_SECONDS,
                     PREF_AUTO_SWITCH_TIME_POINTS,
                     PREF_AUTO_SWITCH_LAST_SWITCH_AT,
@@ -134,9 +138,14 @@ class TianYinWallpaperService : WallpaperService() {
             pref?.registerOnSharedPreferenceChangeListener(prefListener)
 
             list = loadWallpaperList(force = true)
+            preloadInitialWallpaperColors()
             initialLoadCompleted.set(false)
             updateScreenStateReceiverRegistration()
             scheduleNextAutoSwitchCheck()
+        }
+
+        override fun onComputeColors(): WallpaperColors? {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) currentWallpaperColors else null
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
@@ -257,6 +266,11 @@ class TianYinWallpaperService : WallpaperService() {
             }
         }
 
+        private fun preloadInitialWallpaperColors() {
+            val initialModel = list?.firstOrNull() ?: return
+            updateCurrentWallpaperColors(initialModel)
+        }
+
         private fun syncPlaylistIfChanged() {
             val oldList = list
             val newList = loadWallpaperList(force = false) ?: return
@@ -272,11 +286,11 @@ class TianYinWallpaperService : WallpaperService() {
             shuffledIndices.clear()
             shuffledPointer = -1
 
-            if (newList.isNotEmpty()) {
-                val mappedIndex = when {
-                    !oldUuid.isNullOrBlank() -> newList.indexOfFirst { it.uuid == oldUuid }
-                    !oldVideoUri.isNullOrBlank() -> newList.indexOfFirst { it.videoUri == oldVideoUri }
-                    !oldImgUri.isNullOrBlank() -> newList.indexOfFirst { it.imgUri == oldImgUri }
+                if (newList.isNotEmpty()) {
+                    val mappedIndex = when {
+                        !oldUuid.isNullOrBlank() -> newList.indexOfFirst { it.uuid == oldUuid }
+                        !oldVideoUri.isNullOrBlank() -> newList.indexOfFirst { it.videoUri == oldVideoUri }
+                        !oldImgUri.isNullOrBlank() -> newList.indexOfFirst { it.imgUri == oldImgUri }
                     else -> -1
                 }
                 index = when {
@@ -287,6 +301,7 @@ class TianYinWallpaperService : WallpaperService() {
                 Log.d(TAG, "onVisibilityChanged: remap result mappedIndex=$mappedIndex, finalIndex=$index, finalUuid=${newList.getOrNull(index)?.uuid}")
                 pref?.edit()?.putInt(PREF_CURRENT_INDEX, index)?.apply()
             }
+            newList.getOrNull(index)?.let { updateCurrentWallpaperColors(it) }
         }
 
         private fun applyCurrentContent(loadContentNow: Boolean) {
@@ -294,6 +309,7 @@ class TianYinWallpaperService : WallpaperService() {
                 pendingContentLoad = false
                 loadContent()
             } else {
+                list?.getOrNull(index)?.let { updateCurrentWallpaperColors(it) }
                 pendingContentLoad = true
                 isMediaPlayerPrepared = false
                 mediaPlayer?.pause()
@@ -516,9 +532,9 @@ class TianYinWallpaperService : WallpaperService() {
                         markSwitchTimestamp()
                         pref.edit().putInt(PREF_CURRENT_INDEX, index).apply()
                         return false
-                    }
                 }
             }
+        }
 
             // mode=0 表示不做时间驱动自动切换，避免每次可见性变化都触发 next。
             if (mode == 0) return false
@@ -687,6 +703,7 @@ class TianYinWallpaperService : WallpaperService() {
                 if (!newList.isNullOrEmpty()) {
                     list = newList
                     if (index !in newList.indices) index = 0
+                    newList.getOrNull(index)?.let { updateCurrentWallpaperColors(it) }
                     applyCurrentContent(loadContentNow = isVisible)
                 }
             } catch (e: Exception) {
@@ -755,6 +772,14 @@ class TianYinWallpaperService : WallpaperService() {
             mediaPlayer?.setVolume(volume, volume)
         }
 
+        fun updateCurrentClockColorMode(mode: Int) {
+            val currentList = list
+            if (currentList != null && index in currentList.indices) {
+                currentList[index].clockColorMode = mode
+                updateCurrentWallpaperColors(currentList[index])
+            }
+        }
+
         private fun prevWallpaper(ignoreMinInterval: Boolean = false, loadContentNow: Boolean = true) {
             val list = this.list ?: return
             if (list.isEmpty()) return
@@ -798,11 +823,13 @@ class TianYinWallpaperService : WallpaperService() {
             }
 
             if (model.type == 1) {
+                updateCurrentWallpaperColors(model)
                 // 先切到视频模式，避免图片->视频切换期间着色器状态不一致导致黑屏。
                 renderer?.setVideoMode(true)
                 prepareVideo(model)
             } else {
                 // 切到图片时移除视频帧监听，防止旧视频回调干扰渲染。
+                updateCurrentWallpaperColors(model)
                 renderer?.setOnFrameAvailableListener(null)
                 renderer?.setVideoMode(false)
                 prepareImage(model)
@@ -929,6 +956,19 @@ class TianYinWallpaperService : WallpaperService() {
             )?.takeIf { !it.isRecycled }?.copy(Bitmap.Config.ARGB_8888, false)
         }
 
+        private fun updateCurrentWallpaperColors() {
+            list?.getOrNull(index)?.let { updateCurrentWallpaperColors(it) }
+        }
+
+        private fun updateCurrentWallpaperColors(model: TianYinWallpaperModel) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
+            currentWallpaperColors = WallpaperClockColorMode.wallpaperColorsFor(
+                applicationContext,
+                model.clockColorMode
+            )
+            Handler(mainLooper).post { notifyColorsChanged() }
+        }
+
         override fun onFrameAvailable(surfaceTexture: SurfaceTexture) {
             renderer?.updateVideoFrame()
         }
@@ -970,6 +1010,13 @@ class TianYinWallpaperService : WallpaperService() {
                 val volume = intent.getFloatExtra(EXTRA_VOLUME, 0f)
                 activeEngine?.updateCurrentVolume(volume)
             }
+            ACTION_UPDATE_CLOCK_COLOR_MODE -> {
+                val mode = intent.getIntExtra(
+                    EXTRA_CLOCK_COLOR_MODE,
+                    WallpaperClockColorMode.FOLLOW_GLOBAL
+                )
+                activeEngine?.updateCurrentClockColorMode(mode)
+            }
             ACTION_UPDATE_INDEX -> {
                 val idx = intent.getIntExtra(EXTRA_INDEX, -1)
                 if (idx != -1) activeEngine?.updateIndex(idx)
@@ -986,10 +1033,12 @@ class TianYinWallpaperService : WallpaperService() {
         const val ACTION_UPDATE_TRANSFORM = "com.zeaze.tianyinwallpaper.UPDATE_TRANSFORM"
         const val ACTION_UPDATE_BRIGHTNESS = "com.zeaze.tianyinwallpaper.UPDATE_BRIGHTNESS"
         const val ACTION_UPDATE_VOLUME = "com.zeaze.tianyinwallpaper.UPDATE_VOLUME"
+        const val ACTION_UPDATE_CLOCK_COLOR_MODE = "com.zeaze.tianyinwallpaper.UPDATE_CLOCK_COLOR_MODE"
         const val ACTION_UPDATE_INDEX = "com.zeaze.tianyinwallpaper.UPDATE_INDEX"
         const val EXTRA_INDEX = "extra_index"
         const val EXTRA_BRIGHTNESS = "extra_brightness"
         const val EXTRA_VOLUME = "extra_volume"
+        const val EXTRA_CLOCK_COLOR_MODE = "extra_clock_color_mode"
         const val EXTRA_SCALE = "extra_scale"
         const val EXTRA_OFFSET_X = "extra_offset_x"
         const val EXTRA_OFFSET_Y = "extra_offset_y"

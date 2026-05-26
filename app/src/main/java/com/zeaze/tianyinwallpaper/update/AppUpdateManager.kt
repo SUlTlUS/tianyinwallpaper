@@ -34,6 +34,11 @@ object AppUpdateManager {
         "https://raw.githubusercontent.com/SUlTlUS/tianyinwallpaper/master/update/update_info.json",
         "https://cdn.jsdelivr.net/gh/SUlTlUS/tianyinwallpaper@master/update/update_info.json"
     )
+
+    private val changelogUrls = listOf(
+        "https://raw.githubusercontent.com/SUlTlUS/tianyinwallpaper/master/update/changelog.md",
+        "https://cdn.jsdelivr.net/gh/SUlTlUS/tianyinwallpaper@master/update/changelog.md"
+    )
     
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -101,6 +106,10 @@ object AppUpdateManager {
                 // 比较版本号
                 return@withContext if (updateInfo.code > BuildConfig.VERSION_CODE) {
                     Log.d(TAG, "发现新版本！远端(${updateInfo.code}) > 当前(${BuildConfig.VERSION_CODE})")
+                    updateInfo.des = buildAccumulatedChangelog(
+                        latestVersionName = updateInfo.name,
+                        fallbackDescription = updateInfo.des
+                    )
                     CheckResult.HasUpdate(updateInfo)
                 } else {
                     Log.d(TAG, "当前已是最新版本或开发版。远端(${updateInfo.code}) <= 当前(${BuildConfig.VERSION_CODE})")
@@ -115,6 +124,121 @@ object AppUpdateManager {
         
         CheckResult.Error(lastError)
     }
+
+    private fun buildAccumulatedChangelog(
+        latestVersionName: String,
+        fallbackDescription: String
+    ): String {
+        val changelog = fetchFirstAvailableText(changelogUrls) ?: return fallbackDescription
+        val installedVersionName = BuildConfig.VERSION_NAME
+        val matchedSections = parseChangelogSections(changelog).filter { section ->
+            compareVersionNames(section.version, installedVersionName) > 0 &&
+                compareVersionNames(section.version, latestVersionName) <= 0
+        }
+
+        if (matchedSections.isEmpty()) return fallbackDescription
+
+        return matchedSections.joinToString("\n\n") { section ->
+            buildString {
+                append(section.version)
+                if (section.content.isNotBlank()) {
+                    append('\n')
+                    append(section.content)
+                }
+            }
+        }
+    }
+
+    private fun fetchFirstAvailableText(urls: List<String>): String? {
+        for (url in urls) {
+            try {
+                val targetUrl = if (url.contains("raw.githubusercontent.com")) {
+                    "$url?t=${System.currentTimeMillis()}"
+                } else {
+                    url
+                }
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .get()
+                    .build()
+
+                okHttpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "$url request failed: ${response.code}")
+                        return@use
+                    }
+
+                    val body = response.body?.string()
+                    if (!body.isNullOrBlank()) {
+                        return body
+                    }
+                    Log.w(TAG, "$url response body is empty")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "$url request error: ${e.message}")
+            }
+        }
+        return null
+    }
+
+    private fun parseChangelogSections(changelog: String): List<ChangelogSection> {
+        val headingRegex = Regex("""^##\s+(.+?)\s*$""")
+        val sections = mutableListOf<ChangelogSection>()
+        var currentVersion: String? = null
+        val currentContent = StringBuilder()
+
+        fun flushCurrentSection() {
+            val version = currentVersion ?: return
+            sections += ChangelogSection(
+                version = version,
+                content = currentContent.toString().trim()
+            )
+            currentContent.clear()
+        }
+
+        changelog.lineSequence().forEach { line ->
+            val heading = headingRegex.matchEntire(line.trim())
+            if (heading != null) {
+                flushCurrentSection()
+                currentVersion = heading.groupValues[1].trim()
+            } else if (currentVersion != null) {
+                currentContent.appendLine(line)
+            }
+        }
+        flushCurrentSection()
+
+        return sections
+    }
+
+    private fun compareVersionNames(left: String, right: String): Int {
+        val leftParts = parseVersionParts(left)
+        val rightParts = parseVersionParts(right)
+        val maxSize = maxOf(leftParts.size, rightParts.size)
+        for (index in 0 until maxSize) {
+            val leftPart = leftParts.getOrElse(index) { 0 }
+            val rightPart = rightParts.getOrElse(index) { 0 }
+            if (leftPart != rightPart) {
+                return leftPart.compareTo(rightPart)
+            }
+        }
+        return 0
+    }
+
+    private fun parseVersionParts(version: String): List<Int> {
+        return version
+            .trim()
+            .removePrefix("v")
+            .removePrefix("V")
+            .split('.')
+            .mapNotNull { part ->
+                part.takeWhile { it.isDigit() }.toIntOrNull()
+            }
+    }
+
+    private data class ChangelogSection(
+        val version: String,
+        val content: String
+    )
     
     /**
      * 下载进度回调

@@ -3,6 +3,7 @@ package com.zeaze.tianyinwallpaper.service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.app.WallpaperColors
 import android.graphics.PixelFormat
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -14,6 +15,7 @@ import android.opengl.EGLContext
 import android.opengl.EGLDisplay
 import android.opengl.EGLSurface
 import android.opengl.GLES20
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.service.wallpaper.WallpaperService
@@ -27,6 +29,7 @@ import com.zeaze.tianyinwallpaper.service.raster.KeyframeTranscoder
 import com.zeaze.tianyinwallpaper.service.raster.RVEffectPreCtrl
 import com.zeaze.tianyinwallpaper.service.raster.RasterVideoPreRenderParamBean
 import com.zeaze.tianyinwallpaper.utils.RasterPrefs
+import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
@@ -147,6 +150,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         private var pendingFrame = 0
         private var group: RasterGroupModel? = null
         private var isVisible = false
+        private var currentWallpaperColors: WallpaperColors? = null
         private val angleSensor = AngleSensor()
 
         // ── 播放状态（全部在 EGL 线程读写）──
@@ -160,6 +164,7 @@ class VideoRasterWallpaperService : WallpaperService() {
         private var eglHandler: Handler? = null
         private var isWaitingForSurface = false
         private var pref: SharedPreferences? = null
+        private var prefChangeListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
         private var effectCtrl: RVEffectPreCtrl? = null
         private var playbackRunnable: Runnable? = null
         private val PLAYBACK_INTERVAL_MS = 32L   // ~30fps，匹配视频帧率，减少 seek 压力
@@ -168,6 +173,7 @@ class VideoRasterWallpaperService : WallpaperService() {
 
         fun reload() {
             loadActiveGroup()
+            updateCurrentWallpaperColors(group)
             eglThread?.post { loadContent() }
         }
 
@@ -178,12 +184,28 @@ class VideoRasterWallpaperService : WallpaperService() {
             Log.w(TAG, "onCreate")
             surfaceHolder.setFormat(PixelFormat.RGBX_8888)
             pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE)
+            prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (
+                    key == RasterPrefs.PREF_RASTER_GROUPS ||
+                    key == RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID ||
+                    key == WallpaperClockColorMode.PREF_GLOBAL_MODE
+                ) {
+                    loadActiveGroup()
+                    updateCurrentWallpaperColors(group)
+                }
+            }
+            pref?.registerOnSharedPreferenceChangeListener(prefChangeListener)
 
             angleSensor.onAngleChanged = { angle ->
                 eglHandler?.post { doSensorChangeEvent(angle) }
             }
 
             loadActiveGroup()
+            updateCurrentWallpaperColors(group)
+        }
+
+        override fun onComputeColors(): WallpaperColors? {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) currentWallpaperColors else null
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
@@ -223,6 +245,8 @@ class VideoRasterWallpaperService : WallpaperService() {
         override fun onDestroy() {
             super.onDestroy()
             if (activeEngine == this) activeEngine = null
+            prefChangeListener?.let { pref?.unregisterOnSharedPreferenceChangeListener(it) }
+            prefChangeListener = null
             angleSensor.unregisterSensor()
 
             val latch = CountDownLatch(1)
@@ -249,6 +273,7 @@ class VideoRasterWallpaperService : WallpaperService() {
             val newId = pref?.getString(RasterPrefs.PREF_RASTER_ACTIVE_GROUP_ID, null)
             if (newId != group?.id) {
                 loadActiveGroup()
+                updateCurrentWallpaperColors(group)
                 eglThread?.post { loadContent() }
             }
         }
@@ -320,9 +345,23 @@ class VideoRasterWallpaperService : WallpaperService() {
         /** 实际加载视频到播放器（EGL 线程） */
         private fun doLoadVideo(videoPath: String) {
             Log.w(TAG, "doLoadVideo: $videoPath")
+            updateCurrentWallpaperColors(videoPath)
             effectCtrl?.loadSourceFromParams(
                 RasterVideoPreRenderParamBean(videoPath = videoPath, videoFrameRate = 30)
             )
+        }
+
+        private fun updateCurrentWallpaperColors(videoPath: String) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
+            val localMode = group?.clockColorMode ?: WallpaperClockColorMode.FOLLOW_GLOBAL
+            currentWallpaperColors = WallpaperClockColorMode.wallpaperColorsFor(applicationContext, localMode)
+            Handler(mainLooper).post { notifyColorsChanged() }
+        }
+
+        private fun updateCurrentWallpaperColors(group: RasterGroupModel?) {
+            val videoUri = group?.takeIf { it.type == RasterGroupModel.TYPE_DYNAMIC }?.videoUri
+            if (videoUri.isNullOrEmpty()) return
+            updateCurrentWallpaperColors(videoUri)
         }
 
         fun onSurfaceTextureAvailable() {

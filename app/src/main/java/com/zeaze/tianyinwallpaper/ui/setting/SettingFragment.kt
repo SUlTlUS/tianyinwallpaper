@@ -83,6 +83,7 @@ import com.zeaze.tianyinwallpaper.update.AppUpdateManager
 import com.zeaze.tianyinwallpaper.update.UpdateDialog
 import com.zeaze.tianyinwallpaper.update.UpdateDialogState
 import com.zeaze.tianyinwallpaper.utils.RasterPrefs
+import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
 import kotlinx.coroutines.launch
 
 private sealed class SettingsDialogState {
@@ -113,6 +114,9 @@ fun SettingRouteScreen(
     var wallpaperScroll by remember { mutableStateOf(pref.getBoolean("wallpaperScroll", false)) }
     var minTime by remember { mutableStateOf(pref.getInt("minTime", 1)) }
     var themeMode by remember { mutableStateOf(pref.getInt(MainActivity.PREF_THEME_MODE, MainActivity.THEME_MODE_FOLLOW_SYSTEM)) }
+    var globalClockColorMode by remember {
+        mutableStateOf(pref.getInt(WallpaperClockColorMode.PREF_GLOBAL_MODE, WallpaperClockColorMode.LIGHT_CLOCK))
+    }
     var autoSwitchMode by remember {
         mutableStateOf(pref.getInt(TianYinWallpaperService.PREF_AUTO_SWITCH_MODE, AUTO_SWITCH_MODE_NONE))
     }
@@ -172,6 +176,12 @@ fun SettingRouteScreen(
         AUTO_SWITCH_MODE_ITEMS.mapIndexed { index, label ->
             LiquidSegmentedOption(index, label)
         }
+    }
+    val clockColorModeOptions = remember {
+        listOf(
+            LiquidSegmentedOption(WallpaperClockColorMode.LIGHT_CLOCK, "浅色时钟"),
+            LiquidSegmentedOption(WallpaperClockColorMode.DARK_CLOCK, "深色时钟")
+        )
     }
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
@@ -269,6 +279,33 @@ fun SettingRouteScreen(
                                 editor.putInt(MainActivity.PREF_THEME_MODE, mode).apply()
                                 themeMode = mode
                                 onThemeModeChange(mode)
+                            }
+                        },
+                        isLightTheme = isLightTheme,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 16.dp)
+                    )
+                    Text(
+                        text = "锁屏时钟颜色",
+                        style = TextStyle(
+                            color = contentColor,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    )
+                    LiquidSegmentedSelector(
+                        options = clockColorModeOptions,
+                        enableLiquidGlass = enableLiquidGlass,
+                        selectedValue = { globalClockColorMode },
+                        onValueSelected = { mode ->
+                            if (mode != globalClockColorMode) {
+                                editor.putInt(WallpaperClockColorMode.PREF_GLOBAL_MODE, mode).apply()
+                                globalClockColorMode = mode
                             }
                         },
                         isLightTheme = isLightTheme,
