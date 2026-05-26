@@ -16,8 +16,10 @@ import android.widget.Toast
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +51,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -57,6 +61,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.darkColors
@@ -73,6 +78,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.alibaba.fastjson.JSON
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
 import com.zeaze.tianyinwallpaper.base.BaseActivity
@@ -444,113 +450,60 @@ class MainActivity : BaseActivity() {
                             showAddButton = isWallpaperPage || isRasterPage,
                             showPreviewButton = isWallpaperPage,
                             showApplyButton = isWallpaperPage,
-                            showMoreButton = true,
+                            showMoreButton = !showMoreMenu,
                             keepSlotWhenHidden = true
                         )
                     }
 
-                    if (showMoreMenu) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(currentPageRoute) {
-                                    detectTapGestures { showMoreMenu = false }
-                                }
-                        ) {
-                            val menuItems = if (isWallpaperPage) {
-                                listOf(
-                                    "保存" to {
-                                        showMoreMenu = false
-                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
-                                    },
-                                    "选择" to {
-                                        showMoreMenu = false
-                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_SELECT_MODE, Unit)
-                                    },
-                                    "设置" to {
-                                        showMoreMenu = false
-                                        openSettingPage()
-                                    },
-                                    "壁纸组" to {
-                                        showMoreMenu = false
-                                        openAboutPage()
-                                    }
-                                )
-                            } else if (isRasterPage) {
-                                listOf(
-                                    "选择" to {
-                                        showMoreMenu = false
-                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_RASTER_SELECT_MODE, Unit)
-                                    },
-                                    "设置" to {
-                                        showMoreMenu = false
-                                        openSettingPage()
-                                    }
-                                )
-                            } else {
-                                listOf(
-                                    "设置" to {
-                                        showMoreMenu = false
-                                        openSettingPage()
-                                    }
-                                )
+                    val moreMenuItems = if (isWallpaperPage) {
+                        listOf(
+                            "保存" to {
+                                showMoreMenu = false
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
+                            },
+                            "选择" to {
+                                showMoreMenu = false
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_SELECT_MODE, Unit)
+                            },
+                            "设置" to {
+                                showMoreMenu = false
+                                openSettingPage()
+                            },
+                            "壁纸组" to {
+                                showMoreMenu = false
+                                openAboutPage()
                             }
-
-                            val menuSurfaceColor = if (useDarkTheme) Color(0xCC1E1E1E) else Color(0xEFFFFFFF)
-                            Column(
-                                Modifier
-                                    .padding(top = statusBarTopPaddingDp + 66.dp, end = 12.dp)
-                                    .width(140.dp)
-                                    .align(Alignment.TopEnd)
-                                    .let {
-                                        if (enableLiquidGlass && liquidBackdrop != null) {
-                                            it.drawBackdrop(
-                                                backdrop = liquidBackdrop,
-                                                shape = { RoundedRectangle(20f.dp) },
-                                                effects = {
-                                                    vibrancy()
-                                                    blur(if (useDarkTheme) 8f.dp.toPx() else 16f.dp.toPx())
-                                                    lens(14f.dp.toPx(), 28f.dp.toPx(), depthEffect = true)
-                                                },
-                                                onDrawSurface = { drawRect(menuSurfaceColor) }
-                                            )
-                                        } else {
-                                            it
-                                                .clip(RoundedCornerShape(20.dp))
-                                                .background(menuSurfaceColor)
-                                                .border(
-                                                    1.dp,
-                                                    if (useDarkTheme) Color.White else Color.Black,
-                                                    RoundedCornerShape(20.dp)
-                                                )
-                                        }
-                                    }
-                                    .padding(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                menuItems.forEach { (label, onClick) ->
-                                    Row(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .height(44.dp)
-                                            .clip(Capsule())
-                                            .clickable { onClick() }
-                                            .padding(horizontal = 16.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center
-                                    ) {
-                                        BasicText(
-                                            text = label,
-                                            style = TextStyle(
-                                                color = if (useDarkTheme) Color.White else Color.Black,
-                                                fontSize = 15.sp
-                                            )
-                                        )
-                                    }
-                                }
+                        )
+                    } else if (isRasterPage) {
+                        listOf(
+                            "选择" to {
+                                showMoreMenu = false
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_RASTER_SELECT_MODE, Unit)
+                            },
+                            "设置" to {
+                                showMoreMenu = false
+                                openSettingPage()
                             }
-                        }
+                        )
+                    } else {
+                        listOf(
+                            "设置" to {
+                                showMoreMenu = false
+                                openSettingPage()
+                            }
+                        )
                     }
+
+                    LiquidMoreMenuOverlay(
+                        visible = showMoreMenu,
+                        statusBarTopPaddingDp = statusBarTopPaddingDp,
+                        currentPageRoute = currentPageRoute,
+                        useDarkTheme = useDarkTheme,
+                        enableLiquidGlass = enableLiquidGlass,
+                        liquidBackdrop = liquidBackdrop,
+                        menuItems = moreMenuItems,
+                        onDismiss = { showMoreMenu = false }
+                    )
                 } else {
                     if (showMoreMenu) {
                         showMoreMenu = false
@@ -842,6 +795,178 @@ class MainActivity : BaseActivity() {
                     .create()
                     .show()
                 return
+            }
+        }
+    }
+}
+
+private fun lerpFloat(start: Float, stop: Float, fraction: Float): Float {
+    return start + (stop - start) * fraction
+}
+
+@Composable
+private fun LiquidMoreMenuOverlay(
+    visible: Boolean,
+    statusBarTopPaddingDp: Dp,
+    currentPageRoute: String,
+    useDarkTheme: Boolean,
+    enableLiquidGlass: Boolean,
+    liquidBackdrop: LayerBackdrop?,
+    menuItems: List<Pair<String, () -> Unit>>,
+    onDismiss: () -> Unit
+) {
+    var mounted by remember { mutableStateOf(visible) }
+    val progress = remember { Animatable(if (visible) 1f else 0f) }
+    val density = LocalDensity.current
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            mounted = true
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessLow
+                )
+            )
+        } else if (mounted) {
+            progress.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = 0.78f,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+            mounted = false
+        }
+    }
+
+    if (!mounted) return
+
+    val p = progress.value.coerceIn(0f, 1f)
+    val menuSurfaceColor = if (useDarkTheme) Color(0xCC1E1E1E) else Color(0xEFFFFFFF)
+    val textColor = if (useDarkTheme) Color.White else Color.Black
+    val menuWidth = 140.dp
+    val menuHeight = (menuItems.size * 44 + (menuItems.size - 1) * 4 + 16).dp
+    val startScaleX = with(density) { 48.dp.toPx() / menuWidth.toPx() }
+    val startScaleY = with(density) { 48.dp.toPx() / menuHeight.toPx() }
+    val scaleX = lerpFloat(startScaleX, 1f, p)
+    val scaleY = lerpFloat(startScaleY, 1f, p)
+    val translateY = with(density) { (-56).dp.toPx() * (1f - p) }
+    val itemAlpha = ((p - 0.52f) / 0.48f).coerceIn(0f, 1f)
+    val neckAlpha = (1f - kotlin.math.abs(p - 0.45f) / 0.45f).coerceIn(0f, 1f) * 0.65f
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(currentPageRoute) {
+                detectTapGestures { onDismiss() }
+            }
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = statusBarTopPaddingDp + 44.dp, end = 22.dp)
+                .width(28.dp)
+                .height(38.dp)
+                .graphicsLayer {
+                    alpha = neckAlpha
+                    scaleY = lerpFloat(0.4f, 1f, p)
+                    transformOrigin = TransformOrigin(0.5f, 0f)
+                }
+                .clip(RoundedCornerShape(14.dp))
+                .let {
+                    if (enableLiquidGlass && liquidBackdrop != null) {
+                        it.drawBackdrop(
+                            backdrop = liquidBackdrop,
+                            shape = { RoundedRectangle(14f.dp) },
+                            effects = {
+                                vibrancy()
+                                blur(if (useDarkTheme) 8f.dp.toPx() else 16f.dp.toPx())
+                                lens(14f.dp.toPx(), 28f.dp.toPx(), depthEffect = true)
+                            },
+                            onDrawSurface = { drawRect(menuSurfaceColor) }
+                        )
+                    } else {
+                        it.background(menuSurfaceColor)
+                    }
+                }
+        )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = statusBarTopPaddingDp + 66.dp, end = 12.dp)
+                .width(menuWidth)
+                .height(menuHeight)
+                .graphicsLayer {
+                    this.scaleX = scaleX
+                    this.scaleY = scaleY
+                    this.translationY = translateY
+                    this.transformOrigin = TransformOrigin(1f, 0f)
+                    this.alpha = lerpFloat(0.82f, 1f, p)
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures {
+                        // Consume taps inside the menu so the scrim does not dismiss first.
+                    }
+                }
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .let {
+                        if (enableLiquidGlass && liquidBackdrop != null) {
+                            it.drawBackdrop(
+                                backdrop = liquidBackdrop,
+                                shape = { RoundedRectangle(20f.dp) },
+                                effects = {
+                                    vibrancy()
+                                    blur(if (useDarkTheme) 8f.dp.toPx() else 16f.dp.toPx())
+                                    lens(14f.dp.toPx(), 28f.dp.toPx(), depthEffect = true)
+                                },
+                                onDrawSurface = { drawRect(menuSurfaceColor) }
+                            )
+                        } else {
+                            it
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(menuSurfaceColor)
+                                .border(
+                                    1.dp,
+                                    if (useDarkTheme) Color.White else Color.Black,
+                                    RoundedCornerShape(20.dp)
+                                )
+                        }
+                    }
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp)
+                    .graphicsLayer { alpha = itemAlpha },
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                menuItems.forEach { (label, onClick) ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .clip(Capsule())
+                            .clickable { onClick() }
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        BasicText(
+                            text = label,
+                            style = TextStyle(
+                                color = textColor,
+                                fontSize = 15.sp
+                            )
+                        )
+                    }
+                }
             }
         }
     }
