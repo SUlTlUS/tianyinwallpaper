@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -61,6 +62,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
@@ -1763,7 +1765,10 @@ private fun RasterDetailScreen(
 
         // BottomSheet 拖拽关闭状态
         val sheetOffsetY = remember { mutableStateOf(0f) }
-        val dismissThreshold = with(LocalDensity.current) { 200.dp.toPx() }
+        val density = LocalDensity.current
+        val dismissThreshold = with(density) { 200.dp.toPx() }
+        val sheetOuterBottomPadding =
+            with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 16.dp
 
         // 重置偏移当面板重新显示
         LaunchedEffect(isSheetVisible) {
@@ -1808,7 +1813,9 @@ private fun RasterDetailScreen(
                     stiffness = Spring.StiffnessMedium
                 )
             ) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(start = 16.dp, end = 16.dp, bottom = sheetOuterBottomPadding)
         ) {
             if (currentEditorGroup != null) {
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }

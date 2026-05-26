@@ -26,9 +26,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -557,6 +559,9 @@ class MainActivity : BaseActivity() {
 
                  if (showBottomBar && currentRoute == ROUTE_MAIN) {
                     val selectedIndex = pagerState.currentPage
+                    val density = LocalDensity.current
+                    val bottomBarBottomPadding =
+                        with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 10.dp
 
                     LiquidBottomTabs(
                         selectedTabIndex = { selectedIndex },
@@ -569,7 +574,7 @@ class MainActivity : BaseActivity() {
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(horizontal = 36.dp)
-                            .padding(bottom = 10.dp)
+                            .padding(bottom = bottomBarBottomPadding)
                     ) {
                         tabItems.forEachIndexed { index, (route, titleRes) ->
                             LiquidBottomTab({

@@ -36,10 +36,12 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -1495,6 +1497,10 @@ internal fun WallpaperDetailScreen(
             }
 
             // BottomSheet 内容
+            val density = LocalDensity.current
+            val sheetOuterBottomPadding =
+                with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 16.dp
+
             AnimatedVisibility(
                 visible = visible,
                 enter = slideInVertically(
@@ -1511,7 +1517,9 @@ internal fun WallpaperDetailScreen(
                         stiffness = Spring.StiffnessMedium
                     )
                 ) + fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 16.dp, end = 16.dp, bottom = sheetOuterBottomPadding)
             ) {
                 val sheetBackdrop = rememberLayerBackdrop()
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
