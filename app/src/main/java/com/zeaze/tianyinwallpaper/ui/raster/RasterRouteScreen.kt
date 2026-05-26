@@ -1510,6 +1510,9 @@ private fun RasterDetailScreen(
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
     val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF121212).copy(0.56f)
+    val density = LocalDensity.current
+    val bottomActionPadding =
+        with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 24.dp
 
     val detailBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
@@ -1687,7 +1690,7 @@ private fun RasterDetailScreen(
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp),
+                .padding(bottom = bottomActionPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val isStatic = group.type == RasterGroupModel.TYPE_STATIC
@@ -1759,7 +1762,6 @@ private fun RasterDetailScreen(
 
         // BottomSheet 拖拽关闭状态
         val sheetOffsetY = remember { mutableStateOf(0f) }
-        val density = LocalDensity.current
         val dismissThreshold = with(density) { 200.dp.toPx() }
         val sheetOuterBottomPadding =
             with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 16.dp

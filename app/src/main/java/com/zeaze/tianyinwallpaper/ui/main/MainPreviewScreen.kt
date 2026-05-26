@@ -243,6 +243,9 @@ internal fun LiveSyncPreview(
     val previewBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
     val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
     val onPage = if (isLightTheme) Color.Black else Color.White
+    val density = LocalDensity.current
+    val bottomActionPadding =
+        with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 24.dp
 
     val luminanceRegions = remember {
         mapOf(
@@ -352,7 +355,7 @@ internal fun LiveSyncPreview(
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp),
+                .padding(bottom = bottomActionPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1004,6 +1007,9 @@ internal fun WallpaperDetailScreen(
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val contentColor = if (isLightTheme) Color.Black else Color.White
+    val density = LocalDensity.current
+    val bottomActionPadding =
+        with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 24.dp
 
     val detailBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
@@ -1411,7 +1417,7 @@ internal fun WallpaperDetailScreen(
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp),
+                .padding(bottom = bottomActionPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val onVideoButtonClick = {
@@ -1503,7 +1509,6 @@ internal fun WallpaperDetailScreen(
             }
 
             // BottomSheet 内容
-            val density = LocalDensity.current
             val sheetOuterBottomPadding =
                 with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 16.dp
 
