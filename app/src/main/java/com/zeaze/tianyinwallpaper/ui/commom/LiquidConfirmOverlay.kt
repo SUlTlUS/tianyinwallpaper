@@ -42,79 +42,83 @@ fun LiquidConfirmOverlay(
     confirmText: String = "确定",
     dismissText: String = "取消"
 ) {
-    if (!visible) return
-
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor =
         if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
 
-    androidx.compose.foundation.layout.Box(
+    LiquidWindowAnimatedVisibility(
+        visible = visible,
         modifier = Modifier
             .fillMaxSize()
             .clickable { onDismiss() },
-        contentAlignment = Alignment.Center
+        label = "LiquidConfirmOverlay"
     ) {
-        Column(
-            Modifier
-                .padding(horizontal = 40.dp)
-                .clickable(enabled = false) {}
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { RoundedRectangle(48f.dp) },
-                    effects = {
-                        colorControls(
-                            brightness = if (isLightTheme) 0.2f else 0f,
-                            saturation = 1.5f
-                        )
-                        blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
-                        lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
-                    },
-                    highlight = { Highlight.Plain },
-                    onDrawSurface = { drawRect(containerColor) }
-                )
-                .fillMaxWidth()
+        androidx.compose.foundation.layout.Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            BasicText(
-                title,
-                Modifier.padding(28.dp, 24.dp, 28.dp, 12.dp),
-                style = TextStyle(contentColor, 24.sp, FontWeight.Medium)
-            )
-            BasicText(
-                message,
-                Modifier.padding(24.dp, 12.dp, 24.dp, 12.dp),
-                style = TextStyle(contentColor.copy(0.68f), 15.sp)
-            )
-            Row(
+            Column(
                 Modifier
-                    .padding(24.dp, 12.dp, 24.dp, 24.dp)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 40.dp)
+                    .clickable(enabled = false) {}
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RoundedRectangle(48f.dp) },
+                        effects = {
+                            colorControls(
+                                brightness = if (isLightTheme) 0.2f else 0f,
+                                saturation = 1.5f
+                            )
+                            blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
+                            lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
+                        },
+                        highlight = { Highlight.Plain },
+                        onDrawSurface = { drawRect(containerColor) }
+                    )
+                    .fillMaxWidth()
             ) {
+                BasicText(
+                    title,
+                    Modifier.padding(28.dp, 24.dp, 28.dp, 12.dp),
+                    style = TextStyle(contentColor, 24.sp, FontWeight.Medium)
+                )
+                BasicText(
+                    message,
+                    Modifier.padding(24.dp, 12.dp, 24.dp, 12.dp),
+                    style = TextStyle(contentColor.copy(0.68f), 15.sp)
+                )
                 Row(
                     Modifier
-                        .clip(Capsule())
-                        .background(containerColor.copy(0.2f))
-                        .clickable { onDismiss() }
-                        .height(48.dp)
-                        .weight(1f),
-                    horizontalArrangement = Arrangement.Center,
+                        .padding(24.dp, 12.dp, 24.dp, 24.dp)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    BasicText(dismissText, style = TextStyle(contentColor, 16.sp))
-                }
-                Row(
-                    Modifier
-                        .clip(Capsule())
-                        .background(accentColor)
-                        .clickable { onConfirm() }
-                        .height(48.dp)
-                        .weight(1f),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    BasicText(confirmText, style = TextStyle(Color.White, 16.sp))
+                    Row(
+                        Modifier
+                            .clip(Capsule())
+                            .background(containerColor.copy(0.2f))
+                            .clickable { onDismiss() }
+                            .height(48.dp)
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicText(dismissText, style = TextStyle(contentColor, 16.sp))
+                    }
+                    Row(
+                        Modifier
+                            .clip(Capsule())
+                            .background(accentColor)
+                            .clickable { onConfirm() }
+                            .height(48.dp)
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicText(confirmText, style = TextStyle(Color.White, 16.sp))
+                    }
                 }
             }
         }

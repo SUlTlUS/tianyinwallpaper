@@ -17,5 +17,6 @@ data class TianYinWallpaperModel(
     var offsetY: Float = 0f,
     var rotation: Float = 0f,
     var brightness: Float = 0f,
-    var volume: Float = 0f
+    var volume: Float = 0f,
+    var clockColorMode: Int = 0
 )

@@ -40,12 +40,14 @@ jobs:
       - name: Generate update_info.json
         run: |
           APK_FILE=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
-          APK_NAME=$(basename "$APK_FILE")
-          APK_SIZE=$(stat -c%s "$APK_FILE")
-          APK_MD5=$(md5sum "$APK_FILE" | cut -d ' ' -f 1)
           CURRENT_TIME=$(date +%s%3N)
           VERSION_NAME="${{ steps.version.outputs.name }}"
           VERSION_CODE="${{ steps.version.outputs.code }}"
+          APK_NAME="tianyinwallpaper-v${VERSION_NAME}.apk"
+          VERSIONED_APK_FILE="$(dirname "$APK_FILE")/${APK_NAME}"
+          cp "$APK_FILE" "$VERSIONED_APK_FILE"
+          APK_SIZE=$(stat -c%s "$VERSIONED_APK_FILE")
+          APK_MD5=$(md5sum "$VERSIONED_APK_FILE" | cut -d ' ' -f 1)
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION_NAME}/${APK_NAME}"
           
           # 读取 changelog.md 中当前版本的更新说明
@@ -83,7 +85,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/tianyinwallpaper-v${{ steps.version.outputs.name }}.apk
 
       - name: Upload Update Info Artifact
         uses: actions/upload-artifact@v4
@@ -106,7 +108,7 @@ jobs:
             - 下载下方 APK 文件安装即可
 
           files: |
-            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/tianyinwallpaper-v${{ steps.version.outputs.name }}.apk
           generate_release_notes: true
 
       - name: Commit and Push Update Info

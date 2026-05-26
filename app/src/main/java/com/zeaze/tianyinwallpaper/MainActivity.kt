@@ -17,7 +17,6 @@ import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,6 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
@@ -43,20 +43,25 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material.darkColors
@@ -73,6 +78,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.alibaba.fastjson.JSON
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
 import com.zeaze.tianyinwallpaper.base.BaseActivity
@@ -91,6 +97,8 @@ import java.io.File
 import kotlinx.coroutines.launch
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTab
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabs
+import com.zeaze.tianyinwallpaper.catalog.utils.LiquidMorphPhysics
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberLiquidMorphController
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
@@ -493,108 +501,55 @@ class MainActivity : BaseActivity() {
                         )
                     }
 
-                    if (showMoreMenu) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(currentPageRoute) {
-                                    detectTapGestures { showMoreMenu = false }
-                                }
-                        ) {
-                            val menuItems = if (isWallpaperPage) {
-                                listOf(
-                                    "保存" to {
-                                        showMoreMenu = false
-                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
-                                    },
-                                    "选择" to {
-                                        showMoreMenu = false
-                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_SELECT_MODE, Unit)
-                                    },
-                                    "设置" to {
-                                        showMoreMenu = false
-                                        openSettingPage()
-                                    },
-                                    "壁纸组" to {
-                                        showMoreMenu = false
-                                        openAboutPage()
-                                    }
-                                )
-                            } else if (isRasterPage) {
-                                listOf(
-                                    "选择" to {
-                                        showMoreMenu = false
-                                        RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_RASTER_SELECT_MODE, Unit)
-                                    },
-                                    "设置" to {
-                                        showMoreMenu = false
-                                        openSettingPage()
-                                    }
-                                )
-                            } else {
-                                listOf(
-                                    "设置" to {
-                                        showMoreMenu = false
-                                        openSettingPage()
-                                    }
-                                )
+                    val moreMenuItems = if (isWallpaperPage) {
+                        listOf(
+                            "保存" to {
+                                showMoreMenu = false
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
+                            },
+                            "选择" to {
+                                showMoreMenu = false
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_SELECT_MODE, Unit)
+                            },
+                            "设置" to {
+                                showMoreMenu = false
+                                openSettingPage()
+                            },
+                            "壁纸组" to {
+                                showMoreMenu = false
+                                openAboutPage()
                             }
-
-                            val menuSurfaceColor = if (useDarkTheme) Color(0xCC1E1E1E) else Color(0xEFFFFFFF)
-                            Column(
-                                Modifier
-                                    .padding(top = statusBarTopPaddingDp + 66.dp, end = 12.dp)
-                                    .width(140.dp)
-                                    .align(Alignment.TopEnd)
-                                    .let {
-                                        if (enableLiquidGlass && liquidBackdrop != null) {
-                                            it.drawBackdrop(
-                                                backdrop = liquidBackdrop,
-                                                shape = { RoundedRectangle(20f.dp) },
-                                                effects = {
-                                                    vibrancy()
-                                                    blur(if (useDarkTheme) 8f.dp.toPx() else 16f.dp.toPx())
-                                                    lens(14f.dp.toPx(), 28f.dp.toPx(), depthEffect = true)
-                                                },
-                                                onDrawSurface = { drawRect(menuSurfaceColor) }
-                                            )
-                                        } else {
-                                            it
-                                                .clip(RoundedCornerShape(20.dp))
-                                                .background(menuSurfaceColor)
-                                                .border(
-                                                    1.dp,
-                                                    if (useDarkTheme) Color.White else Color.Black,
-                                                    RoundedCornerShape(20.dp)
-                                                )
-                                        }
-                                    }
-                                    .padding(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                menuItems.forEach { (label, onClick) ->
-                                    Row(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .height(44.dp)
-                                            .clip(Capsule())
-                                            .clickable { onClick() }
-                                            .padding(horizontal = 16.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center
-                                    ) {
-                                        BasicText(
-                                            text = label,
-                                            style = TextStyle(
-                                                color = if (useDarkTheme) Color.White else Color.Black,
-                                                fontSize = 15.sp
-                                            )
-                                        )
-                                    }
-                                }
+                        )
+                    } else if (isRasterPage) {
+                        listOf(
+                            "选择" to {
+                                showMoreMenu = false
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_RASTER_SELECT_MODE, Unit)
+                            },
+                            "设置" to {
+                                showMoreMenu = false
+                                openSettingPage()
                             }
-                        }
+                        )
+                    } else {
+                        listOf(
+                            "设置" to {
+                                showMoreMenu = false
+                                openSettingPage()
+                            }
+                        )
                     }
+
+                    LiquidMoreMenuOverlay(
+                        visible = showMoreMenu,
+                        statusBarTopPaddingDp = statusBarTopPaddingDp,
+                        currentPageRoute = currentPageRoute,
+                        useDarkTheme = useDarkTheme,
+                        enableLiquidGlass = enableLiquidGlass,
+                        liquidBackdrop = liquidBackdrop,
+                        menuItems = moreMenuItems,
+                        onDismiss = { showMoreMenu = false }
+                    )
                 } else {
                     if (showMoreMenu) {
                         showMoreMenu = false
@@ -899,6 +854,241 @@ class MainActivity : BaseActivity() {
                     .create()
                     .show()
                 return
+            }
+        }
+    }
+}
+
+private fun lerpFloat(start: Float, stop: Float, fraction: Float): Float {
+    return start + (stop - start) * fraction
+}
+
+private fun lerpDp(start: Dp, stop: Dp, fraction: Float): Dp {
+    return (start.value + (stop.value - start.value) * fraction).dp
+}
+
+@Composable
+private fun LiquidMoreMenuOverlay(
+    visible: Boolean,
+    statusBarTopPaddingDp: Dp,
+    currentPageRoute: String,
+    useDarkTheme: Boolean,
+    enableLiquidGlass: Boolean,
+    liquidBackdrop: LayerBackdrop?,
+    menuItems: List<Pair<String, () -> Unit>>,
+    onDismiss: () -> Unit
+) {
+    var mounted by remember { mutableStateOf(visible) }
+    val morph = rememberLiquidMorphController(if (visible) 1f else 0f)
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            mounted = true
+            morph.open()
+        } else if (mounted) {
+            morph.close()
+            mounted = false
+        }
+    }
+
+    if (!mounted) return
+
+    morph.updateHandoff()
+    val p = morph.value.coerceIn(0f, 1f)
+    val menuSurfaceColor = if (enableLiquidGlass) {
+        if (useDarkTheme) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
+    } else {
+        if (useDarkTheme) Color(0x33000000) else Color(0xAAFFFFFF)
+    }
+    val menuBorderColor = if (useDarkTheme) Color(0x33FFFFFF) else Color(0x88FFFFFF)
+    val textColor = if (useDarkTheme) Color.White else Color.Black
+    val menuWidth = 140.dp
+    val menuHeight = (menuItems.size * 44 + (menuItems.size - 1) * 4 + 16).dp
+    val triggerSize = 48.dp
+    val triggerTopPadding = statusBarTopPaddingDp + 10.dp
+    val triggerEndPadding = 8.dp
+    val menuTopPadding = statusBarTopPaddingDp + 66.dp
+    val menuEndPadding = 12.dp
+    val triggerCenterTop = triggerTopPadding + triggerSize / 2f
+    val triggerCenterEnd = triggerEndPadding + triggerSize / 2f
+    val menuCenterTop = menuTopPadding + menuHeight / 2f
+    val menuCenterEnd = menuEndPadding + menuWidth / 2f
+    val morphState = LiquidMorphPhysics.compute(
+        rawValue = morph.value,
+        finalDx = with(density) { (triggerCenterEnd - menuCenterEnd).toPx() },
+        finalDy = with(density) { (menuCenterTop - triggerCenterTop).toPx() }
+    )
+    val sizeT = morphState.sizeT.coerceIn(0f, 1f)
+    val pathT = morphState.pathT.coerceIn(-0.16f, 1.12f)
+    val bodyWidth = lerpDp(triggerSize, menuWidth, sizeT)
+    val bodyHeight = lerpDp(triggerSize, menuHeight, sizeT)
+    val bodyCenterTop = lerpDp(triggerCenterTop, menuCenterTop, pathT)
+    val bodyCenterEnd = lerpDp(triggerCenterEnd, menuCenterEnd, pathT)
+    val bodyTopPadding = bodyCenterTop - bodyHeight / 2f
+    val bodyEndPadding = bodyCenterEnd - bodyWidth / 2f
+    val radiusT = ((sizeT - 0.72f) / 0.28f).coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
+    val menuBodyCorner = lerpFloat(minOf(bodyWidth.value, bodyHeight.value) / 2f, 20f, radiusT).dp
+    val menuBodyAlpha = when {
+        morph.hasHandedOff -> 0f
+        morph.isClosing -> (p / 0.22f).coerceIn(0f, 1f)
+        else -> 1f
+    }
+    val itemAlpha = ((p - 0.50f) / 0.50f).coerceIn(0f, 1f)
+    val triggerAlpha = when {
+        morph.hasHandedOff -> 0f
+        morph.isClosing -> 0f
+        else -> morphState.anchorScale
+    }
+    val triggerScale = morphState.anchorScale
+    val menuItemsEnabled = p >= 0.995f && !morph.isClosing && !morph.hasHandedOff
+    val overlayBlocksInput = p > 0.30f && !morph.isClosing && !morph.hasHandedOff
+
+    fun closeThen(action: () -> Unit) {
+        scope.launch {
+            morph.close()
+            mounted = false
+            action()
+        }
+    }
+
+    fun triggerMenuItem(action: () -> Unit) {
+        if (menuItemsEnabled) {
+            action()
+        }
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize().let {
+            if (overlayBlocksInput) {
+                it.pointerInput(currentPageRoute) {
+                    detectTapGestures { closeThen(onDismiss) }
+                }
+            } else {
+                it
+            }
+        }
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .zIndex(3f)
+                .padding(top = triggerTopPadding, end = triggerEndPadding)
+                .width(triggerSize)
+                .height(triggerSize)
+                .graphicsLayer {
+                    alpha = if (morph.hasHandedOff) 0f else triggerAlpha
+                    this.scaleX = triggerScale
+                    this.scaleY = triggerScale
+                    translationY = morphState.pushDy
+                    transformOrigin = TransformOrigin(0.5f, 0.5f)
+                }
+                .let {
+                    if (enableLiquidGlass && liquidBackdrop != null) {
+                        it
+                            .clip(CircleShape)
+                            .drawBackdrop(
+                                backdrop = liquidBackdrop,
+                                shape = { Capsule() },
+                                effects = {
+                                    vibrancy()
+                                    blur(2f.dp.toPx())
+                                    lens(12f.dp.toPx(), 24f.dp.toPx())
+                                },
+                                onDrawSurface = { drawRect(menuSurfaceColor) }
+                            )
+                    } else {
+                        it
+                            .clip(CircleShape)
+                            .background(menuSurfaceColor)
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            BasicText("⋯", style = TextStyle(textColor, 18.sp))
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .zIndex(2f)
+                .padding(top = bodyTopPadding, end = bodyEndPadding)
+                .width(bodyWidth)
+                .height(bodyHeight)
+                .graphicsLayer {
+                    this.scaleX = morphState.containerScale
+                    this.scaleY = morphState.containerScale
+                    this.transformOrigin = TransformOrigin(1f, 0f)
+                    this.alpha = menuBodyAlpha
+                }
+                .let {
+                    if (overlayBlocksInput) {
+                        it.pointerInput(Unit) {
+                            detectTapGestures {
+                                // Consume taps inside the menu so the scrim does not dismiss first.
+                            }
+                        }
+                    } else {
+                        it
+                    }
+                }
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .let {
+                        if (enableLiquidGlass && liquidBackdrop != null) {
+                            it.drawBackdrop(
+                                backdrop = liquidBackdrop,
+                                shape = { RoundedRectangle(menuBodyCorner) },
+                                effects = {
+                                    vibrancy()
+                                    blur(6f.dp.toPx())
+                                    lens(18f.dp.toPx(), 30f.dp.toPx())
+                                },
+                                onDrawSurface = { drawRect(menuSurfaceColor) }
+                            )
+                        } else {
+                            it
+                                .clip(RoundedCornerShape(menuBodyCorner))
+                                .background(menuSurfaceColor)
+                                .border(
+                                    1.dp,
+                                    menuBorderColor,
+                                    RoundedCornerShape(menuBodyCorner)
+                                )
+                        }
+                    }
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp)
+                    .graphicsLayer { alpha = itemAlpha },
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                menuItems.forEach { (label, onClick) ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .clip(Capsule())
+                            .clickable(enabled = menuItemsEnabled) { triggerMenuItem(onClick) }
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        BasicText(
+                            text = label,
+                            style = TextStyle(
+                                color = textColor,
+                                fontSize = 15.sp
+                            )
+                        )
+                    }
+                }
             }
         }
     }

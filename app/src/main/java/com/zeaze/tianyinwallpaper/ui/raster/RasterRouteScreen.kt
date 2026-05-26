@@ -28,12 +28,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -53,6 +49,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,6 +57,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
@@ -151,9 +149,13 @@ import com.zeaze.tianyinwallpaper.service.raster.KeyframeTranscoder
 import com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService
 import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
 import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedContent
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimationMode
 import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
+import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
 import com.zeaze.tianyinwallpaper.utils.showToast
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
@@ -835,25 +837,8 @@ fun RasterRouteScreen(
         }
 
         // 1. 自定义 Liquid Glass 对话框（对齐 MainRouteScreen 的 AnimatedContent + drawBackdrop 模式）
-        AnimatedContent(
+        LiquidWindowAnimatedContent(
             targetState = currentDialogState,
-            transitionSpec = {
-                (fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                        scaleIn(
-                            initialScale = 0.8f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessLow
-                            )
-                        ))
-                    .togetherWith(
-                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                scaleOut(
-                                    targetScale = 0.8f,
-                                    animationSpec = spring(stiffness = Spring.StiffnessLow)
-                                )
-                    )
-            },
             contentAlignment = Alignment.Center,
             label = "RasterDialogOverlay",
             modifier = Modifier.fillMaxSize()
@@ -1170,6 +1155,16 @@ fun RasterRouteScreen(
                         detailGroup = groups[idx].copy()
                     }
                     persistGroups()
+                },
+                onClockColorModeChanged = { editorGroup, mode ->
+                    val idx = groups.indexOfFirst { g -> g.id == editorGroup.id }
+                    if (idx >= 0) {
+                        groups[idx] = groups[idx].copy(clockColorMode = mode)
+                        if (detailGroup?.id == editorGroup.id) {
+                            detailGroup = groups[idx].copy()
+                        }
+                        persistGroups()
+                    }
                 },
                 groups = groups,
                 onDismiss = { detailGroup = null },
@@ -1499,6 +1494,7 @@ private fun RasterDetailScreen(
     onGlassBandWidthChangeFinished: (RasterGroupModel, Float) -> Unit,
     // ── 死区开关回调
     onDeadZoneEnabledChanged: (RasterGroupModel, Boolean) -> Unit,
+    onClockColorModeChanged: (RasterGroupModel, Int) -> Unit,
     groups: List<RasterGroupModel>,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
@@ -1513,6 +1509,9 @@ private fun RasterDetailScreen(
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
     val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF121212).copy(0.56f)
+    val density = LocalDensity.current
+    val bottomActionPadding =
+        with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 24.dp
 
     val detailBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
@@ -1690,7 +1689,7 @@ private fun RasterDetailScreen(
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp),
+                .padding(bottom = bottomActionPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val isStatic = group.type == RasterGroupModel.TYPE_STATIC
@@ -1762,7 +1761,9 @@ private fun RasterDetailScreen(
 
         // BottomSheet 拖拽关闭状态
         val sheetOffsetY = remember { mutableStateOf(0f) }
-        val dismissThreshold = with(LocalDensity.current) { 200.dp.toPx() }
+        val dismissThreshold = with(density) { 200.dp.toPx() }
+        val sheetOuterBottomPadding =
+            with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 16.dp
 
         // 重置偏移当面板重新显示
         LaunchedEffect(isSheetVisible) {
@@ -1791,23 +1792,13 @@ private fun RasterDetailScreen(
         }
 
         // BottomSheet 内容
-        AnimatedVisibility(
+        LiquidWindowAnimatedVisibility(
             visible = isSheetVisible,
-            enter = slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMedium
-                )
-            ) + fadeIn(),
-            exit = slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMedium
-                )
-            ) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
+            mode = LiquidWindowAnimationMode.BottomSheet,
+            label = "RasterEditorSheet",
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(start = 16.dp, end = 16.dp, bottom = sheetOuterBottomPadding)
         ) {
             if (currentEditorGroup != null) {
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
@@ -1829,6 +1820,7 @@ private fun RasterDetailScreen(
                 var glassAnimEnabled by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.glassAnimEnabled) }
                 var glassBandWidth by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.glassBandWidth) }
                 var deadZoneEnabled by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.deadZoneEnabled) }
+                var clockColorMode by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.clockColorMode) }
 
                 // ★ 控制 slider/toggle 交互时禁止滚动
                 var isSliderOrToggleInteracting by remember { mutableStateOf(false) }
@@ -1942,6 +1934,40 @@ private fun RasterDetailScreen(
                     ) {
 
                     // === 图集缩略图区域（保持不变） ===
+                        BasicText("锁屏时钟颜色", style = TextStyle(contentColor, 14.sp))
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                WallpaperClockColorMode.FOLLOW_GLOBAL,
+                                WallpaperClockColorMode.LIGHT_CLOCK,
+                                WallpaperClockColorMode.DARK_CLOCK
+                            ).forEach { mode ->
+                                val selected = clockColorMode == mode
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(if (selected) accentColor else contentColor.copy(alpha = 0.1f))
+                                        .clickable {
+                                            clockColorMode = mode
+                                            onClockColorModeChanged(currentEditorGroup, mode)
+                                        },
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    BasicText(
+                                        WallpaperClockColorMode.label(mode),
+                                        style = TextStyle(if (selected) Color.White else contentColor, 13.sp)
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
+
                     if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) {
                         val reorderableState = rememberReorderableLazyListState(
                             lazyListState = thumbnailListState,

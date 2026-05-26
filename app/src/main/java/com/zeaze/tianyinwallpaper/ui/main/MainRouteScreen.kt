@@ -22,16 +22,12 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.animateContentSize
@@ -106,6 +102,7 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedContent
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
@@ -976,35 +973,24 @@ fun MainRouteScreen(
         }
 
         // 1. Custom Liquid Glass Dialog
-        AnimatedContent(
+        LiquidWindowAnimatedContent(
             targetState = currentDialogState,
-            transitionSpec = {
-                (fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                        scaleIn(
-                            initialScale = 0.8f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessLow
-                            )
-                        ))
-                    .togetherWith(
-                        fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                scaleOut(
-                                    targetScale = 0.8f,
-                                    animationSpec = spring(stiffness = Spring.StiffnessLow)
-                                )
-                    )
-            },
             contentAlignment = Alignment.Center,
             label = "DialogOverlay",
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .let {
+                    if (currentDialogState != null) {
+                        it.pointerInput(currentDialogState) {
+                            detectTapGestures { dismissCurrentDialog() }
+                        }
+                    } else {
+                        it
+                    }
+                }
         ) { state ->
             if (state != null) {
-                Box(
-                    modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { dismissCurrentDialog() } },
-                    contentAlignment = Alignment.Center
-                ) {
-                    val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
+                val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
                 val sheetBackdrop = rememberLayerBackdrop()  // 为 LiquidToggle 导出
                 Column(
                     Modifier
@@ -1412,7 +1398,6 @@ fun MainRouteScreen(
                         }
                     }
                 }
-                }
             }
         }
 
@@ -1524,6 +1509,19 @@ fun MainRouteScreen(
                             Intent(context, TianYinWallpaperService::class.java).apply {
                                 action = TianYinWallpaperService.ACTION_UPDATE_VOLUME
                                 putExtra(TianYinWallpaperService.EXTRA_VOLUME, newVolume)
+                            }
+                        )
+                    },
+                    onClockColorModeAction = { newMode ->
+                        val index = wallpapers.indexOfFirst { it.uuid == model.uuid }
+                        if (index >= 0) {
+                            wallpapers[index].clockColorMode = newMode
+                        }
+                        saveCache()
+                        context.startService(
+                            Intent(context, TianYinWallpaperService::class.java).apply {
+                                action = TianYinWallpaperService.ACTION_UPDATE_CLOCK_COLOR_MODE
+                                putExtra(TianYinWallpaperService.EXTRA_CLOCK_COLOR_MODE, newMode)
                             }
                         )
                     }
