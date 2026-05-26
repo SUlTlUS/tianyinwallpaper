@@ -871,7 +871,7 @@ private fun LiquidMoreMenuOverlay(
                 .height(38.dp)
                 .graphicsLayer {
                     alpha = neckAlpha
-                    scaleY = lerpFloat(0.4f, 1f, p)
+                    this.scaleY = lerpFloat(0.4f, 1f, p)
                     transformOrigin = TransformOrigin(0.5f, 0f)
                 }
                 .clip(RoundedCornerShape(14.dp))
