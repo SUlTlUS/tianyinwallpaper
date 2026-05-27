@@ -458,7 +458,7 @@ fun SettingRouteScreen(
                     SettingTextItem("景深模型测试页", contentColor) {
                         onOpenDepthModelTest()
                     }
-                    SettingTextItem("PLY 模型测试页", contentColor) {
+                    SettingTextItem("Gaussian SOG 测试页", contentColor) {
                         onOpenPlyModelTest()
                     }
                     if (corrugatedTestVisible) {

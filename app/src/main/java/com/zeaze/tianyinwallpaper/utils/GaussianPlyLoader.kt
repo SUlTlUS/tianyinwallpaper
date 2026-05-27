@@ -67,7 +67,7 @@ object GaussianPlyLoader {
         val elements: List<PlyElement>
     )
 
-    private data class Splat(
+    data class GaussianSplat(
         val x: Float,
         val y: Float,
         val z: Float,
@@ -225,7 +225,7 @@ object GaussianPlyLoader {
 
         val imageSize = readImageSizeBinary(buffer, header.elements)
         val focal = readFocalLengthBinary(buffer, header.elements)
-        val splats = ArrayList<Splat>(min(maxSplats, vertex.count))
+        val splats = ArrayList<GaussianSplat>(min(maxSplats, vertex.count))
 
         for (i in 0 until vertex.count) {
             val base = vertex.dataOffset + i * vertex.stride
@@ -250,7 +250,7 @@ object GaussianPlyLoader {
             val angle = readQuaternionAngle(properties.keys) { name ->
                 properties.getFloat(buffer, base, name)
             }
-            splats += Splat(
+            splats += GaussianSplat(
                 x = x,
                 y = y,
                 z = z,
@@ -265,7 +265,7 @@ object GaussianPlyLoader {
                 orderKey = sampleHash(i)
             )
         }
-        return buildScene(splats, imageSize.first, imageSize.second, focal)
+        return buildScene(splats, imageSize.first, imageSize.second, focal, "PLY")
     }
 
     private fun parseAscii(
@@ -290,7 +290,7 @@ object GaussianPlyLoader {
 
         val allLines = text.lineSequence().toList()
         val metadata = readAsciiMetadata(header, allLines.drop(vertex.count).iterator())
-        val splats = ArrayList<Splat>(min(maxSplats, vertex.count))
+        val splats = ArrayList<GaussianSplat>(min(maxSplats, vertex.count))
         for (i in 0 until vertex.count) {
             val parts = allLines.getOrNull(i)?.trim()?.split(Regex("\\s+")) ?: break
             if (parts.size < propertyNames.size) continue
@@ -322,7 +322,7 @@ object GaussianPlyLoader {
             val angle = readQuaternionAngle(index.keys) { name ->
                 parts.floatAt(index.getValue(name))
             }
-            splats += Splat(
+            splats += GaussianSplat(
                 x = x,
                 y = y,
                 z = z,
@@ -338,16 +338,17 @@ object GaussianPlyLoader {
             )
         }
 
-        return buildScene(splats, metadata.imageWidth, metadata.imageHeight, metadata.focalLengthPx)
+        return buildScene(splats, metadata.imageWidth, metadata.imageHeight, metadata.focalLengthPx, "PLY")
     }
 
-    private fun buildScene(
-        splats: MutableList<Splat>,
+    fun buildScene(
+        splats: MutableList<GaussianSplat>,
         imageWidth: Int,
         imageHeight: Int,
-        focalLengthPx: Float
+        focalLengthPx: Float,
+        sourceLabel: String = "Gaussian"
     ): GaussianScene {
-        require(splats.isNotEmpty()) { "PLY has no visible Gaussians" }
+        require(splats.isNotEmpty()) { "$sourceLabel has no visible Gaussians" }
         var near = Float.POSITIVE_INFINITY
         var far = Float.NEGATIVE_INFINITY
         splats.forEach { splat ->
@@ -362,7 +363,7 @@ object GaussianPlyLoader {
         }
         val bucketScale = if (far > near) DEPTH_SORT_BUCKETS / (far - near) else 1f
         splats.sortWith(
-            compareBy<Splat> { layerBucket(it.z) }
+            compareBy<GaussianSplat> { layerBucket(it.z) }
                 .thenByDescending { ((it.z - near) * bucketScale).toInt() }
                 .thenBy { it.orderKey }
         )
@@ -459,7 +460,7 @@ object GaussianPlyLoader {
     }
 
     private fun computeParallaxAnchor(
-        splats: List<Splat>,
+        splats: List<GaussianSplat>,
         near: Float,
         far: Float
     ): AnchorDepth {
@@ -624,7 +625,7 @@ object GaussianPlyLoader {
         return (1f / (1f + exp(-value))).coerceIn(0f, 1f)
     }
 
-    private fun isProjectedIntoViewport(
+    fun isProjectedIntoViewport(
         x: Float,
         y: Float,
         z: Float,
@@ -657,13 +658,13 @@ object GaussianPlyLoader {
             projectedY <= VIEWPORT_KEEP_MARGIN
     }
 
-    private fun shouldKeepAuxiliarySplat(index: Int, total: Int, maxSplats: Int): Boolean {
+    fun shouldKeepAuxiliarySplat(index: Int, total: Int, maxSplats: Int): Boolean {
         if (total <= maxSplats) return true
         val sample = (sampleHash(index).toLong() and 0xffffffffL).toDouble() / 4294967296.0
         return sample < maxSplats.toDouble() / total.toDouble()
     }
 
-    private fun sampleHash(index: Int): Int {
+    fun sampleHash(index: Int): Int {
         var value = index.toLong() + HASH_SEED
         value = (value xor (value ushr 30)) * HASH_MUL_A
         value = (value xor (value ushr 27)) * HASH_MUL_B

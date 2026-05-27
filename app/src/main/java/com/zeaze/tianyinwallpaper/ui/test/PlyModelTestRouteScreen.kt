@@ -50,6 +50,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.kyant.shapes.Capsule
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
+import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import com.zeaze.tianyinwallpaper.utils.PhotoMeshPlyLoader
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
@@ -97,35 +98,37 @@ fun PlyModelTestRouteScreen(
         errorText = null
         gaussianScene = null
         meshScene = null
-        val loaded = withContext(Dispatchers.IO) {
+        val loadAttempt = withContext(Dispatchers.IO) {
             when (detectPlyKind(context.applicationContext, uri)) {
-                PlyKind.Mesh -> PhotoMeshPlyLoader.loadScene(
+                PlyKind.Mesh -> LoadAttempt(PhotoMeshPlyLoader.loadScene(
                     context = context.applicationContext,
                     uriString = uri.toString(),
                     maxFaces = maxFaces
-                )?.let { PlyLoadResult.Mesh(it) }
-                PlyKind.Gaussian -> GaussianPlyLoader.loadScene(
+                )?.let { PlyLoadResult.Mesh(it) })
+                PlyKind.Gaussian -> LoadAttempt(null, "Gaussian PLY 已移除，请先转换为 SOG")
+                PlyKind.Sog -> GaussianSceneLoader.loadSceneDetailed(
                     context = context.applicationContext,
                     uriString = uri.toString(),
                     maxSplats = maxSplats,
                     viewportAspect = PLY_PREVIEW_ASPECT
-                )?.let { PlyLoadResult.Gaussian(it) }
-                PlyKind.Unknown -> GaussianPlyLoader.loadScene(
-                    context = context.applicationContext,
-                    uriString = uri.toString(),
-                    maxSplats = maxSplats,
-                    viewportAspect = PLY_PREVIEW_ASPECT
-                )?.let { PlyLoadResult.Gaussian(it) }
-                    ?: PhotoMeshPlyLoader.loadScene(
+                ).let { result ->
+                    LoadAttempt(result.scene?.let { PlyLoadResult.Gaussian(it) }, result.error)
+                }
+                PlyKind.Unknown -> {
+                    PhotoMeshPlyLoader.loadScene(
                         context = context.applicationContext,
                         uriString = uri.toString(),
                         maxFaces = maxFaces
-                    )?.let { PlyLoadResult.Mesh(it) }
+                    )?.let { LoadAttempt(PlyLoadResult.Mesh(it)) }
+                        ?: LoadAttempt(null, "未识别为 SOG 或 Mesh PLY")
+                }
             }
         }
         isLoading = false
+        val loaded = loadAttempt.result
         if (loaded == null) {
-            errorText = "PLY 读取或解析失败，请确认文件包含 SHARP/3DGS 的 vertex 字段"
+            errorText = "SOG/Mesh 读取或解析失败，请确认文件包含 SOG 或 SHARP mesh 数据"
+            errorText = loadAttempt.error?.takeIf { it.isNotBlank() } ?: errorText
         } else {
             when (loaded) {
                 is PlyLoadResult.Gaussian -> gaussianScene = loaded.scene
@@ -148,7 +151,7 @@ fun PlyModelTestRouteScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "PLY 模型测试",
+                text = "Gaussian SOG 测试",
                 style = TextStyle(
                     color = contentColor,
                     fontSize = 30.sp,
@@ -166,7 +169,7 @@ fun PlyModelTestRouteScreen(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("选择 PLY 文件", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("选择 SOG 文件", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
 
             SplatLimitCard(
@@ -347,7 +350,7 @@ private fun LoadingCard(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         CircularProgressIndicator(color = accentColor)
-        Text("正在解析 PLY", color = contentColor.copy(alpha = 0.72f))
+        Text("正在解析 SOG", color = contentColor.copy(alpha = 0.72f))
     }
 }
 
@@ -359,11 +362,11 @@ private fun GaussianPreviewCard(
 ) {
     val renderer = remember { DepthGLRenderer() }
     val previewTilt = remember { FloatArray(2) }
-    var splatScale by remember { mutableStateOf(1.3f) }
-    var globalOpacity by remember { mutableStateOf(1.1f) }
-    var alphaFalloff by remember { mutableStateOf(6.8f) }
-    var minPointSize by remember { mutableStateOf(1.5f) }
-    var maxPointSize by remember { mutableStateOf(48f) }
+    var splatScale by remember { mutableStateOf(1f) }
+    var globalOpacity by remember { mutableStateOf(1f) }
+    var alphaFalloff by remember { mutableStateOf(1f) }
+    var minPointSize by remember { mutableStateOf(0.5f) }
+    var maxPointSize by remember { mutableStateOf(160f) }
 
     fun currentGaussianParams(): DepthGLRenderer.GaussianRenderParams {
         return DepthGLRenderer.GaussianRenderParams(
@@ -404,7 +407,7 @@ private fun GaussianPreviewCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Gaussian 预览", color = contentColor, fontWeight = FontWeight.SemiBold)
+            Text("Gaussian SOG 预览", color = contentColor, fontWeight = FontWeight.SemiBold)
             Text(
                 text = "拖动预览区域测试视差",
                 color = contentColor.copy(alpha = 0.55f),
@@ -427,7 +430,7 @@ private fun GaussianPreviewCard(
                             renderer.start(holder.surface)
                             renderer.resize(width, height)
                             renderer.loadGaussians(scene)
-                            renderer.updateParams(0.045f, 0f)
+                            renderer.updateParams(0.075f, 0f)
                             applyGaussianParams()
                             renderer.updateTilt(previewTilt[0], previewTilt[1])
                         }
@@ -481,7 +484,7 @@ private fun GaussianPreviewCard(
             GaussianParamSlider(
                 label = "Global opacity",
                 value = globalOpacity,
-                valueRange = 0.2f..2.2f,
+                valueRange = 0.2f..3.0f,
                 contentColor = contentColor,
                 onValueChange = {
                     globalOpacity = it
@@ -491,7 +494,7 @@ private fun GaussianPreviewCard(
             GaussianParamSlider(
                 label = "Alpha falloff",
                 value = alphaFalloff,
-                valueRange = 1.4f..8.0f,
+                valueRange = 1.4f..9.0f,
                 contentColor = contentColor,
                 onValueChange = {
                     alphaFalloff = it
@@ -501,7 +504,7 @@ private fun GaussianPreviewCard(
             GaussianParamSlider(
                 label = "Min point size",
                 value = minPointSize,
-                valueRange = 0.5f..4.0f,
+                valueRange = 0.5f..8.0f,
                 contentColor = contentColor,
                 onValueChange = {
                     minPointSize = it.coerceAtMost(maxPointSize)
@@ -511,7 +514,7 @@ private fun GaussianPreviewCard(
             GaussianParamSlider(
                 label = "Max point size",
                 value = maxPointSize,
-                valueRange = 24f..128f,
+                valueRange = 24f..160f,
                 contentColor = contentColor,
                 onValueChange = {
                     maxPointSize = it.coerceAtLeast(minPointSize)
@@ -529,11 +532,11 @@ private fun GaussianPreviewCard(
                 .clickable {
                     previewTilt[0] = 0f
                     previewTilt[1] = 0f
-                    splatScale = 1.3f
-                    globalOpacity = 1.1f
-                    alphaFalloff = 6.8f
-                    minPointSize = 1.5f
-                    maxPointSize = 48f
+                    splatScale = 3f
+                    globalOpacity = 3f
+                    alphaFalloff = 9f
+                    minPointSize = 8f
+                    maxPointSize = 160f
                     applyGaussianParams()
                     renderer.updateTilt(0f, 0f)
                 },
@@ -696,7 +699,7 @@ private fun SceneInfoCard(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(fileName.ifBlank { "未命名 PLY" }, color = contentColor, fontWeight = FontWeight.SemiBold)
+        Text(fileName.ifBlank { "未命名 SOG" }, color = contentColor, fontWeight = FontWeight.SemiBold)
         InfoLine("Splats", scene.count.toString(), contentColor)
         InfoLine("Visible / Aux", "${scene.screenVisibleSplatCount} / ${scene.auxiliarySplatCount}", contentColor)
         InfoLine("Image", "${scene.imageWidth} x ${scene.imageHeight}", contentColor)
@@ -791,8 +794,14 @@ private sealed class PlyLoadResult {
     data class Mesh(val scene: PhotoMeshPlyLoader.MeshScene) : PlyLoadResult()
 }
 
+private data class LoadAttempt(
+    val result: PlyLoadResult?,
+    val error: String? = null
+)
+
 private enum class PlyKind {
     Gaussian,
+    Sog,
     Mesh,
     Unknown
 }
@@ -800,7 +809,15 @@ private enum class PlyKind {
 private fun detectPlyKind(context: Context, uri: Uri): PlyKind {
     return runCatching {
         context.contentResolver.openInputStream(uri)?.use { input ->
-            InputStreamReader(input, StandardCharsets.US_ASCII).buffered(16 * 1024).use { reader ->
+            val buffered = input.buffered(16 * 1024)
+            buffered.mark(4)
+            val first = buffered.read()
+            val second = buffered.read()
+            buffered.reset()
+            if (first == 'P'.code && second == 'K'.code) {
+                return@use PlyKind.Sog
+            }
+            InputStreamReader(buffered, StandardCharsets.US_ASCII).buffered(16 * 1024).use { reader ->
                 var hasFaceElement = false
                 var hasFaceList = false
                 var hasGaussianField = false

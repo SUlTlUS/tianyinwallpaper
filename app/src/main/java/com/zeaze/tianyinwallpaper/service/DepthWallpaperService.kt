@@ -22,7 +22,7 @@ import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
 import com.zeaze.tianyinwallpaper.utils.DepthImageProcessor
 import com.zeaze.tianyinwallpaper.utils.DepthModelRunner
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
-import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
+import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import com.zeaze.tianyinwallpaper.utils.PhotoMeshPlyLoader
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -204,7 +204,7 @@ class DepthWallpaperService : WallpaperService() {
             Thread {
                 if (target.isGaussian()) {
                     val viewportAspect = surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1).toFloat()
-                    val scene = GaussianPlyLoader.loadScene(
+                    val scene = GaussianSceneLoader.loadScene(
                         context = applicationContext,
                         uriString = target.gaussianUri,
                         viewportAspect = viewportAspect
@@ -344,7 +344,7 @@ class DepthWallpaperService : WallpaperService() {
             motionSensorPreference = 0
             val sensor = findMotionSensor(motionSensorPreference).also { motionSensor = it }
             sensor?.let {
-                val ok = sensorManager?.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_UI) == true
+                val ok = sensorManager?.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_GAME) == true
                 lastSensorEventMs = if (ok) SystemClock.elapsedRealtime() else 0L
                 startSensorWatchdog()
                 Log.d(TAG, "registerSensor ok=$ok sensor=${sensor.name} type=${sensor.type}")
@@ -380,7 +380,7 @@ class DepthWallpaperService : WallpaperService() {
             val sensor = candidates[motionSensorPreference]
             motionSensor = sensor
             resetSensorState()
-            val ok = sensorManager?.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_UI) == true
+            val ok = sensorManager?.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_GAME) == true
             lastSensorEventMs = if (ok) SystemClock.elapsedRealtime() else 0L
             Log.w(
                 TAG,
@@ -532,7 +532,11 @@ class DepthWallpaperService : WallpaperService() {
                             "tilt=(${String.format("%.3f", tiltX)}, ${String.format("%.3f", tiltY)})"
                     )
                 }
-                renderer?.updateTilt(tiltX, tiltY)
+                if (model?.isMesh() == true) {
+                    renderer?.updateTilt(tiltY, tiltX)
+                } else {
+                    renderer?.updateTilt(tiltX, tiltY)
+                }
             }
         }
 

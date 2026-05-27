@@ -31,7 +31,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
 import com.zeaze.tianyinwallpaper.utils.DepthImageProcessor
-import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
+import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import com.zeaze.tianyinwallpaper.utils.PhotoMeshPlyLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,7 +42,7 @@ import kotlinx.coroutines.withContext
  *
  * Supported content:
  * - Photo + generated depth map
- * - Gaussian splat PLY
+ * - Gaussian splat SOG
  * - 3D-photo mesh PLY
  */
 @Composable
@@ -122,8 +122,8 @@ fun DepthPreviewView(
                     else -> event.values[0] to event.values[1]
                 }
 
-                tiltX = (tiltX + gx * dt * gyroScale).coerceIn(-1f, 1f)
-                tiltY = (tiltY + gy * dt * gyroScale).coerceIn(-1f, 1f)
+                tiltX = (tiltX + gy * dt * gyroScale).coerceIn(-1f, 1f)
+                tiltY = (tiltY + gx * dt * gyroScale).coerceIn(-1f, 1f)
                 if (lastDispatchTimestamp != 0L && now - lastDispatchTimestamp < minDispatchIntervalNs) {
                     return
                 }
@@ -211,7 +211,7 @@ private fun DepthGLRenderer.loadFromDepthModel(
     updateParams(model.renderParallaxStrength(), 0f)
     when {
         model.isGaussian() -> {
-            val scene = GaussianPlyLoader.loadScene(
+            val scene = GaussianSceneLoader.loadScene(
                 context = context,
                 uriString = model.gaussianUri,
                 viewportAspect = textureView.viewportAspect()

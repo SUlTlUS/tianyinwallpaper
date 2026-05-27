@@ -40,11 +40,11 @@ class DepthGLRenderer {
     private val tiltQueued = AtomicBoolean(false)
 
     data class GaussianRenderParams(
-        val splatScale: Float = 1.3f,
-        val globalOpacity: Float = 1.1f,
-        val alphaFalloff: Float = 6.8f,
-        val minPointSize: Float = 1.5f,
-        val maxPointSize: Float = 48f
+        val splatScale: Float = 1f,
+        val globalOpacity: Float = 1f,
+        val alphaFalloff: Float = 1f,
+        val minPointSize: Float = 0.5f,
+        val maxPointSize: Float = 160f
     )
 
     private sealed class RenderMessage {

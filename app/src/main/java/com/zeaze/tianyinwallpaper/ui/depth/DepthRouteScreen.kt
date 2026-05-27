@@ -7,7 +7,10 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -16,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,11 +31,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Slider
 import androidx.compose.material.Text
@@ -43,29 +49,45 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import com.kyant.shapes.Capsule
+import com.kyant.shapes.RoundedRectangle
 import com.zeaze.tianyinwallpaper.App
+import com.zeaze.tianyinwallpaper.backdrop.Backdrop
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.effects.blur
+import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
+import com.zeaze.tianyinwallpaper.backdrop.effects.lens
+import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.service.DepthWallpaperService
 import com.zeaze.tianyinwallpaper.utils.DepthImageProcessor
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
+import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -83,6 +105,7 @@ fun DepthRouteScreen(
     onBottomBarVisibleChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val activity = context as? Activity
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val wallpapers = remember { mutableStateListOf<DepthWallpaperModel>() }
@@ -90,6 +113,9 @@ fun DepthRouteScreen(
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
     val cardBackground = if (isLightTheme) Color(0xFFE9E9EF) else Color(0xFF202020)
+    val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
+    val enableLiquidGlass = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
     val density = LocalDensity.current
     val statusBarTopPadding = remember(context) {
@@ -167,8 +193,8 @@ fun DepthRouteScreen(
             meshUri = if (kind == DepthAddKind.Mesh) uri.toString() else "",
             displayName = displayName.ifBlank { uri.lastPathSegment.orEmpty() },
             createdAt = System.currentTimeMillis(),
-            sensorSensitivity = 4.5f,
-            parallaxStrength = 0.045f,
+            sensorSensitivity = if (kind == DepthAddKind.Gaussian) 9f else 4.5f,
+            parallaxStrength = if (kind == DepthAddKind.Gaussian) 0.075f else 0.045f,
             blurStrength = DEPTH_BLUR_DISABLED
         ).normalizedDepthParams()
         wallpapers.add(0, model)
@@ -210,7 +236,29 @@ fun DepthRouteScreen(
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            addWallpaper(uri, pendingAddKind)
+            val kind = pendingAddKind
+            if (kind == DepthAddKind.Gaussian) {
+                coroutineScope.launch {
+                    Toast.makeText(context, "Loading Gaussian SOG", Toast.LENGTH_SHORT).show()
+                    val result = withContext(Dispatchers.IO) {
+                        GaussianSceneLoader.loadSceneDetailed(
+                            context = context.applicationContext,
+                            uriString = uri.toString()
+                        )
+                    }
+                    if (result.scene != null) {
+                        addWallpaper(uri, kind)
+                    } else {
+                        Toast.makeText(
+                            context,
+                            result.error?.takeIf { it.isNotBlank() } ?: "Gaussian SOG load failed",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            } else {
+                addWallpaper(uri, kind)
+            }
         }
     }
 
@@ -300,7 +348,9 @@ fun DepthRouteScreen(
         previewModel = null
     }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colors.background)) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colors.background).let { m ->
+        if (enableLiquidGlass && liquidBackdrop != null) m.layerBackdrop(liquidBackdrop) else m
+    }) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             modifier = Modifier.fillMaxSize(),
@@ -340,6 +390,8 @@ fun DepthRouteScreen(
             DepthAddDialog(
                 accentColor = accentColor,
                 contentColor = contentColor,
+                containerColor = containerColor,
+                liquidBackdrop = liquidBackdrop,
                 onDismiss = { showAddDialog = false },
                 onPick = { launchAdd(it) }
             )
@@ -648,10 +700,16 @@ private fun DepthWallpaperCard(
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val context = LocalContext.current
+    val screenAspect = remember(context) {
+        val metrics = context.resources.displayMetrics
+        metrics.widthPixels.toFloat() / metrics.heightPixels.coerceAtLeast(1).toFloat()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(9f / 16f)
+            .aspectRatio(screenAspect)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black)
             .clickable(onClick = onClick)
@@ -702,20 +760,39 @@ private fun DepthWallpaperThumbnail(
     cardBackground: Color
 ) {
     val context = LocalContext.current
-    val bitmap by produceState<Bitmap?>(initialValue = null, model.imageUri) {
-        value = if (model.imageUri.isBlank()) {
-            null
-        } else {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    val options = BitmapFactory.Options().apply {
-                        inPreferredConfig = Bitmap.Config.RGB_565
-                        inSampleSize = 2
-                    }
-                    context.contentResolver.openInputStream(Uri.parse(model.imageUri))?.use {
-                        BitmapFactory.decodeStream(it, null, options)
-                    }
-                }.getOrNull()
+    val contentKey = remember(model) {
+        when {
+            model.isGaussian() -> model.gaussianUri
+            model.isMesh() -> model.meshUri
+            else -> model.imageUri
+        }
+    }
+
+    val bitmap by produceState<Bitmap?>(initialValue = null, model.id, contentKey) {
+        value = when {
+            model.isGaussian() && model.gaussianUri.isNotBlank() -> {
+                withContext(Dispatchers.IO) {
+                    generateGaussianThumbnail(context, model.gaussianUri, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
+                }
+            }
+            model.isMesh() && model.meshUri.isNotBlank() -> {
+                withContext(Dispatchers.IO) {
+                    generateMeshThumbnail(context, model.meshUri, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
+                }
+            }
+            model.imageUri.isBlank() -> null
+            else -> {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        val options = BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.RGB_565
+                            inSampleSize = 2
+                        }
+                        context.contentResolver.openInputStream(Uri.parse(model.imageUri))?.use {
+                            BitmapFactory.decodeStream(it, null, options)
+                        }
+                    }.getOrNull()
+                }
             }
         }
     }
@@ -728,15 +805,39 @@ private fun DepthWallpaperThumbnail(
             contentScale = ContentScale.Crop
         )
     } else {
+        val isLight = MaterialTheme.colors.isLight
+        val placeholderBg = if (isLight) Color(0xFFE8E8ED) else Color(0xFF1C1C1E)
         Box(
-            modifier = Modifier.fillMaxSize().background(cardBackground),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(placeholderBg),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = model.typeLabel(),
-                color = Color.White.copy(alpha = 0.85f),
-                fontWeight = FontWeight.Bold
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                BasicText(
+                    text = when {
+                        model.isGaussian() -> "G"
+                        model.isMesh() -> "M"
+                        else -> "P"
+                    },
+                    style = TextStyle(
+                        color = Color.White.copy(alpha = 0.4f),
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                BasicText(
+                    text = model.typeLabel(),
+                    style = TextStyle(
+                        color = Color.White.copy(alpha = 0.4f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                )
+            }
         }
     }
 }
@@ -745,52 +846,85 @@ private fun DepthWallpaperThumbnail(
 private fun DepthAddDialog(
     accentColor: Color,
     contentColor: Color,
+    containerColor: Color,
+    liquidBackdrop: Backdrop?,
     onDismiss: () -> Unit,
     onPick: (DepthAddKind) -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
+    val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
+    val isLight = MaterialTheme.colors.isLight
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colors.surface)
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .fillMaxSize()
+                .pointerInput(Unit) { detectTapGestures { onDismiss() } },
+            contentAlignment = Alignment.Center
         ) {
-            Text("Add depth wallpaper", color = contentColor, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            AddDialogButton("Photo depth", accentColor) { onPick(DepthAddKind.Photo) }
-            AddDialogButton("Gaussian PLY", accentColor) { onPick(DepthAddKind.Gaussian) }
-            AddDialogButton("Mesh PLY", accentColor) { onPick(DepthAddKind.Mesh) }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = "Cancel",
-                color = contentColor.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .clip(Capsule())
-                    .clickable(onClick = onDismiss)
-                    .padding(horizontal = 18.dp, vertical = 8.dp)
-            )
+            Column(
+                Modifier
+                    .padding(50.dp)
+                    .wrapContentHeight()
+                    .drawBackdrop(
+                        backdrop = dialogBackdrop,
+                        shape = { RoundedRectangle(48f.dp) },
+                        effects = {
+                            colorControls(
+                                brightness = if (isLight) 0.2f else 0f,
+                                saturation = 1.5f
+                            )
+                            blur(if (isLight) 16f.dp.toPx() else 8f.dp.toPx())
+                            lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
+                        },
+                        highlight = { Highlight.Plain },
+                        onDrawSurface = { drawRect(containerColor) }
+                    )
+                    .pointerInput(Unit) { detectTapGestures { } }
+            ) {
+                Column(
+                    Modifier
+                        .padding(16.dp, 20.dp, 16.dp, 20.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    BasicText(
+                        "添加景深壁纸",
+                        style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    DialogButton("图片景深", accentColor, Color.White) { onPick(DepthAddKind.Photo) }
+                    DialogButton("Gaussian SOG", accentColor, Color.White) { onPick(DepthAddKind.Gaussian) }
+                    DialogButton("Mesh PLY", accentColor, Color.White) { onPick(DepthAddKind.Mesh) }
+                    Spacer(Modifier.height(4.dp))
+                    DialogButton("取消", containerColor.copy(0.2f), contentColor) { onDismiss() }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun AddDialogButton(
+private fun DialogButton(
     text: String,
-    accentColor: Color,
+    bgColor: Color,
+    textColor: Color,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(46.dp)
             .clip(Capsule())
-            .background(accentColor)
-            .clickable(onClick = onClick),
+            .background(bgColor)
+            .clickable(onClick = onClick)
+            .height(48.dp)
+            .fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text, color = Color.White, fontWeight = FontWeight.Bold)
+        BasicText(text, style = TextStyle(textColor, 16.sp))
     }
 }
 
@@ -819,4 +953,110 @@ private fun queryDisplayName(context: Context, uri: Uri): String? {
             }
         }
     }.getOrNull() ?: uri.lastPathSegment
+}
+
+private const val THUMBNAIL_WIDTH = 216
+private const val THUMBNAIL_HEIGHT = 384
+private const val THUMBNAIL_MAX_SPLATS = 40_000
+
+private data class ProjectedSplat(
+    val u: Float, val v: Float,
+    val z: Float,
+    val radius: Float,
+    val r: Float, val g: Float, val b: Float, val a: Float
+)
+
+private fun generateGaussianThumbnail(
+    context: Context,
+    uriString: String,
+    width: Int,
+    height: Int
+): Bitmap? {
+    return runCatching {
+        val scene = GaussianSceneLoader.loadScene(
+            context = context,
+            uriString = uriString
+        ) ?: return null
+
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        val bgR = (scene.backgroundR * 255).toInt().coerceIn(0, 255)
+        val bgG = (scene.backgroundG * 255).toInt().coerceIn(0, 255)
+        val bgB = (scene.backgroundB * 255).toInt().coerceIn(0, 255)
+        canvas.drawColor(android.graphics.Color.rgb(bgR, bgG, bgB))
+
+        val count = scene.count
+        val step = (count / THUMBNAIL_MAX_SPLATS).coerceAtLeast(1)
+        val imageW = scene.imageWidth.coerceAtLeast(1).toFloat()
+        val imageH = scene.imageHeight.coerceAtLeast(1).toFloat()
+        val focal = scene.focalLengthPx
+        val thumbW = width.toFloat()
+        val thumbH = height.toFloat()
+
+        // Uniform scale with letterbox/pillarbox, matching drawGaussianPoints approach
+        val imageAspect = imageW / imageH
+        val thumbAspect = thumbW / thumbH
+        val (fillX, fillY) = if (imageAspect > thumbAspect) {
+            imageAspect / thumbAspect to 1f
+        } else {
+            1f to thumbAspect / imageAspect
+        }
+        val uniformScale = minOf(thumbW / imageW, thumbH / imageH)
+        val offsetU = (thumbW - imageW * uniformScale) * 0.5f
+        val offsetV = (thumbH - imageH * uniformScale) * 0.5f
+
+        val splats = ArrayList<ProjectedSplat>(count / step)
+        for (i in 0 until count step step) {
+            val px = scene.positions[i * 3]
+            val py = scene.positions[i * 3 + 1]
+            val pz = scene.positions[i * 3 + 2]
+            if (pz <= 0.01f) continue
+
+            val a = scene.colors[i * 4 + 3]
+            if (a < 0.015f) continue
+
+            val sx = scene.scales[i * 3]
+            val sy = scene.scales[i * 3 + 1]
+            val sz = scene.scales[i * 3 + 2]
+
+            val projX = px / pz
+            val projY = py / pz
+            val u = ((projX * focal) + imageW * 0.5f) * uniformScale + offsetU
+            val v = ((projY * focal) + imageH * 0.5f) * uniformScale + offsetV
+            val rad = maxOf(sx, sy, sz, 0.0006f) * focal / pz * uniformScale * 2.2f
+
+            splats += ProjectedSplat(
+                u, v, pz, rad,
+                scene.colors[i * 4], scene.colors[i * 4 + 1], scene.colors[i * 4 + 2], a
+            )
+        }
+
+        splats.sortByDescending { it.z }
+
+        val paint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
+        for (splat in splats) {
+            val alpha = (splat.a * 255).toInt().coerceIn(0, 255)
+            if (alpha < 2) continue
+            paint.color = android.graphics.Color.argb(
+                alpha,
+                (splat.r * 255).toInt().coerceIn(0, 255),
+                (splat.g * 255).toInt().coerceIn(0, 255),
+                (splat.b * 255).toInt().coerceIn(0, 255)
+            )
+            canvas.drawCircle(splat.u, splat.v, splat.radius.coerceAtLeast(0.6f), paint)
+        }
+
+        bitmap
+    }.getOrNull()
+}
+
+private fun generateMeshThumbnail(
+    context: Context,
+    uriString: String,
+    width: Int,
+    height: Int
+): Bitmap? {
+    // Mesh software rendering not yet implemented; returns null to show placeholder.
+    return null
 }
