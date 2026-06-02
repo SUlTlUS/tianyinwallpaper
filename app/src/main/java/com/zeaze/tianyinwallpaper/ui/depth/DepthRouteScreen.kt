@@ -83,7 +83,6 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.service.DepthWallpaperService
-import com.zeaze.tianyinwallpaper.utils.DepthImageProcessor
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import kotlinx.coroutines.Dispatchers
@@ -92,9 +91,7 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 
 private enum class DepthAddKind {
-    Photo,
-    Gaussian,
-    Mesh
+    Gaussian
 }
 
 private const val DEPTH_BLUR_DISABLED = 0f
@@ -126,13 +123,18 @@ fun DepthRouteScreen(
 
     var activeId by remember { mutableStateOf(pref.getString(DepthPrefs.PREF_DEPTH_ACTIVE_ID, null)) }
     var showAddDialog by remember { mutableStateOf(false) }
-    var pendingAddKind by remember { mutableStateOf(DepthAddKind.Photo) }
+    var pendingAddKind by remember { mutableStateOf(DepthAddKind.Gaussian) }
     var pendingReplaceId by remember { mutableStateOf<String?>(null) }
     var previewModel by remember { mutableStateOf<DepthWallpaperModel?>(null) }
     var showPermissionDialog by remember { mutableStateOf(false) }
 
     fun DepthWallpaperModel.normalizedDepthParams(): DepthWallpaperModel {
         return copy(
+            gaussianRenderMode = if (gaussianRenderMode == "web") "web" else "native",
+            cameraZoom = if (cameraZoom > 0f) cameraZoom.coerceIn(0.6f, 10f) else 1f,
+            centerOffsetX = centerOffsetX.coerceIn(-2.5f, 2.5f),
+            centerOffsetY = centerOffsetY.coerceIn(-2.5f, 2.5f),
+            focusDepth = if (focusDepth.isFinite()) focusDepth.coerceIn(-1f, 1f) else 0.25f,
             blurStrength = DEPTH_BLUR_DISABLED
         )
     }
@@ -170,13 +172,10 @@ fun DepthRouteScreen(
             if (index >= 0) {
                 val old = wallpapers[index]
                 val next = old.copy(
-                    imageUri = if (kind == DepthAddKind.Photo) uri.toString() else "",
-                    gaussianUri = if (kind == DepthAddKind.Gaussian) uri.toString() else "",
-                    meshUri = if (kind == DepthAddKind.Mesh) uri.toString() else "",
+                    gaussianUri = uri.toString(),
                     displayName = displayName.ifBlank { uri.lastPathSegment.orEmpty() },
                     blurStrength = DEPTH_BLUR_DISABLED
                 ).normalizedDepthParams()
-                DepthImageProcessor.deleteCacheFor(context, old)
                 wallpapers[index] = next
                 activeId = next.id
                 previewModel = next
@@ -188,13 +187,16 @@ fun DepthRouteScreen(
         }
         val model = DepthWallpaperModel(
             id = UUID.randomUUID().toString(),
-            imageUri = if (kind == DepthAddKind.Photo) uri.toString() else "",
-            gaussianUri = if (kind == DepthAddKind.Gaussian) uri.toString() else "",
-            meshUri = if (kind == DepthAddKind.Mesh) uri.toString() else "",
+            gaussianUri = uri.toString(),
             displayName = displayName.ifBlank { uri.lastPathSegment.orEmpty() },
             createdAt = System.currentTimeMillis(),
-            sensorSensitivity = if (kind == DepthAddKind.Gaussian) 9f else 4.5f,
-            parallaxStrength = if (kind == DepthAddKind.Gaussian) 0.075f else 0.045f,
+            sensorSensitivity = 9f,
+            parallaxStrength = 0.075f,
+            gaussianRenderMode = "native",
+            cameraZoom = 1f,
+            centerOffsetX = 0f,
+            centerOffsetY = 0f,
+            focusDepth = 0.25f,
             blurStrength = DEPTH_BLUR_DISABLED
         ).normalizedDepthParams()
         wallpapers.add(0, model)
@@ -237,27 +239,23 @@ fun DepthRouteScreen(
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val kind = pendingAddKind
-            if (kind == DepthAddKind.Gaussian) {
-                coroutineScope.launch {
-                    Toast.makeText(context, "Loading Gaussian SOG", Toast.LENGTH_SHORT).show()
-                    val result = withContext(Dispatchers.IO) {
-                        GaussianSceneLoader.loadSceneDetailed(
-                            context = context.applicationContext,
-                            uriString = uri.toString()
-                        )
-                    }
-                    if (result.scene != null) {
-                        addWallpaper(uri, kind)
-                    } else {
-                        Toast.makeText(
-                            context,
-                            result.error?.takeIf { it.isNotBlank() } ?: "Gaussian SOG load failed",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
+            coroutineScope.launch {
+                Toast.makeText(context, "Loading Gaussian SOG", Toast.LENGTH_SHORT).show()
+                val result = withContext(Dispatchers.IO) {
+                    GaussianSceneLoader.loadSceneDetailed(
+                        context = context.applicationContext,
+                        uriString = uri.toString()
+                    )
                 }
-            } else {
-                addWallpaper(uri, kind)
+                if (result.scene != null) {
+                    addWallpaper(uri, kind)
+                } else {
+                    Toast.makeText(
+                        context,
+                        result.error?.takeIf { it.isNotBlank() } ?: "Gaussian SOG load failed",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
     }
@@ -266,31 +264,18 @@ fun DepthRouteScreen(
         pendingReplaceId = null
         pendingAddKind = kind
         showAddDialog = false
-        filePicker.launch(
-            when (kind) {
-                DepthAddKind.Photo -> arrayOf("image/*")
-                DepthAddKind.Gaussian,
-                DepthAddKind.Mesh -> arrayOf("*/*")
-            }
-        )
+        filePicker.launch(arrayOf("*/*"))
     }
 
     fun replacePreview(kind: DepthAddKind) {
         val target = previewModel ?: return
         pendingReplaceId = target.id
         pendingAddKind = kind
-        filePicker.launch(
-            when (kind) {
-                DepthAddKind.Photo -> arrayOf("image/*")
-                DepthAddKind.Gaussian,
-                DepthAddKind.Mesh -> arrayOf("*/*")
-            }
-        )
+        filePicker.launch(arrayOf("*/*"))
     }
 
     fun removeWallpaper(model: DepthWallpaperModel) {
         wallpapers.removeAll { it.id == model.id }
-        DepthImageProcessor.deleteCacheFor(context, model)
         if (activeId == model.id) {
             activeId = wallpapers.firstOrNull()?.id
         }
@@ -380,7 +365,7 @@ fun DepthRouteScreen(
 
         if (wallpapers.isEmpty()) {
             Text(
-                text = "Tap + to add a depth wallpaper",
+                text = "Tap + to add a Gaussian wallpaper",
                 color = contentColor.copy(alpha = 0.7f),
                 modifier = Modifier.align(Alignment.Center)
             )
@@ -441,7 +426,7 @@ fun DepthRouteScreen(
                     saveWallpapers()
                     applyDepthWallpaper()
                 },
-                onPickKind = { replacePreview(it) },
+                onPickGaussian = { replacePreview(DepthAddKind.Gaussian) },
                 onModelChange = { updateWallpaper(it) },
                 modifier = Modifier
                     .fillMaxSize()
@@ -459,12 +444,11 @@ private fun DepthPreviewOverlay(
     accentColor: Color,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
-    onPickKind: (DepthAddKind) -> Unit,
+    onPickGaussian: () -> Unit,
     onModelChange: (DepthWallpaperModel) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val pillBackground = if (MaterialTheme.colors.isLight) Color(0x22FFFFFF) else Color(0x55222222)
-    var previewFps by remember(model.id) { mutableStateOf(60) }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -472,7 +456,7 @@ private fun DepthPreviewOverlay(
     ) {
         DepthPreviewView(
             model = model,
-            previewFps = previewFps,
+            onModelChange = onModelChange,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -499,40 +483,23 @@ private fun DepthPreviewOverlay(
 
         DepthParamPanel(
             model = model,
-            previewFps = previewFps,
-            onPreviewFpsChange = { previewFps = it },
             onModelChange = onModelChange,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(start = 16.dp, end = 16.dp, bottom = 78.dp)
         )
 
-        Row(
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(bottom = 24.dp)
         ) {
             DepthPreviewKindPill(
-                text = "图片景深",
-                selected = !model.isGaussian() && !model.isMesh(),
-                contentColor = contentColor,
-                accentColor = accentColor,
-                onClick = { onPickKind(DepthAddKind.Photo) }
-            )
-            DepthPreviewKindPill(
                 text = "Gaussian",
-                selected = model.isGaussian(),
+                selected = true,
                 contentColor = contentColor,
                 accentColor = accentColor,
-                onClick = { onPickKind(DepthAddKind.Gaussian) }
-            )
-            DepthPreviewKindPill(
-                text = "Mesh",
-                selected = model.isMesh(),
-                contentColor = contentColor,
-                accentColor = accentColor,
-                onClick = { onPickKind(DepthAddKind.Mesh) }
+                onClick = onPickGaussian
             )
         }
     }
@@ -541,8 +508,6 @@ private fun DepthPreviewOverlay(
 @Composable
 private fun DepthParamPanel(
     model: DepthWallpaperModel,
-    previewFps: Int,
-    onPreviewFpsChange: (Int) -> Unit,
     onModelChange: (DepthWallpaperModel) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -568,63 +533,84 @@ private fun DepthParamPanel(
             range = 0.001f..0.075f,
             onValueChange = { onModelChange(model.copy(parallaxStrength = it)) }
         )
-        DepthFpsToggle(
-            value = previewFps,
-            onValueChange = onPreviewFpsChange
-        )
-    }
-}
-
-@Composable
-private fun DepthFpsToggle(
-    value: Int,
-    onValueChange: (Int) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "Preview FPS",
-            color = Color.White,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            DepthFpsPill(
-                text = "30",
-                selected = value <= 30,
-                onClick = { onValueChange(30) }
+        if (model.isGaussian()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                DepthPreviewModePill(
+                    text = "Native",
+                    selected = !model.useWebGaussianRenderer(),
+                    onClick = { onModelChange(model.copy(gaussianRenderMode = "native")) },
+                    modifier = Modifier.weight(1f)
+                )
+                DepthPreviewModePill(
+                    text = "WebView",
+                    selected = model.useWebGaussianRenderer(),
+                    onClick = { onModelChange(model.copy(gaussianRenderMode = "web")) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            DepthParamSlider(
+                label = "距离",
+                value = model.cameraZoom,
+                valueText = String.format("%.2f", model.cameraZoom),
+                range = 0.6f..10f,
+                onValueChange = { onModelChange(model.copy(cameraZoom = it)) }
             )
-            DepthFpsPill(
-                text = "60",
-                selected = value > 30,
-                onClick = { onValueChange(60) }
+            DepthParamSlider(
+                label = "注视深度",
+                value = model.focusDepth,
+                valueText = String.format("%.2f", model.focusDepth),
+                range = -1f..1f,
+                onValueChange = { onModelChange(model.copy(focusDepth = it)) }
+            )
+            Text(
+                text = "重置注视点",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0x332A83FF))
+                    .clickable {
+                        onModelChange(
+                            model.copy(
+                                centerOffsetX = 0f,
+                                centerOffsetY = 0f,
+                                focusDepth = 0.25f
+                            )
+                        )
+                    }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
             )
         }
     }
 }
 
 @Composable
-private fun DepthFpsPill(
+private fun DepthPreviewModePill(
     text: String,
     selected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Text(
-        text = text,
-        color = Color.White,
-        fontSize = 13.sp,
-        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-        modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) Color(0x662A83FF) else Color(0x22000000))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-    )
+    Box(
+        modifier = modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (selected) Color(0xAA2A83FF) else Color(0x33000000))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+        )
+    }
 }
 
 @Composable
@@ -760,40 +746,15 @@ private fun DepthWallpaperThumbnail(
     cardBackground: Color
 ) {
     val context = LocalContext.current
-    val contentKey = remember(model) {
-        when {
-            model.isGaussian() -> model.gaussianUri
-            model.isMesh() -> model.meshUri
-            else -> model.imageUri
-        }
-    }
+    val contentKey = remember(model) { model.gaussianUri }
 
     val bitmap by produceState<Bitmap?>(initialValue = null, model.id, contentKey) {
-        value = when {
-            model.isGaussian() && model.gaussianUri.isNotBlank() -> {
-                withContext(Dispatchers.IO) {
-                    generateGaussianThumbnail(context, model.gaussianUri, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
-                }
+        value = if (model.gaussianUri.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                generateGaussianThumbnail(context, model.gaussianUri, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
             }
-            model.isMesh() && model.meshUri.isNotBlank() -> {
-                withContext(Dispatchers.IO) {
-                    generateMeshThumbnail(context, model.meshUri, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
-                }
-            }
-            model.imageUri.isBlank() -> null
-            else -> {
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        val options = BitmapFactory.Options().apply {
-                            inPreferredConfig = Bitmap.Config.RGB_565
-                            inSampleSize = 2
-                        }
-                        context.contentResolver.openInputStream(Uri.parse(model.imageUri))?.use {
-                            BitmapFactory.decodeStream(it, null, options)
-                        }
-                    }.getOrNull()
-                }
-            }
+        } else {
+            null
         }
     }
 
@@ -818,11 +779,7 @@ private fun DepthWallpaperThumbnail(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 BasicText(
-                    text = when {
-                        model.isGaussian() -> "G"
-                        model.isMesh() -> "M"
-                        else -> "P"
-                    },
+                    text = "G",
                     style = TextStyle(
                         color = Color.White.copy(alpha = 0.4f),
                         fontSize = 32.sp,
@@ -896,9 +853,7 @@ private fun DepthAddDialog(
                         style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold)
                     )
                     Spacer(Modifier.height(4.dp))
-                    DialogButton("图片景深", accentColor, Color.White) { onPick(DepthAddKind.Photo) }
                     DialogButton("Gaussian SOG", accentColor, Color.White) { onPick(DepthAddKind.Gaussian) }
-                    DialogButton("Mesh PLY", accentColor, Color.White) { onPick(DepthAddKind.Mesh) }
                     Spacer(Modifier.height(4.dp))
                     DialogButton("取消", containerColor.copy(0.2f), contentColor) { onDismiss() }
                 }
@@ -929,11 +884,7 @@ private fun DialogButton(
 }
 
 private fun DepthWallpaperModel.typeLabel(): String {
-    return when {
-        isMesh() -> "Mesh"
-        isGaussian() -> "Gaussian"
-        else -> "Photo"
-    }
+    return "Gaussian"
 }
 
 private fun queryDisplayName(context: Context, uri: Uri): String? {
@@ -1051,12 +1002,3 @@ private fun generateGaussianThumbnail(
     }.getOrNull()
 }
 
-private fun generateMeshThumbnail(
-    context: Context,
-    uriString: String,
-    width: Int,
-    height: Int
-): Bitmap? {
-    // Mesh software rendering not yet implemented; returns null to show placeholder.
-    return null
-}

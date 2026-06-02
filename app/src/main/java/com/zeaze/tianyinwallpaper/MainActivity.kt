@@ -90,7 +90,6 @@ import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
 import com.zeaze.tianyinwallpaper.ui.raster.RasterRouteScreen
 import com.zeaze.tianyinwallpaper.ui.test.CorrugatedTestRouteScreen
-import com.zeaze.tianyinwallpaper.ui.test.DepthModelTestRouteScreen
 import com.zeaze.tianyinwallpaper.ui.test.PlyModelTestRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
@@ -136,7 +135,6 @@ class MainActivity : BaseActivity() {
         private const val ROUTE_DEPTH = "depth"
         private const val ROUTE_SETTING = "setting"
         private const val ROUTE_CORRUGATED_TEST = "corrugated_test"
-        private const val ROUTE_DEPTH_MODEL_TEST = "depth_model_test"
         private const val ROUTE_PLY_MODEL_TEST = "ply_model_test"
         const val PREF_THEME_MODE = "themeMode"
         const val THEME_MODE_FOLLOW_SYSTEM = 0
@@ -316,7 +314,6 @@ class MainActivity : BaseActivity() {
                             },
                             onOpenAppInfo = { openAppInfoPage() },
                             onOpenCorrugatedTest = { openCorrugatedTestPage() },
-                            onOpenDepthModelTest = { openDepthModelTestPage() },
                             onOpenPlyModelTest = { openPlyModelTestPage() }
                         )
                     }
@@ -355,23 +352,6 @@ class MainActivity : BaseActivity() {
                         }
                     ) {
                         CorrugatedTestRouteScreen(useDarkTheme = useDarkTheme)
-                    }
-                    composable(
-                        route = ROUTE_DEPTH_MODEL_TEST,
-                        enterTransition = {
-                            slideIntoContainer(
-                                AnimatedContentTransitionScope.SlideDirection.Left,
-                                animationSpec = tween(280)
-                            )
-                        },
-                        popExitTransition = {
-                            slideOutOfContainer(
-                                AnimatedContentTransitionScope.SlideDirection.Right,
-                                animationSpec = tween(280)
-                            )
-                        }
-                    ) {
-                        DepthModelTestRouteScreen(useDarkTheme = useDarkTheme)
                     }
                     composable(
                         route = ROUTE_PLY_MODEL_TEST,
@@ -723,10 +703,6 @@ class MainActivity : BaseActivity() {
 
     fun openCorrugatedTestPage() {
         pendingRoute = ROUTE_CORRUGATED_TEST
-    }
-
-    fun openDepthModelTestPage() {
-        pendingRoute = ROUTE_DEPTH_MODEL_TEST
     }
 
     fun openPlyModelTestPage() {

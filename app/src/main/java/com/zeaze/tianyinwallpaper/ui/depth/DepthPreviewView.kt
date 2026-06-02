@@ -1,13 +1,13 @@
 package com.zeaze.tianyinwallpaper.ui.depth
 
 import android.content.Context
-import android.graphics.SurfaceTexture
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.view.Surface
-import android.view.TextureView
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -20,7 +20,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,92 +29,153 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
-import com.zeaze.tianyinwallpaper.utils.DepthImageProcessor
+import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
-import com.zeaze.tianyinwallpaper.utils.PhotoMeshPlyLoader
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.exp
 
-/**
- * Depth wallpaper preview view copied from RasterPreviewView and adapted for DepthGLRenderer.
- *
- * Supported content:
- * - Photo + generated depth map
- * - Gaussian splat SOG
- * - 3D-photo mesh PLY
- */
 @Composable
 fun DepthPreviewView(
     model: DepthWallpaperModel?,
     previewFps: Int = 60,
+    onModelChange: (DepthWallpaperModel) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    if (model?.isGaussian() == true && model.gaussianUri.isNotBlank()) {
+        if (model.useWebGaussianRenderer()) {
+            SuperSplatWebView(
+                uriString = model.gaussianUri,
+                sensorSensitivity = model.sensorSensitivity,
+                parallaxStrength = model.parallaxStrength,
+                cameraZoom = model.cameraZoom,
+                centerOffsetX = model.centerOffsetX,
+                centerOffsetY = model.centerOffsetY,
+                focusDepth = model.focusDepth,
+                previewFps = previewFps,
+                onCenterOffsetChange = { x, y ->
+                    onModelChange(model.copy(centerOffsetX = x, centerOffsetY = y))
+                },
+                modifier = modifier.fillMaxSize()
+            )
+        } else {
+            NativeGaussianPreviewView(
+                model = model,
+                previewFps = previewFps,
+                modifier = modifier.fillMaxSize()
+            )
+        }
+        return
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colors.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "No Gaussian wallpaper selected",
+            color = MaterialTheme.colors.onBackground.copy(alpha = 0.7f),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun NativeGaussianPreviewView(
+    model: DepthWallpaperModel,
+    previewFps: Int,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-
     val renderer = remember { DepthGLRenderer() }
+    var scene by remember(model.gaussianUri) { mutableStateOf<GaussianPlyLoader.GaussianScene?>(null) }
 
-    var textureView by remember { mutableStateOf<TextureView?>(null) }
-    var isRendererStarted by remember { mutableStateOf(false) }
-
-    LaunchedEffect(
-        isRendererStarted,
-        model?.id,
-        model?.parallaxStrength,
-        model?.isMesh()
-    ) {
-        val target = model
-        if (isRendererStarted && target != null) {
-            renderer.updateParams(target.renderParallaxStrength(), 0f)
+    DisposableEffect(Unit) {
+        onDispose {
+            renderer.stopAndWait(300)
         }
     }
 
-    LaunchedEffect(
-        isRendererStarted,
-        model?.id,
-        model?.imageUri,
-        model?.gaussianUri,
-        model?.meshUri
-    ) {
-        val target = model
-        if (isRendererStarted && target != null) {
-            coroutineScope.launch {
-                withContext(Dispatchers.IO) {
-                    renderer.loadFromDepthModel(context, target, textureView)
-                }
+    LaunchedEffect(model.gaussianUri) {
+        scene = withContext(Dispatchers.IO) {
+            GaussianSceneLoader.loadScene(
+                context = context.applicationContext,
+                uriString = model.gaussianUri,
+                maxSplats = 1_500_000,
+                viewportAspect = context.resources.displayMetrics.widthPixels.toFloat() /
+                    context.resources.displayMetrics.heightPixels.coerceAtLeast(1).toFloat()
+            )
+        }
+        scene?.let { renderer.loadGaussians(it) }
+    }
+
+    LaunchedEffect(model.parallaxStrength, model.cameraZoom, model.centerOffsetX, model.centerOffsetY, model.focusDepth) {
+        renderer.updateParams(model.parallaxStrength, 0f)
+        renderer.updateGaussianParams(model.nativePreviewParams())
+        renderer.requestRender()
+    }
+
+    AndroidView(
+        factory = { viewContext ->
+            SurfaceView(viewContext).apply {
+                holder.addCallback(object : SurfaceHolder.Callback {
+                    override fun surfaceCreated(holder: SurfaceHolder) = Unit
+
+                    override fun surfaceChanged(
+                        holder: SurfaceHolder,
+                        format: Int,
+                        width: Int,
+                        height: Int
+                    ) {
+                        renderer.start(holder.surface)
+                        renderer.resize(width, height)
+                        renderer.updateParams(model.parallaxStrength, 0f)
+                        renderer.updateGaussianParams(model.nativePreviewParams())
+                        scene?.let { renderer.loadGaussians(it) }
+                    }
+
+                    override fun surfaceDestroyed(holder: SurfaceHolder) {
+                        renderer.stopAndWait(300)
+                    }
+                })
             }
-        }
-    }
+        },
+        update = {
+            renderer.updateParams(model.parallaxStrength, 0f)
+            renderer.updateGaussianParams(model.nativePreviewParams())
+        },
+        modifier = modifier
+    )
 
-    DisposableEffect(context, model?.sensorSensitivity, model?.isMesh(), previewFps) {
+    DisposableEffect(context, model.sensorSensitivity, previewFps) {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
         val gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val sensorSensitivity = model?.renderSensorSensitivity() ?: 4.5f
-        val gyroScale = 2.5f * (sensorSensitivity.coerceIn(1f, 9f) / 4.5f)
-        val minDispatchIntervalNs = if (previewFps <= 30) {
-            33_000_000L
-        } else {
-            16_000_000L
-        }
+        val gyroScale = 2.5f * (model.sensorSensitivity.coerceIn(1f, 9f) / 4.5f)
+        val minDispatchIntervalNs = if (previewFps <= 30) 33_000_000L else 16_000_000L
         var lastTimestamp = 0L
         var lastDispatchTimestamp = 0L
         var tiltX = 0f
         var tiltY = 0f
+        var filteredTiltX = 0f
+        var filteredTiltY = 0f
+        var filterInitialized = false
+        var lastFilterTimestamp = 0L
 
-        val sensorListener = object : SensorEventListener {
+        val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent?) {
                 if (event == null) return
                 val now = event.timestamp
+                @Suppress("DEPRECATION")
+                val displayRotation = windowManager.defaultDisplay.rotation
                 val dt = if (lastTimestamp == 0L) 0f else (now - lastTimestamp) / 1_000_000_000f
                 lastTimestamp = now
                 if (dt <= 0f || dt > 0.5f) return
 
-                @Suppress("DEPRECATION")
-                val rotation = windowManager.defaultDisplay.rotation
-                val (gx, gy) = when (rotation) {
+                val (gx, gy) = when (displayRotation) {
                     Surface.ROTATION_90 -> -event.values[1] to event.values[0]
                     Surface.ROTATION_180 -> -event.values[0] to -event.values[1]
                     Surface.ROTATION_270 -> event.values[1] to -event.values[0]
@@ -124,148 +184,46 @@ fun DepthPreviewView(
 
                 tiltX = (tiltX + gy * dt * gyroScale).coerceIn(-1f, 1f)
                 tiltY = (tiltY + gx * dt * gyroScale).coerceIn(-1f, 1f)
-                if (lastDispatchTimestamp != 0L && now - lastDispatchTimestamp < minDispatchIntervalNs) {
-                    return
-                }
-                lastDispatchTimestamp = now
-                if (model?.isMesh() == true) {
-                    renderer.updateTilt(tiltY, tiltX)
+                val filterDt = if (lastFilterTimestamp == 0L) 0f else ((now - lastFilterTimestamp) / 1_000_000_000f).coerceIn(0f, 0.1f)
+                lastFilterTimestamp = now
+                if (!filterInitialized) {
+                    filteredTiltX = tiltX
+                    filteredTiltY = tiltY
+                    filterInitialized = true
                 } else {
-                    renderer.updateTilt(tiltX, tiltY)
+                    val alpha = (1f - exp((-filterDt / 0.12f).toDouble()).toFloat()).coerceIn(0.08f, 0.45f)
+                    filteredTiltX += (tiltX - filteredTiltX) * alpha
+                    filteredTiltY += (tiltY - filteredTiltY) * alpha
                 }
+                if (lastDispatchTimestamp != 0L && now - lastDispatchTimestamp < minDispatchIntervalNs) return
+                lastDispatchTimestamp = now
+                renderer.updateTilt(filteredTiltX, filteredTiltY)
             }
 
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
         }
 
+        renderer.updateTilt(0f, 0f)
         if (gyroSensor != null) {
-            sensorManager.registerListener(
-                sensorListener,
-                gyroSensor,
-                SensorManager.SENSOR_DELAY_GAME
-            )
+            sensorManager.registerListener(listener, gyroSensor, SensorManager.SENSOR_DELAY_GAME)
         }
-
         onDispose {
-            sensorManager.unregisterListener(sensorListener)
-        }
-    }
-
-    Box(modifier = modifier.fillMaxSize()) {
-        AndroidView(
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                        override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                            renderer.start(Surface(surface))
-                            renderer.resize(width, height)
-                            isRendererStarted = true
-                            coroutineScope.launch {
-                                withContext(Dispatchers.IO) {
-                                    model?.let { renderer.loadFromDepthModel(context, it, textureView) }
-                                }
-                            }
-                        }
-
-                        override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                            renderer.resize(width, height)
-                            renderer.requestRender()
-                        }
-
-                        override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                            isRendererStarted = false
-                            renderer.stopAndWait(500)
-                            return true
-                        }
-
-                        override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-                    }
-                }.also { textureView = it }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        if (!isRendererStarted || model == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colors.background),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = if (model == null) "No active depth wallpaper" else "Loading depth wallpaper",
-                    color = MaterialTheme.colors.onBackground.copy(alpha = 0.7f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+            sensorManager.unregisterListener(listener)
         }
     }
 }
 
-private fun DepthGLRenderer.loadFromDepthModel(
-    context: Context,
-    model: DepthWallpaperModel,
-    textureView: TextureView?
-) {
-    updateParams(model.renderParallaxStrength(), 0f)
-    when {
-        model.isGaussian() -> {
-            val scene = GaussianSceneLoader.loadScene(
-                context = context,
-                uriString = model.gaussianUri,
-                viewportAspect = textureView.viewportAspect()
-            )
-            if (scene != null) {
-                loadGaussians(scene)
-            }
-        }
-        model.isMesh() -> {
-            val lods = PhotoMeshPlyLoader.loadSceneLods(
-                context = context,
-                uriString = model.meshUri,
-                fullFaces = PhotoMeshPlyLoader.MAX_FACE_LIMIT,
-                motionFaces = PhotoMeshPlyLoader.MOTION_LOD_FACE_LIMIT,
-                lowFaces = PhotoMeshPlyLoader.LOW_LOD_FACE_LIMIT
-            )
-            if (lods != null) {
-                loadMeshLods(lods)
-            }
-        }
-        else -> {
-            val layeredTextures = DepthImageProcessor.loadLayeredTextureSet(
-                context = context,
-                model = model,
-                targetWidth = (textureView?.width ?: 720).coerceAtLeast(1) * 2,
-                targetHeight = (textureView?.height ?: 1280).coerceAtLeast(1) * 2
-            )
-            if (layeredTextures != null) {
-                loadLayeredTextures(layeredTextures)
-            } else {
-                val textures = DepthImageProcessor.loadTextureSet(
-                    context = context,
-                    model = model,
-                    targetWidth = (textureView?.width ?: 720).coerceAtLeast(1) * 2,
-                    targetHeight = (textureView?.height ?: 1280).coerceAtLeast(1) * 2
-                )
-                if (textures != null) {
-                    loadTextures(textures)
-                }
-            }
-        }
-    }
-}
-
-private fun TextureView?.viewportAspect(): Float {
-    val width = this?.width?.takeIf { it > 0 } ?: 9
-    val height = this?.height?.takeIf { it > 0 } ?: 16
-    return width.toFloat() / height.toFloat()
-}
-
-private fun DepthWallpaperModel.renderParallaxStrength(): Float {
-    return parallaxStrength
-}
-
-private fun DepthWallpaperModel.renderSensorSensitivity(): Float {
-    return sensorSensitivity
+private fun DepthWallpaperModel.nativePreviewParams(): DepthGLRenderer.GaussianRenderParams {
+    return DepthGLRenderer.GaussianRenderParams(
+        splatScale = 1.05f,
+        globalOpacity = 1.0f,
+        alphaFalloff = 1.0f,
+        minPointSize = 0.5f,
+        maxPointSize = 120f,
+        cameraZoom = cameraZoom,
+        centerOffsetX = centerOffsetX,
+        centerOffsetY = centerOffsetY,
+        focusDepthOffset = focusDepth,
+        useLayerCache = false
+    )
 }

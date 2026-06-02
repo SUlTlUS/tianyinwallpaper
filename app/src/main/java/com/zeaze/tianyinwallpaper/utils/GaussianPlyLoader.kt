@@ -37,7 +37,13 @@ object GaussianPlyLoader {
         val auxiliarySplatCount: Int,
         val backgroundR: Float,
         val backgroundG: Float,
-        val backgroundB: Float
+        val backgroundB: Float,
+        val sceneCenterX: Float = 0f,
+        val sceneCenterY: Float = 0f,
+        val sceneCenterZ: Float = 1f,
+        val sceneRadius: Float = 1f,
+        val defaultCameraDistance: Float = 1f,
+        val rotations: FloatBuffer? = null
     )
 
     data class GaussianDepthLayer(
@@ -436,6 +442,7 @@ object GaussianPlyLoader {
         scales.position(0)
 
         val focus = splats[splats.size / 2].z
+        val bounds = computeSceneBounds(splats, imageHeight, focalLengthPx)
         return GaussianScene(
             count = splats.size,
             positions = positions,
@@ -455,8 +462,73 @@ object GaussianPlyLoader {
             auxiliarySplatCount = splats.size - screenVisibleCount,
             backgroundR = (backgroundR / colorWeight.coerceAtLeast(0.0001f)).coerceIn(0f, 1f),
             backgroundG = (backgroundG / colorWeight.coerceAtLeast(0.0001f)).coerceIn(0f, 1f),
-            backgroundB = (backgroundB / colorWeight.coerceAtLeast(0.0001f)).coerceIn(0f, 1f)
+            backgroundB = (backgroundB / colorWeight.coerceAtLeast(0.0001f)).coerceIn(0f, 1f),
+            sceneCenterX = bounds.centerX,
+            sceneCenterY = bounds.centerY,
+            sceneCenterZ = bounds.centerZ,
+            sceneRadius = bounds.radius,
+            defaultCameraDistance = bounds.defaultCameraDistance
         )
+    }
+
+    data class SceneBounds(
+        val centerX: Float,
+        val centerY: Float,
+        val centerZ: Float,
+        val radius: Float,
+        val defaultCameraDistance: Float
+    )
+
+    fun computeSceneBounds(
+        splats: List<GaussianSplat>,
+        imageHeight: Int,
+        focalLengthPx: Float
+    ): SceneBounds {
+        var minX = Float.POSITIVE_INFINITY
+        var minY = Float.POSITIVE_INFINITY
+        var minZ = Float.POSITIVE_INFINITY
+        var maxX = Float.NEGATIVE_INFINITY
+        var maxY = Float.NEGATIVE_INFINITY
+        var maxZ = Float.NEGATIVE_INFINITY
+        splats.forEach { splat ->
+            minX = min(minX, splat.x)
+            minY = min(minY, splat.y)
+            minZ = min(minZ, splat.z)
+            maxX = max(maxX, splat.x)
+            maxY = max(maxY, splat.y)
+            maxZ = max(maxZ, splat.z)
+        }
+        return computeSceneBounds(minX, minY, minZ, maxX, maxY, maxZ, imageHeight, focalLengthPx)
+    }
+
+    fun computeSceneBounds(
+        minX: Float,
+        minY: Float,
+        minZ: Float,
+        maxX: Float,
+        maxY: Float,
+        maxZ: Float,
+        imageHeight: Int,
+        focalLengthPx: Float
+    ): SceneBounds {
+        if (!minX.isFinite() || !minY.isFinite() || !minZ.isFinite() ||
+            !maxX.isFinite() || !maxY.isFinite() || !maxZ.isFinite()
+        ) {
+            return SceneBounds(0f, 0f, 1f, 1f, 1f)
+        }
+        val centerX = (minX + maxX) * 0.5f
+        val centerY = (minY + maxY) * 0.5f
+        val centerZ = (minZ + maxZ) * 0.5f
+        val dx = maxX - centerX
+        val dy = maxY - centerY
+        val dz = maxZ - centerZ
+        val radius = sqrt(dx * dx + dy * dy + dz * dz).coerceAtLeast(0.001f)
+        val safeFocal = focalLengthPx.coerceAtLeast(1f)
+        val safeHeight = imageHeight.coerceAtLeast(1).toFloat()
+        val halfFov = kotlin.math.atan((safeHeight * 0.5f) / safeFocal)
+        val defaultDistance = (radius / kotlin.math.sin(halfFov).coerceAtLeast(0.001f))
+            .coerceAtLeast(radius * 0.02f)
+        return SceneBounds(centerX, centerY, centerZ, radius, defaultDistance)
     }
 
     private fun computeParallaxAnchor(
@@ -693,7 +765,7 @@ object GaussianPlyLoader {
     private const val DEPTH_LAYER_COUNT = 16
     private const val MIN_SPLAT_LIMIT = 10_000
     private const val MAX_SPLAT_LIMIT = 900_000
-    private const val VIEWPORT_KEEP_MARGIN = 1.18f
+    private const val VIEWPORT_KEEP_MARGIN = 2.35f
     private const val ANCHOR_DEPTH_BUCKETS = 128
     private const val ANCHOR_LAYER_WINDOW_BUCKETS = 4
     private const val ANCHOR_MIN_SPLATS = 768

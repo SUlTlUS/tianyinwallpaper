@@ -100,7 +100,6 @@ fun SettingRouteScreen(
     onThemeModeChange: (Int) -> Unit = {},
     onOpenAppInfo: () -> Unit = {},
     onOpenCorrugatedTest: () -> Unit = {},
-    onOpenDepthModelTest: () -> Unit = {},
     onOpenPlyModelTest: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -455,9 +454,6 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
-                    SettingTextItem("景深模型测试页", contentColor) {
-                        onOpenDepthModelTest()
-                    }
                     SettingTextItem("Gaussian SOG 测试页", contentColor) {
                         onOpenPlyModelTest()
                     }

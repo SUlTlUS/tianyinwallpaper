@@ -6,6 +6,8 @@ import java.io.BufferedInputStream
 import java.util.Locale
 
 object GaussianSceneLoader {
+    private val gaussianLoadLock = Any()
+
     data class SceneLoadResult(
         val scene: GaussianPlyLoader.GaussianScene?,
         val error: String? = null
@@ -14,7 +16,7 @@ object GaussianSceneLoader {
     fun loadScene(
         context: Context,
         uriString: String,
-        maxSplats: Int = GaussianPlyLoader.DEFAULT_MAX_SPLATS,
+        maxSplats: Int = GaussianSogLoader.DEFAULT_MAX_SPLATS,
         viewportAspect: Float? = null
     ): GaussianPlyLoader.GaussianScene? = loadSceneDetailed(
         context = context,
@@ -26,14 +28,16 @@ object GaussianSceneLoader {
     fun loadSceneDetailed(
         context: Context,
         uriString: String,
-        maxSplats: Int = GaussianPlyLoader.DEFAULT_MAX_SPLATS,
+        maxSplats: Int = GaussianSogLoader.DEFAULT_MAX_SPLATS,
         viewportAspect: Float? = null
     ): SceneLoadResult {
         if (!prefersSog(context, uriString)) {
             return SceneLoadResult(scene = null, error = "Gaussian PLY 已移除，请先转换为 SOG")
         }
         return runCatching {
-            GaussianSogLoader.loadSceneOrThrow(context, uriString, maxSplats, viewportAspect)
+            synchronized(gaussianLoadLock) {
+                GaussianSogLoader.loadSceneOrThrow(context, uriString, maxSplats, viewportAspect)
+            }
         }.fold(
             onSuccess = { SceneLoadResult(scene = it) },
             onFailure = { SceneLoadResult(scene = null, error = "SOG: ${it.message ?: it.javaClass.simpleName}") }

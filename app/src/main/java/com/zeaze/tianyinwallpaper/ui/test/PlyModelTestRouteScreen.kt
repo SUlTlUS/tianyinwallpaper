@@ -51,9 +51,7 @@ import com.kyant.shapes.Capsule
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
-import com.zeaze.tianyinwallpaper.utils.PhotoMeshPlyLoader
-import java.io.InputStreamReader
-import java.nio.charset.StandardCharsets
+import com.zeaze.tianyinwallpaper.utils.GaussianSogLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -72,13 +70,10 @@ fun PlyModelTestRouteScreen(
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var displayName by remember { mutableStateOf("") }
     var gaussianScene by remember { mutableStateOf<GaussianPlyLoader.GaussianScene?>(null) }
-    var meshScene by remember { mutableStateOf<PhotoMeshPlyLoader.MeshScene?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
-    var maxSplats by remember { mutableStateOf(GaussianPlyLoader.DEFAULT_MAX_SPLATS) }
-    var maxSplatsSlider by remember { mutableStateOf(GaussianPlyLoader.DEFAULT_MAX_SPLATS.toFloat()) }
-    var maxFaces by remember { mutableStateOf(PhotoMeshPlyLoader.DEFAULT_MAX_FACES) }
-    var maxFacesSlider by remember { mutableStateOf(PhotoMeshPlyLoader.DEFAULT_MAX_FACES.toFloat()) }
+    var maxSplats by remember { mutableStateOf(GaussianSogLoader.DEFAULT_MAX_SPLATS) }
+    var maxSplatsSlider by remember { mutableStateOf(GaussianSogLoader.DEFAULT_MAX_SPLATS.toFloat()) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -92,48 +87,25 @@ fun PlyModelTestRouteScreen(
         displayName = queryDisplayName(context, uri).orEmpty()
     }
 
-    LaunchedEffect(selectedUri, maxSplats, maxFaces) {
+    LaunchedEffect(selectedUri, maxSplats) {
         val uri = selectedUri ?: return@LaunchedEffect
         isLoading = true
         errorText = null
         gaussianScene = null
-        meshScene = null
-        val loadAttempt = withContext(Dispatchers.IO) {
-            when (detectPlyKind(context.applicationContext, uri)) {
-                PlyKind.Mesh -> LoadAttempt(PhotoMeshPlyLoader.loadScene(
-                    context = context.applicationContext,
-                    uriString = uri.toString(),
-                    maxFaces = maxFaces
-                )?.let { PlyLoadResult.Mesh(it) })
-                PlyKind.Gaussian -> LoadAttempt(null, "Gaussian PLY 已移除，请先转换为 SOG")
-                PlyKind.Sog -> GaussianSceneLoader.loadSceneDetailed(
-                    context = context.applicationContext,
-                    uriString = uri.toString(),
-                    maxSplats = maxSplats,
-                    viewportAspect = PLY_PREVIEW_ASPECT
-                ).let { result ->
-                    LoadAttempt(result.scene?.let { PlyLoadResult.Gaussian(it) }, result.error)
-                }
-                PlyKind.Unknown -> {
-                    PhotoMeshPlyLoader.loadScene(
-                        context = context.applicationContext,
-                        uriString = uri.toString(),
-                        maxFaces = maxFaces
-                    )?.let { LoadAttempt(PlyLoadResult.Mesh(it)) }
-                        ?: LoadAttempt(null, "未识别为 SOG 或 Mesh PLY")
-                }
-            }
+        val result = withContext(Dispatchers.IO) {
+            GaussianSceneLoader.loadSceneDetailed(
+                context = context.applicationContext,
+                uriString = uri.toString(),
+                maxSplats = maxSplats,
+                viewportAspect = SOG_PREVIEW_ASPECT
+            )
         }
         isLoading = false
-        val loaded = loadAttempt.result
-        if (loaded == null) {
-            errorText = "SOG/Mesh 读取或解析失败，请确认文件包含 SOG 或 SHARP mesh 数据"
-            errorText = loadAttempt.error?.takeIf { it.isNotBlank() } ?: errorText
+        if (result.scene != null) {
+            gaussianScene = result.scene
         } else {
-            when (loaded) {
-                is PlyLoadResult.Gaussian -> gaussianScene = loaded.scene
-                is PlyLoadResult.Mesh -> meshScene = loaded.scene
-            }
+            errorText = result.error?.takeIf { it.isNotBlank() }
+                ?: "SOG 读取或解析失败，请确认文件包含 Gaussian SOG 数据"
         }
     }
 
@@ -186,20 +158,6 @@ fun PlyModelTestRouteScreen(
                 }
             )
 
-            MeshFaceLimitCard(
-                maxFaces = maxFaces,
-                sliderValue = maxFacesSlider,
-                enabled = selectedUri != null && !isLoading,
-                panelColor = panelColor,
-                contentColor = contentColor,
-                onSliderChange = { maxFacesSlider = it },
-                onCommit = {
-                    val nextLimit = quantizeFaceLimit(maxFacesSlider)
-                    maxFacesSlider = nextLimit.toFloat()
-                    maxFaces = nextLimit
-                }
-            )
-
             if (isLoading) {
                 LoadingCard(panelColor, contentColor, accentColor)
             }
@@ -219,21 +177,6 @@ fun PlyModelTestRouteScreen(
 
             gaussianScene?.let { loadedScene ->
                 GaussianPreviewCard(
-                    scene = loadedScene,
-                    panelColor = panelColor,
-                    contentColor = contentColor
-                )
-
-                SceneInfoCard(
-                    fileName = displayName.ifBlank { selectedUri?.lastPathSegment.orEmpty() },
-                    scene = loadedScene,
-                    panelColor = panelColor,
-                    contentColor = contentColor
-                )
-            }
-
-            meshScene?.let { loadedScene ->
-                MeshPreviewCard(
                     scene = loadedScene,
                     panelColor = panelColor,
                     contentColor = contentColor
@@ -294,47 +237,6 @@ private fun SplatLimitCard(
 }
 
 @Composable
-private fun MeshFaceLimitCard(
-    maxFaces: Int,
-    sliderValue: Float,
-    enabled: Boolean,
-    panelColor: Color,
-    contentColor: Color,
-    onSliderChange: (Float) -> Unit,
-    onCommit: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(panelColor)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Max mesh faces", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                "${formatFaces(quantizeFaceLimit(sliderValue))} / ${formatFaces(maxFaces)}",
-                color = contentColor.copy(alpha = 0.62f),
-                fontSize = 13.sp
-            )
-        }
-        Slider(
-            value = sliderValue,
-            onValueChange = onSliderChange,
-            onValueChangeFinished = onCommit,
-            valueRange = MIN_TEST_FACES.toFloat()..MAX_TEST_FACES.toFloat(),
-            enabled = enabled,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
-
-@Composable
 private fun LoadingCard(
     panelColor: Color,
     contentColor: Color,
@@ -362,11 +264,11 @@ private fun GaussianPreviewCard(
 ) {
     val renderer = remember { DepthGLRenderer() }
     val previewTilt = remember { FloatArray(2) }
-    var splatScale by remember { mutableStateOf(1f) }
-    var globalOpacity by remember { mutableStateOf(1f) }
-    var alphaFalloff by remember { mutableStateOf(1f) }
+    var splatScale by remember { mutableStateOf(1.0f) }
+    var globalOpacity by remember { mutableStateOf(1.0f) }
+    var alphaFalloff by remember { mutableStateOf(1.0f) }
     var minPointSize by remember { mutableStateOf(0.5f) }
-    var maxPointSize by remember { mutableStateOf(160f) }
+    var maxPointSize by remember { mutableStateOf(120f) }
 
     fun currentGaussianParams(): DepthGLRenderer.GaussianRenderParams {
         return DepthGLRenderer.GaussianRenderParams(
@@ -374,7 +276,8 @@ private fun GaussianPreviewCard(
             globalOpacity = globalOpacity,
             alphaFalloff = alphaFalloff,
             minPointSize = minPointSize,
-            maxPointSize = maxPointSize
+            maxPointSize = maxPointSize,
+            useLayerCache = false
         )
     }
 
@@ -390,6 +293,7 @@ private fun GaussianPreviewCard(
 
     LaunchedEffect(scene) {
         renderer.loadGaussians(scene)
+        renderer.updateParams(0.075f, 0f)
         applyGaussianParams()
         renderer.updateTilt(previewTilt[0], previewTilt[1])
     }
@@ -408,11 +312,7 @@ private fun GaussianPreviewCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Gaussian SOG 预览", color = contentColor, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = "拖动预览区域测试视差",
-                color = contentColor.copy(alpha = 0.55f),
-                fontSize = 12.sp
-            )
+            Text("拖动预览测试视差", color = contentColor.copy(alpha = 0.55f), fontSize = 12.sp)
         }
 
         AndroidView(
@@ -450,7 +350,7 @@ private fun GaussianPreviewCard(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(9f / 16f)
+                .aspectRatio(SOG_PREVIEW_ASPECT)
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.Black)
                 .pointerInput(scene) {
@@ -471,56 +371,11 @@ private fun GaussianPreviewCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            GaussianParamSlider(
-                label = "Splat scale",
-                value = splatScale,
-                valueRange = 0.35f..3.0f,
-                contentColor = contentColor,
-                onValueChange = {
-                    splatScale = it
-                },
-                onValueChangeFinished = { applyGaussianParams() }
-            )
-            GaussianParamSlider(
-                label = "Global opacity",
-                value = globalOpacity,
-                valueRange = 0.2f..3.0f,
-                contentColor = contentColor,
-                onValueChange = {
-                    globalOpacity = it
-                },
-                onValueChangeFinished = { applyGaussianParams() }
-            )
-            GaussianParamSlider(
-                label = "Alpha falloff",
-                value = alphaFalloff,
-                valueRange = 1.4f..9.0f,
-                contentColor = contentColor,
-                onValueChange = {
-                    alphaFalloff = it
-                },
-                onValueChangeFinished = { applyGaussianParams() }
-            )
-            GaussianParamSlider(
-                label = "Min point size",
-                value = minPointSize,
-                valueRange = 0.5f..8.0f,
-                contentColor = contentColor,
-                onValueChange = {
-                    minPointSize = it.coerceAtMost(maxPointSize)
-                },
-                onValueChangeFinished = { applyGaussianParams() }
-            )
-            GaussianParamSlider(
-                label = "Max point size",
-                value = maxPointSize,
-                valueRange = 24f..160f,
-                contentColor = contentColor,
-                onValueChange = {
-                    maxPointSize = it.coerceAtLeast(minPointSize)
-                },
-                onValueChangeFinished = { applyGaussianParams() }
-            )
+            GaussianParamSlider("Splat scale", splatScale, 0.35f..3.0f, contentColor, { splatScale = it }, { applyGaussianParams() })
+            GaussianParamSlider("Global opacity", globalOpacity, 0.2f..3.0f, contentColor, { globalOpacity = it }, { applyGaussianParams() })
+            GaussianParamSlider("Alpha falloff", alphaFalloff, 0.2f..4.0f, contentColor, { alphaFalloff = it }, { applyGaussianParams() })
+            GaussianParamSlider("Min point size", minPointSize, 0.5f..8.0f, contentColor, { minPointSize = it.coerceAtMost(maxPointSize) }, { applyGaussianParams() })
+            GaussianParamSlider("Max point size", maxPointSize, 24f..160f, contentColor, { maxPointSize = it.coerceAtLeast(minPointSize) }, { applyGaussianParams() })
         }
 
         Row(
@@ -532,11 +387,11 @@ private fun GaussianPreviewCard(
                 .clickable {
                     previewTilt[0] = 0f
                     previewTilt[1] = 0f
-                    splatScale = 3f
-                    globalOpacity = 3f
-                    alphaFalloff = 9f
-                    minPointSize = 8f
-                    maxPointSize = 160f
+                    splatScale = 1.0f
+                    globalOpacity = 1.0f
+                    alphaFalloff = 1.0f
+                    minPointSize = 0.5f
+                    maxPointSize = 120f
                     applyGaussianParams()
                     renderer.updateTilt(0f, 0f)
                 },
@@ -545,114 +400,6 @@ private fun GaussianPreviewCard(
         ) {
             Text("重置预览参数", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
-    }
-}
-
-@Composable
-private fun MeshPreviewCard(
-    scene: PhotoMeshPlyLoader.MeshScene,
-    panelColor: Color,
-    contentColor: Color
-) {
-    val renderer = remember { DepthGLRenderer() }
-    val previewTilt = remember { FloatArray(2) }
-    var parallaxStrength by remember { mutableStateOf(0.045f) }
-
-    fun applyParams() {
-        renderer.updateParams(parallaxStrength, 0f)
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            renderer.stopAndWait(300)
-        }
-    }
-
-    LaunchedEffect(scene) {
-        renderer.loadMesh(scene)
-        applyParams()
-        renderer.updateTilt(previewTilt[0], previewTilt[1])
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(panelColor)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Mesh preview", color = contentColor, fontWeight = FontWeight.SemiBold)
-            Text(
-                text = "Drag to test parallax",
-                color = contentColor.copy(alpha = 0.55f),
-                fontSize = 12.sp
-            )
-        }
-
-        AndroidView(
-            factory = { viewContext ->
-                SurfaceView(viewContext).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) = Unit
-
-                        override fun surfaceChanged(
-                            holder: SurfaceHolder,
-                            format: Int,
-                            width: Int,
-                            height: Int
-                        ) {
-                            renderer.start(holder.surface)
-                            renderer.resize(width, height)
-                            renderer.loadMesh(scene)
-                            applyParams()
-                            renderer.updateTilt(previewTilt[0], previewTilt[1])
-                        }
-
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            renderer.stopAndWait(300)
-                        }
-                    })
-                }
-            },
-            update = { view ->
-                if (view.holder.surface.isValid && view.width > 0 && view.height > 0) {
-                    renderer.resize(view.width, view.height)
-                    applyParams()
-                    renderer.updateTilt(previewTilt[0], previewTilt[1])
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(9f / 16f)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color.Black)
-                .pointerInput(scene) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        previewTilt[0] = (previewTilt[0] + dragAmount.x / 360f).coerceIn(-1f, 1f)
-                        previewTilt[1] = (previewTilt[1] + dragAmount.y / 520f).coerceIn(-1f, 1f)
-                        renderer.updateTilt(previewTilt[0], previewTilt[1])
-                    }
-                }
-        )
-
-        GaussianParamSlider(
-            label = "Parallax strength",
-            value = parallaxStrength,
-            valueRange = 0.005f..0.075f,
-            contentColor = contentColor,
-            onValueChange = {
-                parallaxStrength = it
-                applyParams()
-            },
-            onValueChangeFinished = { applyParams() }
-        )
     }
 }
 
@@ -719,33 +466,6 @@ private fun SceneInfoCard(
 }
 
 @Composable
-private fun SceneInfoCard(
-    fileName: String,
-    scene: PhotoMeshPlyLoader.MeshScene,
-    panelColor: Color,
-    contentColor: Color
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(panelColor)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(fileName.ifBlank { "Mesh PLY" }, color = contentColor, fontWeight = FontWeight.SemiBold)
-        InfoLine("Type", "3D-photo mesh", contentColor)
-        InfoLine("Faces", "${formatFaces(scene.faceCount)} / ${formatFaces(scene.sourceFaceCount)}", contentColor)
-        InfoLine("Vertices", formatFaces(scene.vertexCount), contentColor)
-        InfoLine("Chunks", scene.chunks.size.toString(), contentColor)
-        InfoLine("Image", "${scene.imageWidth} x ${scene.imageHeight}", contentColor)
-        InfoLine("FOV", "${fmt(scene.hFovRad)} / ${fmt(scene.vFovRad)} rad", contentColor)
-        InfoLine("Depth", "${fmt(scene.nearDepth)} / ${fmt(scene.focusDepth)} / ${fmt(scene.farDepth)}", contentColor)
-        InfoLine("Stride", scene.faceStride.toString(), contentColor)
-    }
-}
-
-@Composable
 private fun InfoLine(
     label: String,
     value: String,
@@ -776,98 +496,6 @@ private fun formatSplats(value: Int): String {
     }
 }
 
-private fun quantizeFaceLimit(value: Float): Int {
-    return ((value / FACE_LIMIT_STEP).roundToInt() * FACE_LIMIT_STEP)
-        .coerceIn(MIN_TEST_FACES, MAX_TEST_FACES)
-}
-
-private fun formatFaces(value: Int): String {
-    return if (value >= 1_000_000) {
-        String.format("%.2fM", value / 1_000_000f)
-    } else {
-        "${value / 1_000}K"
-    }
-}
-
-private sealed class PlyLoadResult {
-    data class Gaussian(val scene: GaussianPlyLoader.GaussianScene) : PlyLoadResult()
-    data class Mesh(val scene: PhotoMeshPlyLoader.MeshScene) : PlyLoadResult()
-}
-
-private data class LoadAttempt(
-    val result: PlyLoadResult?,
-    val error: String? = null
-)
-
-private enum class PlyKind {
-    Gaussian,
-    Sog,
-    Mesh,
-    Unknown
-}
-
-private fun detectPlyKind(context: Context, uri: Uri): PlyKind {
-    return runCatching {
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            val buffered = input.buffered(16 * 1024)
-            buffered.mark(4)
-            val first = buffered.read()
-            val second = buffered.read()
-            buffered.reset()
-            if (first == 'P'.code && second == 'K'.code) {
-                return@use PlyKind.Sog
-            }
-            InputStreamReader(buffered, StandardCharsets.US_ASCII).buffered(16 * 1024).use { reader ->
-                var hasFaceElement = false
-                var hasFaceList = false
-                var hasGaussianField = false
-                var hasColorField = false
-                var currentElement = ""
-                var line = reader.readLine()
-                var lines = 0
-                while (line != null && lines < 512) {
-                    val trimmed = line.trim()
-                    if (trimmed == "end_header") break
-                    val parts = trimmed.split(Regex("\\s+"))
-                    when (parts.firstOrNull()) {
-                        "element" -> {
-                            currentElement = parts.getOrNull(1).orEmpty()
-                            if (currentElement == "face") hasFaceElement = true
-                        }
-                        "property" -> {
-                            val propertyName = parts.lastOrNull().orEmpty()
-                            if (currentElement == "face" && parts.getOrNull(1) == "list") {
-                                hasFaceList = true
-                            }
-                            if (currentElement == "vertex" && propertyName in setOf("red", "green", "blue", "r", "g", "b")) {
-                                hasColorField = true
-                            }
-                            if (currentElement == "vertex" && propertyName in setOf("f_dc_0", "opacity", "scale_0")) {
-                                hasGaussianField = true
-                            }
-                        }
-                    }
-                    line = reader.readLine()
-                    lines++
-                }
-                when {
-                    hasFaceElement && hasFaceList && hasColorField -> PlyKind.Mesh
-                    hasGaussianField -> PlyKind.Gaussian
-                    else -> PlyKind.Unknown
-                }
-            }
-        } ?: PlyKind.Unknown
-    }.getOrDefault(PlyKind.Unknown)
-}
-
-private const val MIN_TEST_SPLATS = 60_000
-private const val MAX_TEST_SPLATS = 800_000
-private const val SPLAT_LIMIT_STEP = 10_000
-private const val MIN_TEST_FACES = 40_000
-private const val MAX_TEST_FACES = 1_600_000
-private const val FACE_LIMIT_STEP = 20_000
-private const val PLY_PREVIEW_ASPECT = 9f / 16f
-
 private fun queryDisplayName(context: Context, uri: Uri): String? {
     return runCatching {
         context.contentResolver.query(
@@ -886,3 +514,8 @@ private fun queryDisplayName(context: Context, uri: Uri): String? {
         }
     }.getOrNull() ?: uri.lastPathSegment
 }
+
+private const val MIN_TEST_SPLATS = 60_000
+private const val MAX_TEST_SPLATS = 1_200_000
+private const val SPLAT_LIMIT_STEP = 10_000
+private const val SOG_PREVIEW_ASPECT = 9f / 16f
