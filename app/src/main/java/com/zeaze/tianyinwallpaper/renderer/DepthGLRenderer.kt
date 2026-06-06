@@ -1381,6 +1381,10 @@ class DepthGLRenderer {
             uniform float uStrength;
             uniform float uFocusDepth;
             uniform float uFarDepth;
+            uniform vec3 uSceneCenter;
+            uniform float uSceneRadius;
+            uniform float uDefaultCameraDistance;
+            uniform float uTanHalfFov;
             uniform float uCameraZoom;
             uniform vec2 uCenterOffset;
             uniform float uFocusDepthOffset;
@@ -1418,15 +1422,15 @@ class DepthGLRenderer {
             }
 
             CameraFrame wallpaperCamera() {
-                float baseTargetZ = max(max(uFocusDepth, uFarDepth), 0.05);
-                float targetZ = max(baseTargetZ + baseTargetZ * uFocusDepthOffset, 0.02);
+                float radius = max(uSceneRadius, 0.001);
                 vec3 target = vec3(
-                    uCenterOffset.x * baseTargetZ * 0.22,
-                    uCenterOffset.y * baseTargetZ * 0.22,
-                    targetZ
+                    uSceneCenter.x + uCenterOffset.x * radius,
+                    uSceneCenter.y + uCenterOffset.y * radius,
+                    max(uSceneCenter.z + radius * uFocusDepthOffset, 0.02)
                 );
-                float distance = max(baseTargetZ * 1.45 / max(uCameraZoom, 0.6), baseTargetZ * 0.02);
-                vec2 tangent = vec2(uTilt.x, -uTilt.y) * distance * uStrength * 2.4;
+                float frameDistance = max(uDefaultCameraDistance, radius * 0.02);
+                float distance = max(frameDistance / max(uCameraZoom, 0.6), radius * 0.02);
+                vec2 tangent = vec2(uTilt.x, -uTilt.y) * frameDistance * max(uStrength, 0.02) * 2.4;
                 float maxTangent = distance * 0.75;
                 float tangentLength = length(tangent);
                 if (tangentLength > maxTangent && tangentLength > 0.0001) {
@@ -1451,7 +1455,8 @@ class DepthGLRenderer {
                 vec3 rel = aPos - camera.position;
                 float viewX = dot(rel, camera.right);
                 float viewY = dot(rel, camera.up);
-                float z = max(dot(rel, camera.forward), 0.02);
+                float rawZ = dot(rel, camera.forward);
+                float z = max(rawZ, 0.02);
                 float focalPixels = 0.5 * uSurfaceSize.y / max(uTanHalfFov, 0.001);
                 vec2 center = vec2(
                     (viewX / z) * (2.0 * focalPixels / uSurfaceSize.x),
@@ -1493,7 +1498,7 @@ class DepthGLRenderer {
                 vec2 pixelOffset = majorAxis * local.x * majorPixels + minorAxis * local.y * minorPixels;
                 vec2 clipOffset = pixelOffset * vec2(2.0 / uSurfaceSize.x, 2.0 / uSurfaceSize.y);
                 gl_Position = vec4(center + clipOffset, 0.0, 1.0);
-                vColor = aColor;
+                vColor = vec4(aColor.rgb, aColor.a * step(0.02, rawZ));
                 vLocal = local;
                 vAaFactor = clamp(sqrt(max(detOrig / detBlur, 0.0)), 0.0, 1.0);
             }

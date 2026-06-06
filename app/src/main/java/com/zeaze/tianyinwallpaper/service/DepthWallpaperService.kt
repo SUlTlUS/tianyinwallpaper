@@ -37,6 +37,11 @@ class DepthWallpaperService : WallpaperService() {
 
     override fun onCreateEngine(): Engine = DepthWallpaperEngine()
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        GaussianSceneLoader.trimMemory(level)
+    }
+
     inner class DepthWallpaperEngine : Engine() {
         private var renderer: DepthGLRenderer? = null
         private var webSplatController: SuperSplatWebController? = null
