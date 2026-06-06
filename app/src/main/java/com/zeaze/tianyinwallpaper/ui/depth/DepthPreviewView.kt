@@ -5,6 +5,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -101,13 +102,15 @@ private fun NativeGaussianPreviewView(
 
     LaunchedEffect(model.gaussianUri) {
         scene = withContext(Dispatchers.IO) {
-            GaussianSceneLoader.loadScene(
+            val result = GaussianSceneLoader.loadSceneDetailed(
                 context = context.applicationContext,
                 uriString = model.gaussianUri,
-                maxSplats = 1_500_000,
+                maxSplats = NATIVE_PREVIEW_MAX_GAUSSIAN_SPLATS,
                 viewportAspect = context.resources.displayMetrics.widthPixels.toFloat() /
                     context.resources.displayMetrics.heightPixels.coerceAtLeast(1).toFloat()
             )
+            result.error?.let { Log.w(TAG, "native preview gaussian load failed error=$it uri=${model.gaussianUri}") }
+            result.scene
         }
         scene?.let { renderer.loadGaussians(it) }
     }
@@ -212,6 +215,9 @@ private fun NativeGaussianPreviewView(
         }
     }
 }
+
+private const val TAG = "DepthPreviewView"
+private const val NATIVE_PREVIEW_MAX_GAUSSIAN_SPLATS = 500_000
 
 private fun DepthWallpaperModel.nativePreviewParams(): DepthGLRenderer.GaussianRenderParams {
     return DepthGLRenderer.GaussianRenderParams(

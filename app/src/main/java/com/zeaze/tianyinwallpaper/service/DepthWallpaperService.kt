@@ -24,6 +24,7 @@ import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
+import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import com.zeaze.tianyinwallpaper.utils.SuperSplatWebController
 import com.zeaze.tianyinwallpaper.utils.SuperSplatWebParams
@@ -320,29 +321,62 @@ class DepthWallpaperService : WallpaperService() {
             renderer?.updateGaussianParams(target.nativeGaussianParams())
             Thread {
                 val viewportAspect = surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1).toFloat()
-                val scene = GaussianSceneLoader.loadScene(
+                val fastResult = GaussianSceneLoader.loadSceneDetailed(
+                    context = applicationContext,
+                    uriString = target.gaussianUri,
+                    maxSplats = SERVICE_FAST_GAUSSIAN_SPLATS,
+                    viewportAspect = viewportAspect
+                )
+                val fastScene = fastResult.scene
+                if (fastScene != null && currentVersion == loadVersion && isVisible && surfaceReady) {
+                    deliverNativeGaussianScene(fastScene, targetKey, reason, "fast", viewportAspect)
+                } else {
+                    Log.w(
+                        TAG,
+                        "loadContent gaussian native fast skipped reason=$reason scene=${fastScene != null} " +
+                            "error=${fastResult.error} current=$currentVersion loadVersion=$loadVersion " +
+                            "visible=$isVisible surfaceReady=$surfaceReady"
+                    )
+                    return@Thread
+                }
+
+                if (SERVICE_MAX_GAUSSIAN_SPLATS <= SERVICE_FAST_GAUSSIAN_SPLATS) return@Thread
+                val fullResult = GaussianSceneLoader.loadSceneDetailed(
                     context = applicationContext,
                     uriString = target.gaussianUri,
                     maxSplats = SERVICE_MAX_GAUSSIAN_SPLATS,
                     viewportAspect = viewportAspect
                 )
-                if (scene != null && currentVersion == loadVersion && isVisible && surfaceReady) {
-                    loadedImageKey = targetKey
-                    Log.d(
-                        TAG,
-                        "loadContent gaussian native fallback loaded reason=$reason count=${scene.count} " +
-                            "visible=${scene.screenVisibleSplatCount} aux=${scene.auxiliarySplatCount} " +
-                            "image=${scene.imageWidth}x${scene.imageHeight} viewportAspect=$viewportAspect"
-                    )
-                    renderer?.loadGaussians(scene)
-                } else {
-                    Log.w(
-                        TAG,
-                        "loadContent gaussian native fallback skipped reason=$reason scene=${scene != null} " +
-                            "current=$currentVersion loadVersion=$loadVersion visible=$isVisible surfaceReady=$surfaceReady"
-                    )
+                val fullScene = fullResult.scene
+                if (
+                    fullScene != null &&
+                    fullScene.count > fastScene.count &&
+                    currentVersion == loadVersion &&
+                    isVisible &&
+                    surfaceReady
+                ) {
+                    deliverNativeGaussianScene(fullScene, targetKey, reason, "full", viewportAspect)
+                } else if (fullResult.error != null) {
+                    Log.w(TAG, "loadContent gaussian native full skipped reason=$reason error=${fullResult.error}")
                 }
             }.also { it.name = "DepthGaussianFallbackLoader" }.start()
+        }
+
+        private fun deliverNativeGaussianScene(
+            scene: GaussianPlyLoader.GaussianScene,
+            targetKey: String,
+            reason: String,
+            quality: String,
+            viewportAspect: Float
+        ) {
+            loadedImageKey = targetKey
+            Log.d(
+                TAG,
+                "loadContent gaussian native loaded reason=$reason quality=$quality count=${scene.count} " +
+                    "visible=${scene.screenVisibleSplatCount} aux=${scene.auxiliarySplatCount} " +
+                    "image=${scene.imageWidth}x${scene.imageHeight} viewportAspect=$viewportAspect"
+            )
+            renderer?.loadGaussians(scene)
         }
 
         private fun activateWebSplatMode() {
@@ -804,6 +838,7 @@ class DepthWallpaperService : WallpaperService() {
         private const val DISPATCH_LOG_INTERVAL_MS = 1_000L
         private const val WEBVIEW_FRAME_INTERVAL_MS = 16L
         private const val WEBVIEW_READY_TIMEOUT_MS = 4_000L
-        private const val SERVICE_MAX_GAUSSIAN_SPLATS = 1_500_000
+        private const val SERVICE_FAST_GAUSSIAN_SPLATS = 500_000
+        private const val SERVICE_MAX_GAUSSIAN_SPLATS = 1_200_000
     }
 }

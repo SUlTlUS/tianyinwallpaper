@@ -40,12 +40,16 @@ object GaussianSceneLoader {
         uriString: String,
         maxSplats: Int = GaussianSogLoader.DEFAULT_MAX_SPLATS,
         viewportAspect: Float? = null
-    ): GaussianPlyLoader.GaussianScene? = loadSceneDetailed(
-        context = context,
-        uriString = uriString,
-        maxSplats = maxSplats,
-        viewportAspect = viewportAspect
-    ).scene
+    ): GaussianPlyLoader.GaussianScene? {
+        val result = loadSceneDetailed(
+            context = context,
+            uriString = uriString,
+            maxSplats = maxSplats,
+            viewportAspect = viewportAspect
+        )
+        result.error?.let { Log.w(TAG, "loadScene failed maxSplats=$maxSplats error=$it uri=$uriString") }
+        return result.scene
+    }
 
     fun loadSceneDetailed(
         context: Context,
@@ -53,6 +57,7 @@ object GaussianSceneLoader {
         maxSplats: Int = GaussianSogLoader.DEFAULT_MAX_SPLATS,
         viewportAspect: Float? = null
     ): SceneLoadResult {
+        val startMs = SystemClock.elapsedRealtime()
         if (!prefersSog(context, uriString)) {
             return SceneLoadResult(scene = null, error = "Gaussian PLY 已移除，请先转换为 SOG")
         }
@@ -68,8 +73,22 @@ object GaussianSceneLoader {
                 duplicateForConsumer(scene)
             }
         }.fold(
-            onSuccess = { SceneLoadResult(scene = it) },
-            onFailure = { SceneLoadResult(scene = null, error = "SOG: ${it.message ?: it.javaClass.simpleName}") }
+            onSuccess = {
+                Log.d(
+                    TAG,
+                    "loadScene ok maxSplats=$maxSplats count=${it.count} elapsedMs=${SystemClock.elapsedRealtime() - startMs} uri=$uriString"
+                )
+                SceneLoadResult(scene = it)
+            },
+            onFailure = {
+                val error = "SOG: ${it.message ?: it.javaClass.simpleName}"
+                Log.w(
+                    TAG,
+                    "loadScene failed maxSplats=$maxSplats elapsedMs=${SystemClock.elapsedRealtime() - startMs} error=$error uri=$uriString",
+                    it
+                )
+                SceneLoadResult(scene = null, error = error)
+            }
         )
     }
 
