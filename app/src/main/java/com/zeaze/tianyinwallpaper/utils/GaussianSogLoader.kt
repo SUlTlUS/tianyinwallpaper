@@ -495,6 +495,7 @@ object GaussianSogLoader {
             TAG,
             "built SOG scene count=$count visible=${splats.screenVisibleCount} aux=${count - splats.screenVisibleCount} " +
                 "near=$near far=$far radius=${bounds.radius} distance=${cameraDistance ?: bounds.defaultCameraDistance} " +
+                "cameraDefaults=${cameraTarget != null} " +
                 "target=${cameraTarget?.joinToString(prefix = "[", postfix = "]") { String.format(Locale.US, "%.3f", it) } ?: "bounds"} " +
                 "heap=${Runtime.getRuntime().totalMemory() / 1024 / 1024}MB"
         )
@@ -523,6 +524,7 @@ object GaussianSogLoader {
             sceneCenterZ = cameraTarget?.get(2) ?: bounds.centerZ,
             sceneRadius = bounds.radius,
             defaultCameraDistance = cameraDistance ?: bounds.defaultCameraDistance,
+            hasCameraDefaults = cameraTarget != null,
             rotations = rotations
         )
     }

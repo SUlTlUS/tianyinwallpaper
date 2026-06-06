@@ -586,6 +586,7 @@ class DepthGLRenderer {
                     sH.toFloat() / scene.imageHeight.coerceAtLeast(1).toFloat()
                 ) * GAUSSIAN_SPLAT_SCALE * gaussianParams.splatScale
                 ).coerceIn(0.35f, 30f)
+            val focusDepthOffset = sceneFocusDepthOffset(scene)
 
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uFocal"), scene.focalLengthPx)
             GLES20.glUniform2f(
@@ -621,7 +622,7 @@ class DepthGLRenderer {
                 gaussianParams.centerOffsetX,
                 gaussianParams.centerOffsetY
             )
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uFocusDepthOffset"), gaussianParams.focusDepthOffset)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uFocusDepthOffset"), focusDepthOffset)
             GLES20.glUniform1f(
                 GLES20.glGetUniformLocation(gaussianQuadProg, "uPointScale"),
                 gaussianParams.splatScale.coerceIn(0.25f, 3f)
@@ -731,6 +732,7 @@ class DepthGLRenderer {
                     sH.toFloat() / scene.imageHeight.coerceAtLeast(1).toFloat()
                 ) * GAUSSIAN_SPLAT_SCALE * gaussianParams.splatScale
                 ).coerceIn(0.35f, 28f)
+            val focusDepthOffset = sceneFocusDepthOffset(scene)
 
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianProg, "uFocal"), scene.focalLengthPx)
             GLES20.glUniform2f(
@@ -749,7 +751,7 @@ class DepthGLRenderer {
                 gaussianParams.centerOffsetX,
                 gaussianParams.centerOffsetY
             )
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianProg, "uFocusDepthOffset"), gaussianParams.focusDepthOffset)
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianProg, "uFocusDepthOffset"), focusDepthOffset)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianProg, "uPointScale"), pointScale)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianProg, "uOpacity"), gaussianParams.globalOpacity)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianProg, "uAlphaFalloff"), gaussianParams.alphaFalloff)
@@ -1140,6 +1142,14 @@ class DepthGLRenderer {
             }
         }
 
+        private fun sceneFocusDepthOffset(scene: GaussianPlyLoader.GaussianScene): Float {
+            return if (scene.hasCameraDefaults) {
+                gaussianParams.focusDepthOffset - DEFAULT_FOCUS_DEPTH_OFFSET
+            } else {
+                gaussianParams.focusDepthOffset
+            }
+        }
+
         private fun deleteGaussianLayerTextures() {
             if (gaussianLayerTextures.isNotEmpty()) {
                 val ids = gaussianLayerTextures.map { it.textureId }.toIntArray()
@@ -1254,6 +1264,7 @@ class DepthGLRenderer {
         private const val GAUSSIAN_QUAD_VERTEX_COUNT = 6
         private const val GAUSSIAN_LAYER_TEXTURE_MAX_SIZE = 768
         private const val GAUSSIAN_TAN_HALF_FOV = 0.57735026f
+        private const val DEFAULT_FOCUS_DEPTH_OFFSET = 0.25f
         private const val FLOAT_SIZE_BYTES = 4
         private const val ENABLE_GAUSSIAN_LAYER_CACHE = false
 
