@@ -67,6 +67,7 @@ class DepthWallpaperService : WallpaperService() {
 
         private var loadVersion = 0
         private var loadedImageKey: String? = null
+        private var lastSensorRegisterMs = 0L
         private var lastSensorEventMs = 0L
         private var lastDispatchNs = 0L
         private var sensorEventCount = 0L
@@ -133,6 +134,7 @@ class DepthWallpaperService : WallpaperService() {
                         TAG,
                         "sensor stale, restart. visible=$isVisible surfaceReady=$surfaceReady " +
                             "lastSensorAgeMs=${if (lastSensorEventMs == 0L) -1 else now - lastSensorEventMs} " +
+                            "registeredAgeMs=${if (lastSensorRegisterMs == 0L) -1 else now - lastSensorRegisterMs} " +
                             "sensor=${motionSensor?.name}"
                     )
                     restartMotionSensor()
@@ -204,7 +206,7 @@ class DepthWallpaperService : WallpaperService() {
                         if (it.isGaussian()) renderer?.updateGaussianParams(it.nativeGaussianParams())
                     }
                 }
-                registerSensor()
+                registerSensor(resetCamera = loadedImageKey == null)
                 resumeMotionRendering()
                 if (surfaceReady && model?.contentKey() != loadedImageKey) {
                     loadContent()
@@ -229,7 +231,6 @@ class DepthWallpaperService : WallpaperService() {
                 startWebDrawLoop()
             } else {
                 renderer?.setRenderingEnabled(true)
-                renderer?.updateTilt(0f, 0f)
                 renderer?.requestRender()
             }
             mainHandler.postDelayed({
@@ -576,14 +577,15 @@ class DepthWallpaperService : WallpaperService() {
                 contains("Failed to allocate", ignoreCase = true)
         }
 
-        private fun registerSensor() {
+        private fun registerSensor(resetCamera: Boolean = true) {
             unregisterSensor()
-            resetSensorState()
+            resetSensorState(resetCamera = resetCamera)
             motionSensorPreference = 0
             val sensor = findMotionSensor(motionSensorPreference).also { motionSensor = it }
             sensor?.let {
                 val ok = sensorManager?.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_GAME) == true
-                lastSensorEventMs = if (ok) SystemClock.elapsedRealtime() else 0L
+                lastSensorRegisterMs = if (ok) SystemClock.elapsedRealtime() else 0L
+                lastSensorEventMs = 0L
                 startSensorWatchdog()
                 Log.d(TAG, "registerSensor ok=$ok sensor=${sensor.name} type=${sensor.type}")
             } ?: Log.w(TAG, "registerSensor no sensor")
@@ -603,6 +605,7 @@ class DepthWallpaperService : WallpaperService() {
             Log.d(TAG, "unregisterSensor events=$sensorEventCount dispatches=$dispatchCount")
             sensorManager?.unregisterListener(sensorListener)
             stopSensorWatchdog()
+            lastSensorRegisterMs = 0L
         }
 
         private fun restartMotionSensor() {
@@ -618,9 +621,10 @@ class DepthWallpaperService : WallpaperService() {
             motionSensorPreference = (currentIndex + 1).floorMod(candidates.size)
             val sensor = candidates[motionSensorPreference]
             motionSensor = sensor
-            resetSensorState()
+            resetSensorState(resetCamera = false)
             val ok = sensorManager?.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_GAME) == true
-            lastSensorEventMs = if (ok) SystemClock.elapsedRealtime() else 0L
+            lastSensorRegisterMs = if (ok) SystemClock.elapsedRealtime() else 0L
+            lastSensorEventMs = 0L
             Log.w(
                 TAG,
                 "restartMotionSensor ok=$ok sensor=${sensor.name} type=${sensor.type} " +
@@ -637,7 +641,7 @@ class DepthWallpaperService : WallpaperService() {
             mainHandler.removeCallbacks(sensorWatchdog)
         }
 
-        private fun resetSensorState() {
+        private fun resetSensorState(resetCamera: Boolean = true) {
             lastDispatchNs = 0L
             hasBaselineTilt = false
             baselineTiltX = 0f
@@ -658,13 +662,14 @@ class DepthWallpaperService : WallpaperService() {
             dispatchCount = 0L
             lastSensorLogMs = 0L
             lastDispatchLogMs = 0L
+            lastSensorRegisterMs = 0L
             hasGravity = false
             gravity.fill(0f)
             if (model?.isGaussian() == true && gaussianWebActive) {
                 webSplatController?.resetSensorBaseline = true
-                webSplatController?.setTilt(0f, 0f)
+                if (resetCamera) webSplatController?.setTilt(0f, 0f)
             } else {
-                renderer?.resetCamera()
+                if (resetCamera) renderer?.resetCamera()
             }
         }
 
@@ -862,7 +867,12 @@ class DepthWallpaperService : WallpaperService() {
 
         private fun availableMotionSensors(): List<Sensor> {
             val manager = sensorManager ?: return emptyList()
-            return listOfNotNull(manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE))
+            return listOfNotNull(
+                manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE),
+                manager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR),
+                manager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR),
+                manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            ).distinctBy { it.type }
         }
 
         private fun Int.floorMod(modulus: Int): Int {
@@ -911,8 +921,8 @@ class DepthWallpaperService : WallpaperService() {
         private const val GRAVITY_FILTER_ALPHA = 0.32f
         private const val MIN_TILT_CHANGE = 0.002f
         private const val MIN_DISPATCH_INTERVAL_NS = 16_000_000L
-        private const val SENSOR_WATCHDOG_INTERVAL_MS = 3_000L
-        private const val SENSOR_STALE_TIMEOUT_MS = 4_500L
+        private const val SENSOR_WATCHDOG_INTERVAL_MS = 1_000L
+        private const val SENSOR_STALE_TIMEOUT_MS = 2_500L
         private const val SENSOR_LOG_INTERVAL_MS = 1_000L
         private const val DISPATCH_LOG_INTERVAL_MS = 1_000L
         private const val WEBVIEW_FRAME_INTERVAL_MS = 16L

@@ -75,6 +75,10 @@ class DepthGLRenderer : NativeGaussianRenderer {
     override fun start(surface: Surface) {
         synchronized(lifecycleLock) {
             Log.d(TAG, "start running=${isRunning.get()} surfaceValid=${isSurfaceValid.get()} threadAlive=${eglThread?.isAlive == true}")
+            if (isRunning.get() && isSurfaceValid.get() && eglThread?.isAlive == true) {
+                signalRenderThread()
+                return
+            }
             if (isRunning.get() || eglThread?.isAlive == true) {
                 stopAndWaitLocked(RENDER_THREAD_STOP_TIMEOUT_MS)
             }
@@ -203,6 +207,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
     override fun setRenderingEnabled(enabled: Boolean) {
         Log.d(TAG, "setRenderingEnabled $enabled queue=${messageQueue.size}")
         renderingEnabled = enabled
+        if (enabled) renderQueued.set(false)
         signalRenderThread()
         if (enabled) requestRender()
     }
