@@ -321,7 +321,7 @@ class DepthWallpaperService : WallpaperService() {
             renderer?.setRenderingEnabled(isVisible)
             renderer?.updateParams(target.renderParallaxStrength(), 0f)
             renderer?.updateGaussianParams(target.nativeGaussianParams())
-            renderer?.resetCamera()
+            resetSensorState()
             Thread {
                 val viewportAspect = surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1).toFloat()
                 val fastResult = GaussianSceneLoader.loadSceneDetailed(
