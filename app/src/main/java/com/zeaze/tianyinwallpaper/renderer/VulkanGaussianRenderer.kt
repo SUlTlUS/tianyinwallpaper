@@ -11,12 +11,16 @@ class VulkanGaussianRenderer(
     private val appContext: Context
 ) : NativeGaussianRenderer {
     private val fallback = DepthGLRenderer()
+    private var surfaceProbeDone = false
 
     override fun start(surface: Surface) {
-        val surfaceReady = runCatching { nativeProbeSurface(surface) }
-            .onFailure { Log.w(TAG, "Vulkan surface probe failed", it) }
-            .getOrDefault(false)
-        Log.d(TAG, "Vulkan surface probe ready=$surfaceReady; rendering delegated to GLES fallback")
+        if (!surfaceProbeDone) {
+            surfaceProbeDone = true
+            val surfaceReady = runCatching { nativeProbeSurface(surface) }
+                .onFailure { Log.w(TAG, "Vulkan surface probe failed", it) }
+                .getOrDefault(false)
+            Log.d(TAG, "Vulkan surface probe ready=$surfaceReady; rendering delegated to GLES fallback")
+        }
         fallback.start(surface)
     }
 
