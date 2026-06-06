@@ -224,9 +224,9 @@ private const val NATIVE_PREVIEW_MAX_GAUSSIAN_SPLATS = 500_000
 
 private fun DepthWallpaperModel.nativePreviewParams(): DepthGLRenderer.GaussianRenderParams {
     return DepthGLRenderer.GaussianRenderParams(
-        splatScale = 1.05f,
+        splatScale = 1.35f,
         globalOpacity = 1.0f,
-        alphaFalloff = 1.0f,
+        alphaFalloff = 0.72f,
         minPointSize = 0.5f,
         maxPointSize = 120f,
         cameraZoom = cameraZoom,

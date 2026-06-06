@@ -1544,8 +1544,8 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 float mid = 0.5 * (covXX + covYY);
                 float diff = 0.5 * (covXX - covYY);
                 float radius = sqrt(max(diff * diff + covXY * covXY, 0.0));
-                float lambda1 = max(mid + radius, 0.000001);
-                float lambda2 = max(mid - radius, 0.1);
+                float lambda1 = max(mid + radius, 1.0);
+                float lambda2 = max(mid - radius, 1.0);
                 float majorPixels = 2.0 * sqrt(2.0 * lambda1);
                 float minorPixels = 2.0 * sqrt(2.0 * lambda2);
                 vec2 majorAxis = normalize(vec2(covXY, lambda1 - covXX));

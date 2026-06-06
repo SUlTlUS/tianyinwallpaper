@@ -506,9 +506,9 @@ class DepthWallpaperService : WallpaperService() {
 
         private fun DepthWallpaperModel.nativeGaussianParams(): DepthGLRenderer.GaussianRenderParams {
             return DepthGLRenderer.GaussianRenderParams(
-                splatScale = 1.05f,
+                splatScale = 1.35f,
                 globalOpacity = 1.0f,
-                alphaFalloff = 1.0f,
+                alphaFalloff = 0.72f,
                 minPointSize = 0.5f,
                 maxPointSize = 120f,
                 cameraZoom = cameraZoom,

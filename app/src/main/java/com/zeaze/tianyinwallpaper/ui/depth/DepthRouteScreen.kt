@@ -88,6 +88,8 @@ import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.security.MessageDigest
 import java.util.UUID
 
 private enum class DepthAddKind {
@@ -276,6 +278,7 @@ fun DepthRouteScreen(
 
     fun removeWallpaper(model: DepthWallpaperModel) {
         wallpapers.removeAll { it.id == model.id }
+        removeGaussianThumbnailCache(context, model)
         if (activeId == model.id) {
             activeId = wallpapers.firstOrNull()?.id
         }
@@ -746,12 +749,12 @@ private fun DepthWallpaperThumbnail(
     cardBackground: Color
 ) {
     val context = LocalContext.current
-    val contentKey = remember(model) { model.gaussianUri }
+    val contentKey = remember(model) { gaussianThumbnailCacheKey(model) }
 
     val bitmap by produceState<Bitmap?>(initialValue = null, model.id, contentKey) {
         value = if (model.gaussianUri.isNotBlank()) {
             withContext(Dispatchers.IO) {
-                generateGaussianThumbnail(context, model.gaussianUri, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
+                loadOrGenerateGaussianThumbnail(context, model, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
             }
         } else {
             null
@@ -909,6 +912,7 @@ private fun queryDisplayName(context: Context, uri: Uri): String? {
 private const val THUMBNAIL_WIDTH = 216
 private const val THUMBNAIL_HEIGHT = 384
 private const val THUMBNAIL_MAX_SPLATS = 40_000
+private const val GAUSSIAN_THUMBNAIL_CACHE_VERSION = 2
 
 private data class ProjectedSplat(
     val u: Float, val v: Float,
@@ -924,10 +928,12 @@ private fun generateGaussianThumbnail(
     height: Int
 ): Bitmap? {
     return runCatching {
-        val scene = GaussianSceneLoader.loadScene(
+        val scene = GaussianSceneLoader.loadSceneDetailed(
             context = context,
-            uriString = uriString
-        ) ?: return null
+            uriString = uriString,
+            maxSplats = THUMBNAIL_MAX_SPLATS,
+            viewportAspect = width.toFloat() / height.coerceAtLeast(1).toFloat()
+        ).scene ?: return null
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -946,13 +952,6 @@ private fun generateGaussianThumbnail(
         val thumbH = height.toFloat()
 
         // Uniform scale with letterbox/pillarbox, matching drawGaussianPoints approach
-        val imageAspect = imageW / imageH
-        val thumbAspect = thumbW / thumbH
-        val (fillX, fillY) = if (imageAspect > thumbAspect) {
-            imageAspect / thumbAspect to 1f
-        } else {
-            1f to thumbAspect / imageAspect
-        }
         val uniformScale = minOf(thumbW / imageW, thumbH / imageH)
         val offsetU = (thumbW - imageW * uniformScale) * 0.5f
         val offsetV = (thumbH - imageH * uniformScale) * 0.5f
@@ -975,7 +974,7 @@ private fun generateGaussianThumbnail(
             val projY = py / pz
             val u = ((projX * focal) + imageW * 0.5f) * uniformScale + offsetU
             val v = ((projY * focal) + imageH * 0.5f) * uniformScale + offsetV
-            val rad = maxOf(sx, sy, sz, 0.0006f) * focal / pz * uniformScale * 2.2f
+            val rad = maxOf(sx, sy, sz, 0.0006f) * focal / pz * uniformScale * 2.6f
 
             splats += ProjectedSplat(
                 u, v, pz, rad,
@@ -995,10 +994,54 @@ private fun generateGaussianThumbnail(
                 (splat.g * 255).toInt().coerceIn(0, 255),
                 (splat.b * 255).toInt().coerceIn(0, 255)
             )
-            canvas.drawCircle(splat.u, splat.v, splat.radius.coerceAtLeast(0.6f), paint)
+            canvas.drawCircle(splat.u, splat.v, splat.radius.coerceAtLeast(0.8f), paint)
         }
 
         bitmap
     }.getOrNull()
+}
+
+private fun loadOrGenerateGaussianThumbnail(
+    context: Context,
+    model: DepthWallpaperModel,
+    width: Int,
+    height: Int
+): Bitmap? {
+    val file = gaussianThumbnailCacheFile(context, model)
+    if (file?.exists() == true) {
+        BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.RGB_565
+        })?.let { return it }
+    }
+
+    val bitmap = generateGaussianThumbnail(context, model.gaussianUri, width, height) ?: return null
+    if (file != null) {
+        runCatching {
+            file.outputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)
+            }
+        }
+    }
+    return bitmap
+}
+
+private fun removeGaussianThumbnailCache(context: Context, model: DepthWallpaperModel) {
+    gaussianThumbnailCacheFile(context, model)?.takeIf { it.exists() }?.delete()
+}
+
+private fun gaussianThumbnailCacheFile(context: Context, model: DepthWallpaperModel): File? {
+    if (model.id.isBlank() || model.gaussianUri.isBlank()) return null
+    val root = context.getExternalFilesDir(null) ?: return null
+    val dir = File(root, "thumbnail_cache")
+    if (!dir.mkdirs() && !dir.exists()) return null
+    return File(dir, "${gaussianThumbnailCacheKey(model)}.jpg")
+}
+
+private fun gaussianThumbnailCacheKey(model: DepthWallpaperModel): String {
+    val digest = MessageDigest.getInstance("SHA-1")
+        .digest(model.gaussianUri.toByteArray())
+        .joinToString("") { "%02x".format(it) }
+        .take(16)
+    return "gaussian_${model.id}_${digest}_v$GAUSSIAN_THUMBNAIL_CACHE_VERSION"
 }
 
