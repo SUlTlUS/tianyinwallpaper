@@ -1,14 +1,14 @@
 package com.zeaze.tianyinwallpaper.ui.depth
 
 import android.content.Context
+import android.graphics.SurfaceTexture
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.util.Log
 import android.view.Surface
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.view.TextureView
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -95,6 +95,7 @@ private fun NativeGaussianPreviewView(
     val appContext = context.applicationContext
     val renderer = remember(appContext) { NativeGaussianRendererFactory.create(appContext) }
     var scene by remember(model.gaussianUri) { mutableStateOf<GaussianPlyLoader.GaussianScene?>(null) }
+    var isRendererStarted by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -133,27 +134,30 @@ private fun NativeGaussianPreviewView(
 
     AndroidView(
         factory = { viewContext ->
-            SurfaceView(viewContext).apply {
-                holder.addCallback(object : SurfaceHolder.Callback {
-                    override fun surfaceCreated(holder: SurfaceHolder) = Unit
-
-                    override fun surfaceChanged(
-                        holder: SurfaceHolder,
-                        format: Int,
-                        width: Int,
-                        height: Int
-                    ) {
-                        renderer.start(holder.surface)
+            TextureView(viewContext).apply {
+                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                        renderer.start(Surface(surface))
                         renderer.resize(width, height)
                         renderer.updateParams(model.parallaxStrength, 0f)
                         renderer.updateGaussianParams(model.nativePreviewParams())
+                        isRendererStarted = true
                         scene?.let { renderer.loadGaussians(it) }
                     }
 
-                    override fun surfaceDestroyed(holder: SurfaceHolder) {
-                        renderer.stopAndWait(300)
+                    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                        renderer.resize(width, height)
+                        renderer.requestRender()
                     }
-                })
+
+                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                        isRendererStarted = false
+                        renderer.stopAndWait(300)
+                        return true
+                    }
+
+                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+                }
             }
         },
         update = {
@@ -162,6 +166,22 @@ private fun NativeGaussianPreviewView(
         },
         modifier = modifier
     )
+
+    if (!isRendererStarted) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colors.background),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "正在加载",
+                color = MaterialTheme.colors.onBackground.copy(alpha = 0.7f),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
 
     DisposableEffect(context, model.sensorSensitivity, previewFps) {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
