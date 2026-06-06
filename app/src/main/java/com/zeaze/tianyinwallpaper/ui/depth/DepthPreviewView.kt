@@ -92,7 +92,8 @@ private fun NativeGaussianPreviewView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val renderer = remember { NativeGaussianRendererFactory.create(context.applicationContext) }
+    val appContext = context.applicationContext
+    val renderer = remember(appContext) { NativeGaussianRendererFactory.create(appContext) }
     var scene by remember(model.gaussianUri) { mutableStateOf<GaussianPlyLoader.GaussianScene?>(null) }
 
     DisposableEffect(Unit) {
