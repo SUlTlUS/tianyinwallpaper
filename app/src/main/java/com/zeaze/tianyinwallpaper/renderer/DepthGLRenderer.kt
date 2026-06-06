@@ -160,7 +160,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
     override fun updateParams(parallaxStrength: Float, blurStrength: Float) {
         messageQueue.offer(
             RenderMessage.SetParams(
-                parallaxStrength.coerceIn(0.001f, 0.075f),
+                parallaxStrength.coerceIn(0f, 0.12f),
                 blurStrength.coerceIn(0f, 0.02f)
             )
         )
@@ -1352,7 +1352,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 vec3 target = vec3(
                     uSceneCenter.x + uCenterOffset.x * radius,
                     uSceneCenter.y + uCenterOffset.y * radius,
-                    max(uSceneCenter.z + radius * uFocusDepthOffset, 0.02)
+                    uSceneCenter.z + radius * uFocusDepthOffset
                 );
                 float frameDistance = max(uDefaultCameraDistance, radius * 0.02);
                 float distance = max(frameDistance / max(uCameraZoom, 0.6), radius * 0.02);
@@ -1485,7 +1485,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 vec3 target = vec3(
                     uSceneCenter.x + uCenterOffset.x * radius,
                     uSceneCenter.y + uCenterOffset.y * radius,
-                    max(uSceneCenter.z + radius * uFocusDepthOffset, 0.02)
+                    uSceneCenter.z + radius * uFocusDepthOffset
                 );
                 float frameDistance = max(uDefaultCameraDistance, radius * 0.02);
                 float distance = max(frameDistance / max(uCameraZoom, 0.6), radius * 0.02);
