@@ -48,6 +48,7 @@ class SuperSplatWebController(
         private set
     var onCenterOffsetChange: ((Float, Float) -> Unit)? = null
     var onRenderRequested: (() -> Unit)? = null
+    var onLoadingChanged: ((Boolean) -> Unit)? = null
     var pendingParams: SuperSplatWebParams? = null
     var pageReady: Boolean = false
         private set
@@ -90,6 +91,7 @@ class SuperSplatWebController(
         webView?.destroy()
         webView = null
         pageReady = false
+        onLoadingChanged?.invoke(false)
         loadedUriString = null
     }
 
@@ -101,6 +103,7 @@ class SuperSplatWebController(
         pageReady = false
         loadedUriString = uriString
         loadStartedMs = SystemClock.elapsedRealtime()
+        onLoadingChanged?.invoke(true)
         target.loadUrl(SUPER_SPLAT_URL)
     }
 
@@ -111,12 +114,14 @@ class SuperSplatWebController(
     fun onViewerReady() {
         Log.d(TAG, "viewer ready elapsedMs=${elapsedSinceLoadStart()} uri=$loadedUriString")
         pageReady = true
+        onLoadingChanged?.invoke(false)
         applyParams(resetCamera = true)
         onRenderRequested?.invoke()
     }
 
     fun onFirstFrame() {
         Log.d(TAG, "first frame elapsedMs=${elapsedSinceLoadStart()} uri=$loadedUriString")
+        onLoadingChanged?.invoke(false)
         onRenderRequested?.invoke()
     }
 

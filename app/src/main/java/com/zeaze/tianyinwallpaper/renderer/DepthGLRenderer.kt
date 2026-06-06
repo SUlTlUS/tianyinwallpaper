@@ -576,6 +576,32 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 1f
             )
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
+            val dotCount = 5
+            val baseSize = (minOf(sW, sH) * 0.018f).toInt().coerceIn(10, 28)
+            val gap = (baseSize * 1.55f).toInt()
+            val totalWidth = (dotCount - 1) * gap + baseSize
+            val startX = (sW - totalWidth) / 2
+            val centerY = sH / 2
+
+            GLES20.glEnable(GLES20.GL_SCISSOR_TEST)
+            for (i in 0 until dotCount) {
+                val phase = (t + i * 0.12f) % 1f
+                val wave = ((sin(phase * TWO_PI) + 1f) * 0.5f).coerceIn(0f, 1f)
+                val size = (baseSize * (0.65f + wave * 0.55f)).toInt().coerceAtLeast(6)
+                val alpha = 0.35f + wave * 0.55f
+                val x = startX + i * gap + (baseSize - size) / 2
+                val y = centerY - size / 2
+                GLES20.glScissor(x, y, size, size)
+                GLES20.glClearColor(
+                    0.34f + alpha * 0.22f,
+                    0.50f + alpha * 0.28f,
+                    0.95f,
+                    1f
+                )
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            }
+            GLES20.glDisable(GLES20.GL_SCISSOR_TEST)
         }
 
         private fun logNoContent(message: String) {

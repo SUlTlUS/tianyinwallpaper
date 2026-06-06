@@ -42,6 +42,7 @@ fun DepthPreviewView(
     model: DepthWallpaperModel?,
     previewFps: Int = 60,
     onModelChange: (DepthWallpaperModel) -> Unit = {},
+    onLoadingChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (model?.isGaussian() == true && model.gaussianUri.isNotBlank()) {
@@ -58,12 +59,14 @@ fun DepthPreviewView(
                 onCenterOffsetChange = { x, y ->
                     onModelChange(model.copy(centerOffsetX = x, centerOffsetY = y))
                 },
+                onLoadingChanged = onLoadingChanged,
                 modifier = modifier.fillMaxSize()
             )
         } else {
             NativeGaussianPreviewView(
                 model = model,
                 previewFps = previewFps,
+                onLoadingChanged = onLoadingChanged,
                 modifier = modifier.fillMaxSize()
             )
         }
@@ -89,6 +92,7 @@ fun DepthPreviewView(
 private fun NativeGaussianPreviewView(
     model: DepthWallpaperModel,
     previewFps: Int,
+    onLoadingChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -97,13 +101,20 @@ private fun NativeGaussianPreviewView(
     var scene by remember(model.gaussianUri) { mutableStateOf<GaussianPlyLoader.GaussianScene?>(null) }
     var isRendererStarted by remember { mutableStateOf(false) }
 
+    LaunchedEffect(scene, isRendererStarted) {
+        onLoadingChanged(scene == null || !isRendererStarted)
+    }
+
     DisposableEffect(Unit) {
         onDispose {
+            onLoadingChanged(false)
             renderer.stopAndWait(300)
         }
     }
 
     LaunchedEffect(model.gaussianUri, model.gaussianMaxSplats) {
+        onLoadingChanged(true)
+        scene = null
         scene = withContext(Dispatchers.IO) {
             val previewMaxSplats = model.nativePreviewMaxSplats()
             if (model.gaussianMaxSplats > previewMaxSplats) {

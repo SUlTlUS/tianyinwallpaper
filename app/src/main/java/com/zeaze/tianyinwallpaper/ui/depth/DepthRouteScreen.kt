@@ -18,9 +18,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,8 +33,16 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -56,14 +66,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -83,6 +96,9 @@ import com.zeaze.tianyinwallpaper.backdrop.effects.lens
 import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.service.DepthWallpaperService
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
@@ -94,6 +110,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
+import kotlin.math.roundToInt
 
 private enum class DepthAddKind {
     Gaussian,
@@ -447,8 +464,6 @@ fun DepthRouteScreen(
             itemsIndexed(wallpapers, key = { _, model -> model.id }) { _, model ->
                 DepthWallpaperCard(
                     model = model,
-                    active = model.id == activeId,
-                    selected = model.id == selectedId,
                     cardBackground = cardBackground,
                     onClick = {
                         selectedId = model.id
@@ -531,6 +546,8 @@ fun DepthRouteScreen(
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
                 contentColor = contentColor,
                 accentColor = accentColor,
+                containerColor = containerColor,
+                enableLiquidGlass = enableLiquidGlass,
                 onDismiss = { previewModel = null },
                 onApply = {
                     val committed = commitWallpaperDraft(model)
@@ -552,23 +569,89 @@ private fun DepthPreviewOverlay(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     contentColor: Color,
     accentColor: Color,
+    containerColor: Color,
+    enableLiquidGlass: Boolean,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
     onPickGaussian: () -> Unit,
     onModelChange: (DepthWallpaperModel) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val density = LocalDensity.current
+    val isLightTheme = MaterialTheme.colors.isLight
     val pillBackground = if (MaterialTheme.colors.isLight) Color(0x22FFFFFF) else Color(0x55222222)
+    val detailBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val coroutineScope = rememberCoroutineScope()
+    val animatedOffset = remember { Animatable(0f) }
+    val dismissThreshold = with(density) { 200.dp.toPx() }
+    val bottomPadding = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 78.dp
+    var previewLoading by remember(model.id, model.gaussianUri, model.gaussianRenderMode, model.gaussianMaxSplats) {
+        mutableStateOf(true)
+    }
+
+    val luminanceRegions = remember {
+        mapOf(
+            "cancel" to Rect(0f, 0f, 0.18f, 0.1f),
+            "apply" to Rect(0.82f, 0f, 1f, 0.1f),
+            "gaussian" to Rect(0.36f, 0.9f, 0.64f, 1f)
+        )
+    }
+    val luminanceSampler = if (detailBackdrop != null) {
+        rememberMultiRegionLuminanceSampler(
+            enabled = true,
+            sampleLayer = detailBackdrop.graphicsLayer,
+            regions = luminanceRegions,
+            sampleIntervalMs = 200L
+        )
+    } else {
+        null
+    }
+    val cancelLuminanceState = luminanceSampler?.let { rememberRegionLuminanceState(it, "cancel") }
+    val applyLuminanceState = luminanceSampler?.let { rememberRegionLuminanceState(it, "apply") }
+    val gaussianLuminanceState = luminanceSampler?.let { rememberRegionLuminanceState(it, "gaussian") }
+
+    fun closeWithAnimation() {
+        coroutineScope.launch {
+            animatedOffset.animateTo(2000f, animationSpec = tween(250))
+            onDismiss()
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        DepthPreviewView(
-            model = model,
-            onModelChange = onModelChange,
-            modifier = Modifier.fillMaxSize()
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .let { m ->
+                    if (detailBackdrop != null) m.layerBackdrop(detailBackdrop) else m
+                }
+        ) {
+            DepthPreviewView(
+                model = model,
+                onModelChange = onModelChange,
+                onLoadingChanged = { previewLoading = it },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        if (previewLoading) {
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+                Text(
+                    text = "正在加载",
+                    color = Color.White.copy(alpha = 0.82f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
 
         Row(
             modifier = Modifier
@@ -577,26 +660,90 @@ private fun DepthPreviewOverlay(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            DepthPreviewPill(
-                text = "取消",
-                color = contentColor,
-                background = pillBackground,
-                onClick = onDismiss
-            )
-            DepthPreviewPill(
-                text = "应用",
-                color = Color.White,
-                background = Color(0x662A83FF),
-                onClick = onApply
-            )
+            if (detailBackdrop != null) {
+                LiquidButton(
+                    onClick = { closeWithAnimation() },
+                    backdrop = detailBackdrop,
+                    surfaceColor = pillBackground,
+                    luminanceState = cancelLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "取消",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(
+                            color = cancelLuminanceState?.contentColor ?: contentColor,
+                            fontSize = 15.sp
+                        )
+                    )
+                }
+                LiquidButton(
+                    onClick = { if (!previewLoading) onApply() },
+                    backdrop = detailBackdrop,
+                    surfaceColor = if (previewLoading) Color.Gray.copy(alpha = 0.5f)
+                    else accentColor.copy(alpha = 0.75f),
+                    tint = if (previewLoading) Color.Unspecified else accentColor,
+                    luminanceState = applyLuminanceState,
+                    modifier = Modifier
+                        .height(44.dp)
+                        .graphicsLayer { alpha = if (previewLoading) 0.5f else 1f }
+                ) {
+                    BasicText(
+                        "应用",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(
+                            color = if (previewLoading) Color.White.copy(alpha = 0.5f) else Color.White,
+                            fontSize = 15.sp
+                        )
+                    )
+                }
+            } else {
+                DepthPreviewPill(
+                    text = "取消",
+                    color = contentColor,
+                    background = pillBackground,
+                    onClick = { closeWithAnimation() }
+                )
+                DepthPreviewPill(
+                    text = "应用",
+                    color = if (previewLoading) Color.White.copy(alpha = 0.5f) else Color.White,
+                    background = if (previewLoading) Color.Gray.copy(alpha = 0.3f) else Color(0x662A83FF),
+                    onClick = { if (!previewLoading) onApply() }
+                )
+            }
         }
 
         DepthParamPanel(
             model = model,
             onModelChange = onModelChange,
+            backdrop = detailBackdrop,
+            containerColor = containerColor,
+            isLightTheme = isLightTheme,
+            sheetOffset = animatedOffset.value,
+            onDrag = { dragY ->
+                coroutineScope.launch {
+                    animatedOffset.snapTo((animatedOffset.value + dragY).coerceAtLeast(0f))
+                }
+            },
+            onDragEnd = {
+                coroutineScope.launch {
+                    if (animatedOffset.value > dismissThreshold) {
+                        animatedOffset.animateTo(2000f, animationSpec = tween(200))
+                        onDismiss()
+                    } else {
+                        animatedOffset.animateTo(
+                            0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            )
+                        )
+                    }
+                }
+            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(start = 16.dp, end = 16.dp, bottom = 78.dp)
+                .padding(start = 16.dp, end = 16.dp, bottom = bottomPadding)
         )
 
         Box(
@@ -604,13 +751,30 @@ private fun DepthPreviewOverlay(
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 24.dp)
         ) {
-            DepthPreviewKindPill(
-                text = "Gaussian",
-                selected = true,
-                contentColor = contentColor,
-                accentColor = accentColor,
-                onClick = onPickGaussian
-            )
+            if (detailBackdrop != null) {
+                LiquidButton(
+                    onClick = onPickGaussian,
+                    backdrop = detailBackdrop,
+                    surfaceColor = accentColor.copy(alpha = 0.75f),
+                    tint = accentColor,
+                    luminanceState = gaussianLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "Gaussian",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(Color.White, 15.sp)
+                    )
+                }
+            } else {
+                DepthPreviewKindPill(
+                    text = "Gaussian",
+                    selected = true,
+                    contentColor = contentColor,
+                    accentColor = accentColor,
+                    onClick = onPickGaussian
+                )
+            }
         }
     }
 }
@@ -619,16 +783,67 @@ private fun DepthPreviewOverlay(
 private fun DepthParamPanel(
     model: DepthWallpaperModel,
     onModelChange: (DepthWallpaperModel) -> Unit,
+    backdrop: Backdrop?,
+    containerColor: Color,
+    isLightTheme: Boolean,
+    sheetOffset: Float,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color(0x99000000))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .offset { IntOffset(0, sheetOffset.roundToInt()) }
+            .then(
+                if (backdrop != null) {
+                    Modifier.drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { RoundedRectangle(41f.dp) },
+                        effects = {
+                            colorControls(
+                                brightness = if (isLightTheme) 0.2f else 0f,
+                                saturation = 1.5f
+                            )
+                            blur(if (isLightTheme) 16f.dp.toPx() else 8f.dp.toPx())
+                            lens(16f.dp.toPx(), 32f.dp.toPx(), depthEffect = true)
+                        },
+                        highlight = { Highlight.Plain },
+                        onDrawSurface = { drawRect(containerColor) }
+                    )
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0x99000000))
+                }
+            )
+            .combinedClickable(onClick = {})
+            .padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragEnd = onDragEnd,
+                        onDragCancel = onDragEnd
+                    ) { change, dragAmount ->
+                        change.consume()
+                        onDrag(dragAmount.y)
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 4.dp)
+                    .width(40.dp)
+                    .height(4.dp)
+                    .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+            )
+        }
         DepthParamSlider(
             label = "灵敏度",
             value = model.sensorSensitivity,
@@ -803,8 +1018,6 @@ private fun DepthPreviewKindPill(
 @Composable
 private fun DepthWallpaperCard(
     model: DepthWallpaperModel,
-    active: Boolean,
-    selected: Boolean,
     cardBackground: Color,
     onClick: () -> Unit,
     onDelete: () -> Unit
@@ -819,13 +1032,6 @@ private fun DepthWallpaperCard(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(screenAspect)
-            .then(
-                if (selected) {
-                    Modifier.border(2.dp, Color(0xFF2A83FF), RoundedCornerShape(16.dp))
-                } else {
-                    Modifier
-                }
-            )
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black)
             .clickable(onClick = onClick)
@@ -842,18 +1048,6 @@ private fun DepthWallpaperCard(
                 .background(Color(0x66000000), RoundedCornerShape(16.dp))
                 .padding(horizontal = 6.dp, vertical = 2.dp)
         )
-        if (active) {
-            Text(
-                text = "使用中",
-                color = Color.White,
-                fontSize = 11.sp,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 3.dp)
-                    .background(Color(0x66000000), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            )
-        }
         Text(
             text = "×",
             color = Color.White,

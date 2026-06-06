@@ -36,6 +36,7 @@ fun SuperSplatWebView(
     focusDepth: Float,
     previewFps: Int,
     onCenterOffsetChange: (Float, Float) -> Unit,
+    onLoadingChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -63,6 +64,7 @@ fun SuperSplatWebView(
         update = { webView ->
             controller.attachWebView(webView)
             controller.onCenterOffsetChange = onCenterOffsetChange
+            controller.onLoadingChanged = onLoadingChanged
             controller.modelUri = modelUri
             controller.pendingParams = params
             controller.loadModelIfNeeded(uriString)
