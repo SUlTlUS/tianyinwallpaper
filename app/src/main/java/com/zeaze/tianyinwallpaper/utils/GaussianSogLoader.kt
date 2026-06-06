@@ -68,6 +68,27 @@ object GaussianSogLoader {
         val minSplatCount: Int
     )
 
+    private data class SogCameraDefaults(
+        val target: FloatArray,
+        val position: FloatArray?
+    ) {
+        fun distance(): Float? {
+            val source = position ?: return null
+            val dx = source[0] - target[0]
+            val dy = source[1] - target[1]
+            val dz = source[2] - target[2]
+            return sqrt(dx * dx + dy * dy + dz * dz).takeIf { it.isFinite() && it > 0f }
+        }
+
+        fun withDepthFlip(flipZ: Boolean): SogCameraDefaults {
+            if (!flipZ) return this
+            val flippedTarget = target.copyOf()
+            flippedTarget[2] = -flippedTarget[2]
+            val flippedPosition = position?.copyOf()?.also { it[2] = -it[2] }
+            return SogCameraDefaults(flippedTarget, flippedPosition)
+        }
+    }
+
     private class SogSplatAccumulator(capacity: Int) {
         val x = FloatArray(capacity)
         val y = FloatArray(capacity)
@@ -207,6 +228,8 @@ object GaussianSogLoader {
         require(meta.getIntValue("version") == 2) { "Unsupported SOG version: ${meta.getIntValue("version")}" }
         val count = meta.getIntValue("count")
         require(count > 0) { "SOG has no splats" }
+        val cameraDefaults = meta.readCameraDefaults()
+            ?: files.findEntry("settings.json")?.let { JSON.parseObject(String(it, StandardCharsets.UTF_8)).readCameraDefaults() }
         val splatLimit = maxSplats
             .coerceIn(MIN_SPLAT_LIMIT, MAX_SPLAT_LIMIT)
             .coerceAtMost(count)
@@ -266,6 +289,7 @@ object GaussianSogLoader {
             imageWidth = DEFAULT_IMAGE_WIDTH,
             imageHeight = DEFAULT_IMAGE_HEIGHT,
             focalLengthPx = DEFAULT_FOCAL_LENGTH,
+            cameraDefaults = cameraDefaults?.withDepthFlip(flipZ),
             sourceLabel = "SOG"
         )
     }
@@ -348,6 +372,7 @@ object GaussianSogLoader {
         imageWidth: Int,
         imageHeight: Int,
         focalLengthPx: Float,
+        cameraDefaults: SogCameraDefaults?,
         sourceLabel: String
     ): GaussianPlyLoader.GaussianScene {
         val count = splats.count
@@ -464,10 +489,13 @@ object GaussianSogLoader {
             imageHeight = imageHeight,
             focalLengthPx = focalLengthPx
         )
+        val cameraTarget = cameraDefaults?.target
+        val cameraDistance = cameraDefaults?.distance()
         Log.d(
             TAG,
             "built SOG scene count=$count visible=${splats.screenVisibleCount} aux=${count - splats.screenVisibleCount} " +
-                "near=$near far=$far radius=${bounds.radius} distance=${bounds.defaultCameraDistance} " +
+                "near=$near far=$far radius=${bounds.radius} distance=${cameraDistance ?: bounds.defaultCameraDistance} " +
+                "target=${cameraTarget?.joinToString(prefix = "[", postfix = "]") { String.format(Locale.US, "%.3f", it) } ?: "bounds"} " +
                 "heap=${Runtime.getRuntime().totalMemory() / 1024 / 1024}MB"
         )
         return GaussianPlyLoader.GaussianScene(
@@ -490,11 +518,11 @@ object GaussianSogLoader {
             backgroundR = (splats.backgroundR / colorWeight).coerceIn(0f, 1f),
             backgroundG = (splats.backgroundG / colorWeight).coerceIn(0f, 1f),
             backgroundB = (splats.backgroundB / colorWeight).coerceIn(0f, 1f),
-            sceneCenterX = bounds.centerX,
-            sceneCenterY = bounds.centerY,
-            sceneCenterZ = bounds.centerZ,
+            sceneCenterX = cameraTarget?.get(0) ?: bounds.centerX,
+            sceneCenterY = cameraTarget?.get(1) ?: bounds.centerY,
+            sceneCenterZ = cameraTarget?.get(2) ?: bounds.centerZ,
             sceneRadius = bounds.radius,
-            defaultCameraDistance = bounds.defaultCameraDistance,
+            defaultCameraDistance = cameraDistance ?: bounds.defaultCameraDistance,
             rotations = rotations
         )
     }
@@ -604,6 +632,33 @@ object GaussianSogLoader {
         val array = getJSONArray(key) ?: error("SOG missing $label")
         require(array.size >= minCount) { "SOG $label requires at least $minCount values" }
         return array.toFloatArray()
+    }
+
+    private fun JSONObject.readCameraDefaults(): SogCameraDefaults? {
+        val initial = getJSONArray("cameras")
+            ?.getJSONObject(0)
+            ?.getJSONObject("initial")
+            ?: getJSONObject("camera")?.getJSONObject("initial")
+            ?: getJSONObject("initialCamera")
+            ?: getJSONObject("initial")
+            ?: this
+        val target = initial.optionalFloatArray("target", 3)
+            ?: initial.optionalFloatArray("lookAt", 3)
+            ?: initial.optionalFloatArray("focus", 3)
+            ?: return null
+        val position = initial.optionalFloatArray("position", 3)
+            ?: initial.optionalFloatArray("eye", 3)
+        return SogCameraDefaults(
+            target = target,
+            position = position
+        )
+    }
+
+    private fun JSONObject.optionalFloatArray(key: String, minCount: Int): FloatArray? {
+        val array = getJSONArray(key) ?: return null
+        if (array.size < minCount) return null
+        val values = FloatArray(minCount) { index -> array.getDoubleValue(index).toFloat() }
+        return values.takeIf { candidate -> candidate.all { it.isFinite() } }
     }
 
     private fun JSONArray.toFloatArray(): FloatArray {
@@ -764,6 +819,7 @@ object GaussianSogLoader {
     private fun shouldKeepBundledEntry(baseName: String): Boolean {
         val lower = baseName.lowercase()
         if (lower == "meta.json") return true
+        if (lower == "settings.json") return true
         if (!lower.endsWith(".webp")) return false
         if (lower.startsWith("sh") && !lower.startsWith("sh0")) return false
         return true
