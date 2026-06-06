@@ -565,7 +565,7 @@ private fun DepthParamPanel(
                 )
             }
             DepthParamSlider(
-                label = "密度",
+                label = "壁纸密度",
                 value = model.gaussianMaxSplats.toFloat(),
                 valueText = formatSplatBudget(model.gaussianMaxSplats),
                 range = GAUSSIAN_MIN_SPLAT_BUDGET.toFloat()..GAUSSIAN_FULL_SPLAT_BUDGET.toFloat(),

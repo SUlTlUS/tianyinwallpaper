@@ -355,9 +355,11 @@ class DepthWallpaperService : WallpaperService() {
                     maxSplats = fastMaxSplats,
                     viewportAspect = viewportAspect
                 )
-                val fastScene = fastResult.scene
+                var fastScene = fastResult.scene
+                val fastSceneCount = fastScene?.count ?: 0
                 if (fastScene != null && currentVersion == loadVersion && isVisible && surfaceReady) {
                     deliverNativeGaussianScene(fastScene, targetKey, reason, "fast", viewportAspect, fastResult.elapsedMs)
+                    fastScene = null
                 } else {
                     Log.w(
                         TAG,
@@ -373,6 +375,10 @@ class DepthWallpaperService : WallpaperService() {
                 }
 
                 if (targetMaxSplats <= fastMaxSplats) return@Thread
+                GaussianSceneLoader.clearSceneCache()
+                Runtime.getRuntime().gc()
+                Thread.sleep(SERVICE_FULL_GAUSSIAN_DELAY_MS)
+                if (currentVersion != loadVersion || !isVisible || !surfaceReady) return@Thread
                 val fullResult = GaussianSceneLoader.loadSceneDetailed(
                     context = applicationContext,
                     uriString = target.gaussianUri,
@@ -382,7 +388,7 @@ class DepthWallpaperService : WallpaperService() {
                 val fullScene = fullResult.scene
                 if (
                     fullScene != null &&
-                    fullScene.count > fastScene.count &&
+                    fullScene.count > fastSceneCount &&
                     currentVersion == loadVersion &&
                     isVisible &&
                     surfaceReady
@@ -394,6 +400,10 @@ class DepthWallpaperService : WallpaperService() {
                         "loadContent gaussian native full skipped reason=$reason " +
                             "elapsedMs=${fullResult.elapsedMs} error=${fullResult.error}"
                     )
+                    if (fullResult.error.isLikelyGaussianOutOfMemory()) {
+                        GaussianSceneLoader.clearSceneCache()
+                        Runtime.getRuntime().gc()
+                    }
                 }
             }.also { it.name = "DepthGaussianFallbackLoader" }.start()
         }
@@ -558,6 +568,12 @@ class DepthWallpaperService : WallpaperService() {
 
         private fun DepthWallpaperModel.renderGaussianMaxSplats(): Int {
             return gaussianMaxSplats.coerceIn(SERVICE_MIN_GAUSSIAN_SPLATS, SERVICE_MAX_GAUSSIAN_SPLATS)
+        }
+
+        private fun String?.isLikelyGaussianOutOfMemory(): Boolean {
+            if (this == null) return false
+            return contains("OutOfMemory", ignoreCase = true) ||
+                contains("Failed to allocate", ignoreCase = true)
         }
 
         private fun registerSensor() {
@@ -904,6 +920,7 @@ class DepthWallpaperService : WallpaperService() {
         private const val RESUME_RENDER_KICK_MS = 250L
         private const val SERVICE_MIN_GAUSSIAN_SPLATS = 500_000
         private const val SERVICE_FAST_GAUSSIAN_SPLATS = 800_000
+        private const val SERVICE_FULL_GAUSSIAN_DELAY_MS = 1_000L
         private const val SERVICE_MAX_GAUSSIAN_SPLATS = 1_500_000
     }
 }

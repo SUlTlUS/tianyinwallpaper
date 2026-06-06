@@ -338,15 +338,15 @@ class DepthGLRenderer : NativeGaussianRenderer {
                         is RenderMessage.LoadGaussians -> {
                             deleteGaussianLayerTextures()
                             deleteGaussianBuffers()
-                            gaussianScene = message.scene
-                            uploadGaussianBuffers(message.scene)
-                            resetSplatBudget(message.scene)
-                            cW = message.scene.imageWidth.coerceAtLeast(1)
-                            cH = message.scene.imageHeight.coerceAtLeast(1)
+                            val retainedScene = uploadGaussianBuffers(message.scene)
+                            gaussianScene = retainedScene
+                            resetSplatBudget(retainedScene)
+                            cW = retainedScene.imageWidth.coerceAtLeast(1)
+                            cH = retainedScene.imageHeight.coerceAtLeast(1)
                             needsDraw = true
                             Log.d(
                                 TAG,
-                                "thread loaded gaussians count=${message.scene.count} " +
+                                "thread loaded gaussians count=${retainedScene.count} " +
                                     "budget=$currentSplatBudget/$targetSplatBudget " +
                                     "loading=${targetSplatBudget - currentSplatBudget}"
                             )
@@ -945,13 +945,13 @@ class DepthGLRenderer : NativeGaussianRenderer {
             scene.scales.position(0)
         }
 
-        private fun uploadGaussianBuffers(scene: GaussianPlyLoader.GaussianScene) {
+        private fun uploadGaussianBuffers(scene: GaussianPlyLoader.GaussianScene): GaussianPlyLoader.GaussianScene {
             drainGlErrors("before gaussian VBO upload")
             val rotations = scene.rotations
             if (rotations == null) {
                 Log.w(TAG, "gaussian quad renderer requires rotation buffer")
                 gaussianVboSet = null
-                return
+                return scene
             }
             val ids = IntArray(4)
             GLES20.glGenBuffers(ids.size, ids, 0)
@@ -959,7 +959,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 Log.w(TAG, "glGenBuffers failed for gaussian scene")
                 GLES20.glDeleteBuffers(ids.size, ids, 0)
                 gaussianVboSet = null
-                return
+                return scene
             }
 
             val uploaded =
@@ -976,17 +976,29 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 GLES20.glDeleteBuffers(ids.size, ids, 0)
                 gaussianVboSet = null
                 Log.w(TAG, "gaussian VBO upload failed; quad renderer will not draw without VBO")
-                return
+                return scene
             }
+            val retainedScene = if (gaussianParams.useLayerCache) scene else scene.withoutCpuSplatBuffers()
             gaussianVboSet = GaussianVboSet(
-                scene = scene,
+                scene = retainedScene,
                 positionBuffer = ids[0],
                 colorBuffer = ids[1],
                 scaleBuffer = ids[2],
                 rotationBuffer = ids[3],
-                count = scene.count
+                count = retainedScene.count
             )
             Log.d(TAG, "uploaded gaussian VBO count=${scene.count}")
+            return retainedScene
+        }
+
+        private fun GaussianPlyLoader.GaussianScene.withoutCpuSplatBuffers(): GaussianPlyLoader.GaussianScene {
+            val empty = FloatBuffer.allocate(0)
+            return copy(
+                positions = empty,
+                colors = empty.duplicate(),
+                scales = empty.duplicate(),
+                rotations = empty.duplicate()
+            )
         }
 
         private fun uploadFloatBuffer(

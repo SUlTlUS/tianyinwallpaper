@@ -104,10 +104,17 @@ private fun NativeGaussianPreviewView(
 
     LaunchedEffect(model.gaussianUri, model.gaussianMaxSplats) {
         scene = withContext(Dispatchers.IO) {
+            val previewMaxSplats = model.nativePreviewMaxSplats()
+            if (model.gaussianMaxSplats > previewMaxSplats) {
+                Log.d(
+                    TAG,
+                    "native preview splat budget capped requested=${model.gaussianMaxSplats} preview=$previewMaxSplats"
+                )
+            }
             val result = GaussianSceneLoader.loadSceneDetailed(
                 context = context.applicationContext,
                 uriString = model.gaussianUri,
-                maxSplats = model.nativePreviewMaxSplats(),
+                maxSplats = previewMaxSplats,
                 viewportAspect = context.resources.displayMetrics.widthPixels.toFloat() /
                     context.resources.displayMetrics.heightPixels.coerceAtLeast(1).toFloat()
             )
@@ -221,7 +228,7 @@ private fun NativeGaussianPreviewView(
 
 private const val TAG = "DepthPreviewView"
 private const val NATIVE_PREVIEW_MIN_GAUSSIAN_SPLATS = 500_000
-private const val NATIVE_PREVIEW_MAX_GAUSSIAN_SPLATS = 1_500_000
+private const val NATIVE_PREVIEW_MAX_GAUSSIAN_SPLATS = 800_000
 
 private fun DepthWallpaperModel.nativePreviewMaxSplats(): Int {
     return gaussianMaxSplats.coerceIn(
