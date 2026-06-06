@@ -520,7 +520,7 @@ class DepthWallpaperService : WallpaperService() {
         }
 
         private fun DepthWallpaperModel.contentKey(): String {
-            return "$id|$gaussianUri|$gaussianRenderMode|gaussian-v9"
+            return "$id|$gaussianUri|$gaussianRenderMode|gaussian-v10"
         }
 
         private fun DepthWallpaperModel.renderParallaxStrength(): Float {
