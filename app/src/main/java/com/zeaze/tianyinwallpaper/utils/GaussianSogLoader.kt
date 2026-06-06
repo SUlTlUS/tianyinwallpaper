@@ -9,12 +9,13 @@ import com.alibaba.fastjson.JSON
 import com.alibaba.fastjson.JSONArray
 import com.alibaba.fastjson.JSONObject
 import java.io.ByteArrayInputStream
+import java.io.File
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
-import java.util.zip.ZipInputStream
+import java.util.zip.ZipFile
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.exp
@@ -719,22 +720,28 @@ object GaussianSogLoader {
     }
 
     private fun readBundledFiles(context: Context, input: InputStream): Map<String, ByteArray> {
-        return ZipInputStream(input.buffered()).use { zip ->
-            val entries = HashMap<String, ByteArray>()
-            while (true) {
-                val entry = zip.nextEntry ?: break
-                if (!entry.isDirectory) {
-                    val name = entry.name
-                    val baseName = entryBaseName(name)
-                    if (shouldKeepBundledEntry(baseName)) {
-                        val bytes = zip.readBytes()
-                        entries.storeEntry(name, bytes)
-                        entries.storeEntry(baseName, bytes)
+        val tempFile = File.createTempFile("gaussian_sog_", ".sog", context.cacheDir)
+        return try {
+            tempFile.outputStream().use { output -> input.copyTo(output) }
+            ZipFile(tempFile).use { zip ->
+                val entries = HashMap<String, ByteArray>()
+                val zipEntries = zip.entries()
+                while (zipEntries.hasMoreElements()) {
+                    val entry = zipEntries.nextElement()
+                    if (!entry.isDirectory) {
+                        val name = entry.name
+                        val baseName = entryBaseName(name)
+                        if (shouldKeepBundledEntry(baseName)) {
+                            val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                            entries.storeEntry(name, bytes)
+                            entries.storeEntry(baseName, bytes)
+                        }
                     }
                 }
-                zip.closeEntry()
+                entries
             }
-            entries
+        } finally {
+            tempFile.delete()
         }
     }
 
