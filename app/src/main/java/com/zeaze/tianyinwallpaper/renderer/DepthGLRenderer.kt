@@ -239,6 +239,9 @@ class DepthGLRenderer : NativeGaussianRenderer {
         private var gaussianLayerBuildFailedScene: GaussianPlyLoader.GaussianScene? = null
         private var gaussianLayerTextureWidth = 1
         private var gaussianLayerTextureHeight = 1
+        private var currentSplatBudget = 0
+        private var targetSplatBudget = 0
+        private var lastSplatBudgetStepMs = 0L
         private var drawCount = 0L
         private var lastDrawLogMs = 0L
         private var lastNoContentLogMs = 0L
@@ -330,10 +333,16 @@ class DepthGLRenderer : NativeGaussianRenderer {
                             deleteGaussianBuffers()
                             gaussianScene = message.scene
                             uploadGaussianBuffers(message.scene)
+                            resetSplatBudget(message.scene)
                             cW = message.scene.imageWidth.coerceAtLeast(1)
                             cH = message.scene.imageHeight.coerceAtLeast(1)
                             needsDraw = true
-                            Log.d(TAG, "thread loaded gaussians count=${message.scene.count}")
+                            Log.d(
+                                TAG,
+                                "thread loaded gaussians count=${message.scene.count} " +
+                                    "budget=$currentSplatBudget/$targetSplatBudget " +
+                                    "loading=${targetSplatBudget - currentSplatBudget}"
+                            )
                         }
                         is RenderMessage.SetParams -> {
                             parallaxStrength = message.parallaxStrength
@@ -361,6 +370,9 @@ class DepthGLRenderer : NativeGaussianRenderer {
 
                 if (!isThreadActive()) break
                 if (consumePendingTilt()) {
+                    needsDraw = true
+                }
+                if (timedRenderDue && advanceSplatBudgetIfNeeded()) {
                     needsDraw = true
                 }
                 if (needsDraw) {
@@ -482,7 +494,11 @@ class DepthGLRenderer : NativeGaussianRenderer {
         }
 
         private fun nextTimedRenderDelayMs(): Long {
-            return Long.MAX_VALUE
+            if (gaussianScene == null || currentSplatBudget >= targetSplatBudget) {
+                return Long.MAX_VALUE
+            }
+            val now = SystemClock.elapsedRealtime()
+            return (lastSplatBudgetStepMs + SPLAT_BUDGET_STEP_INTERVAL_MS - now).coerceAtLeast(0L)
         }
 
         private fun draw() {
@@ -525,9 +541,11 @@ class DepthGLRenderer : NativeGaussianRenderer {
             val now = SystemClock.elapsedRealtime()
             if (!swapped || now - lastDrawLogMs > DRAW_LOG_INTERVAL_MS) {
                 lastDrawLogMs = now
+                val loading = (targetSplatBudget - currentSplatBudget).coerceAtLeast(0)
                 Log.d(
                     TAG,
                     "draw #$drawCount mode=$mode swapped=$swapped size=${sW}x$sH content=${cW}x$cH " +
+                        "ready=${loading == 0} loading=$loading budget=$currentSplatBudget/$targetSplatBudget " +
                         "tilt=(${String.format("%.3f", tiltX)}, ${String.format("%.3f", tiltY)}) " +
                         "queue=${messageQueue.size} renderQueued=${renderQueued.get()} tiltQueued=${tiltQueued.get()}"
                 )
@@ -553,6 +571,11 @@ class DepthGLRenderer : NativeGaussianRenderer {
         private fun drawGaussianQuads(scene: GaussianPlyLoader.GaussianScene) {
             val vbo = gaussianVboSet?.takeIf { it.scene === scene && it.count == scene.count } ?: run {
                 drawGaussianUnavailable(scene, "missing gaussian VBO for quad renderer")
+                return
+            }
+            val drawSplatCount = currentSplatBudget.coerceIn(0, scene.count)
+            if (drawSplatCount <= 0) {
+                drawGaussianUnavailable(scene, "splat budget is zero")
                 return
             }
             GLES20.glViewport(0, 0, sW, sH)
@@ -630,11 +653,37 @@ class DepthGLRenderer : NativeGaussianRenderer {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uAlphaFalloff"), gaussianParams.alphaFalloff)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uQuadExtent"), GAUSSIAN_QUAD_EXTENT)
 
-            GLES30.glDrawArraysInstanced(GLES20.GL_TRIANGLES, 0, GAUSSIAN_QUAD_VERTEX_COUNT, scene.count)
+            GLES30.glDrawArraysInstanced(GLES20.GL_TRIANGLES, 0, GAUSSIAN_QUAD_VERTEX_COUNT, drawSplatCount)
             logGlError("gaussian draw quads")
 
             disableGaussianQuadVertexAttributes()
             GLES20.glDisable(GLES20.GL_BLEND)
+        }
+
+        private fun resetSplatBudget(scene: GaussianPlyLoader.GaussianScene) {
+            targetSplatBudget = scene.count.coerceAtLeast(0)
+            currentSplatBudget = if (targetSplatBudget <= SPLAT_BUDGET_INITIAL) {
+                targetSplatBudget
+            } else {
+                SPLAT_BUDGET_INITIAL
+            }
+            lastSplatBudgetStepMs = SystemClock.elapsedRealtime()
+        }
+
+        private fun advanceSplatBudgetIfNeeded(): Boolean {
+            if (currentSplatBudget >= targetSplatBudget) return false
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastSplatBudgetStepMs < SPLAT_BUDGET_STEP_INTERVAL_MS) return false
+            currentSplatBudget = (currentSplatBudget + SPLAT_BUDGET_STEP)
+                .coerceAtMost(targetSplatBudget)
+            lastSplatBudgetStepMs = now
+            Log.d(
+                TAG,
+                "splat budget step ready=${currentSplatBudget >= targetSplatBudget} " +
+                    "loading=${targetSplatBudget - currentSplatBudget} " +
+                    "budget=$currentSplatBudget/$targetSplatBudget"
+            )
+            return true
         }
 
         private fun drawGaussianUnavailable(scene: GaussianPlyLoader.GaussianScene, reason: String = "quad renderer unavailable") {
@@ -1256,6 +1305,9 @@ class DepthGLRenderer : NativeGaussianRenderer {
         private const val GAUSSIAN_TAN_HALF_FOV = 0.57735026f
         private const val FLOAT_SIZE_BYTES = 4
         private const val ENABLE_GAUSSIAN_LAYER_CACHE = false
+        private const val SPLAT_BUDGET_INITIAL = 500_000
+        private const val SPLAT_BUDGET_STEP = 250_000
+        private const val SPLAT_BUDGET_STEP_INTERVAL_MS = 120L
 
         private const val GAUSSIAN_VERTEX_SHADER = """
             attribute vec3 aPos;

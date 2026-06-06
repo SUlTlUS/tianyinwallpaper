@@ -841,6 +841,6 @@ class DepthWallpaperService : WallpaperService() {
         private const val WEBVIEW_FRAME_INTERVAL_MS = 16L
         private const val WEBVIEW_READY_TIMEOUT_MS = 4_000L
         private const val SERVICE_FAST_GAUSSIAN_SPLATS = 500_000
-        private const val SERVICE_MAX_GAUSSIAN_SPLATS = 1_200_000
+        private const val SERVICE_MAX_GAUSSIAN_SPLATS = 1_500_000
     }
 }
