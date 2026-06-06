@@ -43,7 +43,6 @@ object GaussianPlyLoader {
         val sceneCenterZ: Float = 1f,
         val sceneRadius: Float = 1f,
         val defaultCameraDistance: Float = 1f,
-        val hasCameraDefaults: Boolean = false,
         val rotations: FloatBuffer? = null
     )
 
