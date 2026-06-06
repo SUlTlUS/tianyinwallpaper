@@ -18,6 +18,11 @@ android {
         versionCode = 39
         versionName = "3.6.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++17", "-Wall", "-Wextra")
+            }
+        }
     }
 
     signingConfigs {
@@ -74,6 +79,13 @@ android {
 
     androidResources {
         noCompress += listOf("tflite", "lite")
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 }
 

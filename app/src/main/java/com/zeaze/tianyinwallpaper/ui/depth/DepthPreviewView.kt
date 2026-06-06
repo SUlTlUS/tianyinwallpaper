@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
+import com.zeaze.tianyinwallpaper.renderer.NativeGaussianRendererFactory
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import kotlinx.coroutines.Dispatchers
@@ -91,7 +92,7 @@ private fun NativeGaussianPreviewView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val renderer = remember { DepthGLRenderer() }
+    val renderer = remember { NativeGaussianRendererFactory.create(context.applicationContext) }
     var scene by remember(model.gaussianUri) { mutableStateOf<GaussianPlyLoader.GaussianScene?>(null) }
 
     DisposableEffect(Unit) {

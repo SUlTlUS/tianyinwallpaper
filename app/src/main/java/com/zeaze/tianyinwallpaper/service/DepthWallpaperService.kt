@@ -23,6 +23,8 @@ import android.webkit.WebView
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
+import com.zeaze.tianyinwallpaper.renderer.NativeGaussianRenderer
+import com.zeaze.tianyinwallpaper.renderer.NativeGaussianRendererFactory
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
@@ -44,7 +46,7 @@ class DepthWallpaperService : WallpaperService() {
     }
 
     inner class DepthWallpaperEngine : Engine() {
-        private var renderer: DepthGLRenderer? = null
+        private var renderer: NativeGaussianRenderer? = null
         private var webSplatController: SuperSplatWebController? = null
         private var webSplatView: WebView? = null
         private var sensorManager: SensorManager? = null
@@ -149,7 +151,7 @@ class DepthWallpaperService : WallpaperService() {
             sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
             motionSensor = findMotionSensor()
             windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            renderer = DepthGLRenderer().also { it.setRenderingEnabled(false) }
+            renderer = NativeGaussianRendererFactory.create(this@DepthWallpaperService).also { it.setRenderingEnabled(false) }
             loadActiveModel()
             Log.d(TAG, "onCreate sensor=${motionSensor?.name ?: "none"} model=${model?.id} gaussian=${model?.isGaussian()}")
         }
@@ -486,7 +488,7 @@ class DepthWallpaperService : WallpaperService() {
         }
 
         private fun DepthWallpaperModel.contentKey(): String {
-            return "$id|$gaussianUri|$gaussianRenderMode|gaussian-v8"
+            return "$id|$gaussianUri|$gaussianRenderMode|gaussian-v9"
         }
 
         private fun DepthWallpaperModel.renderParallaxStrength(): Float {

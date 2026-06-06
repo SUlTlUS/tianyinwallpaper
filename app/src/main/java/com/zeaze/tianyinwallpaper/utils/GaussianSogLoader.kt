@@ -290,12 +290,14 @@ object GaussianSogLoader {
         if (count > splatLimit && !GaussianPlyLoader.shouldKeepAuxiliarySplat(index, count, splatLimit)) {
             return
         }
-        val x = decodePosition(index, 0, meansL, meansU, mins, maxs)
-        val y = decodePosition(index, 1, meansL, meansU, mins, maxs)
+        val decodedX = decodePosition(index, 0, meansL, meansU, mins, maxs)
+        val decodedY = decodePosition(index, 1, meansL, meansU, mins, maxs)
         val z = decodePosition(index, 2, meansL, meansU, mins, maxs)
             .let { if (flipZ) -it else it }
         val opacity = sh0Image.channel(index, 3) / 255f
         if (!z.isFinite() || z <= 0.001f || opacity < 0.015f) return
+        val x = -decodedX
+        val y = -decodedY
 
         val visible = GaussianPlyLoader.isProjectedIntoViewport(
             x = x,
@@ -309,7 +311,7 @@ object GaussianSogLoader {
         val sx = decodeScale(scaleCodebook[scalesImage.channel(index, 0)])
         val sy = decodeScale(scaleCodebook[scalesImage.channel(index, 1)])
         val sz = decodeScale(scaleCodebook[scalesImage.channel(index, 2)])
-        val quat = decodeQuat(index, quatsImage) ?: Quat(0f, 0f, 0f, 1f)
+        val quat = rotateQuatForWebView(decodeQuat(index, quatsImage) ?: Quat(0f, 0f, 0f, 1f))
         splats.add(
             px = x,
             py = y,
@@ -746,6 +748,15 @@ object GaussianSogLoader {
         } finally {
             tempFile.delete()
         }
+    }
+
+    private fun rotateQuatForWebView(quat: Quat): Quat {
+        return Quat(
+            x = -quat.y,
+            y = quat.x,
+            z = quat.w,
+            w = -quat.z
+        )
     }
 
     private fun MutableMap<String, ByteArray>.storeEntry(name: String, bytes: ByteArray) {

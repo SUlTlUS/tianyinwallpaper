@@ -22,7 +22,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
 
-class DepthGLRenderer {
+class DepthGLRenderer : NativeGaussianRenderer {
     private var eglThread: EglRenderThread? = null
     private val isRunning = AtomicBoolean(false)
     private val isSurfaceValid = AtomicBoolean(false)
@@ -72,7 +72,7 @@ class DepthGLRenderer {
         val count: Int
     )
 
-    fun start(surface: Surface) {
+    override fun start(surface: Surface) {
         synchronized(lifecycleLock) {
             Log.d(TAG, "start running=${isRunning.get()} surfaceValid=${isSurfaceValid.get()} threadAlive=${eglThread?.isAlive == true}")
             if (isRunning.get() || eglThread?.isAlive == true) {
@@ -86,7 +86,7 @@ class DepthGLRenderer {
         }
     }
 
-    fun stop() {
+    override fun stop() {
         synchronized(lifecycleLock) {
             Log.d(TAG, "stop running=${isRunning.get()} queue=${messageQueue.size}")
             surfaceGeneration.incrementAndGet()
@@ -101,7 +101,7 @@ class DepthGLRenderer {
         }
     }
 
-    fun stopAndWait(timeoutMs: Long = 500) {
+    override fun stopAndWait(timeoutMs: Long) {
         synchronized(lifecycleLock) {
             stopAndWaitLocked(timeoutMs)
         }
@@ -124,13 +124,13 @@ class DepthGLRenderer {
         eglThread = null
     }
 
-    fun resize(width: Int, height: Int) {
+    override fun resize(width: Int, height: Int) {
         Log.d(TAG, "resize ${width}x$height")
         messageQueue.offer(RenderMessage.SetSurfaceSize(width, height))
         signalRenderThread()
     }
 
-    fun loadGaussians(scene: GaussianPlyLoader.GaussianScene) {
+    override fun loadGaussians(scene: GaussianPlyLoader.GaussianScene) {
         Log.d(
             TAG,
             "loadGaussians count=${scene.count} image=${scene.imageWidth}x${scene.imageHeight} " +
@@ -141,7 +141,7 @@ class DepthGLRenderer {
         requestRender()
     }
 
-    fun updateTilt(x: Float, y: Float) {
+    override fun updateTilt(x: Float, y: Float) {
         var nextX = x.coerceIn(-1f, 1f)
         var nextY = y.coerceIn(-1f, 1f)
         val tiltLengthSq = nextX * nextX + nextY * nextY
@@ -157,7 +157,7 @@ class DepthGLRenderer {
         requestRender()
     }
 
-    fun updateParams(parallaxStrength: Float, blurStrength: Float) {
+    override fun updateParams(parallaxStrength: Float, blurStrength: Float) {
         messageQueue.offer(
             RenderMessage.SetParams(
                 parallaxStrength.coerceIn(0.001f, 0.075f),
@@ -167,7 +167,7 @@ class DepthGLRenderer {
         requestRender()
     }
 
-    fun updateGaussianParams(params: GaussianRenderParams) {
+    override fun updateGaussianParams(params: GaussianRenderParams) {
         messageQueue.offer(
             RenderMessage.SetGaussianParams(
                 params.copy(
@@ -186,14 +186,14 @@ class DepthGLRenderer {
         requestRender()
     }
 
-    fun requestRender() {
+    override fun requestRender() {
         if (renderQueued.compareAndSet(false, true)) {
             messageQueue.offer(RenderMessage.Render)
         }
         signalRenderThread()
     }
 
-    fun setRenderingEnabled(enabled: Boolean) {
+    override fun setRenderingEnabled(enabled: Boolean) {
         Log.d(TAG, "setRenderingEnabled $enabled queue=${messageQueue.size}")
         renderingEnabled = enabled
         signalRenderThread()
