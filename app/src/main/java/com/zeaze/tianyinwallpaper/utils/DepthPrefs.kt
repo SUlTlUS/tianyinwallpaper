@@ -22,9 +22,8 @@ object DepthPrefs {
     }
 
     fun loadActiveWallpaper(pref: SharedPreferences): DepthWallpaperModel? {
-        val activeId = pref.getString(PREF_DEPTH_ACTIVE_ID, null)
-        val wallpapers = loadWallpapers(pref)
-        return wallpapers.firstOrNull { it.id == activeId } ?: wallpapers.firstOrNull()
+        val activeId = pref.getString(PREF_DEPTH_ACTIVE_ID, null) ?: return null
+        return loadWallpapers(pref).firstOrNull { it.id == activeId }
     }
 
     fun setActiveWallpaperId(pref: SharedPreferences, id: String) {

@@ -18,6 +18,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -198,17 +199,15 @@ fun DepthRouteScreen(
         if (replaceId != null) {
             val index = wallpapers.indexOfFirst { it.id == replaceId }
             if (index >= 0) {
-                val old = wallpapers[index]
+                val old = previewModel?.takeIf { it.id == replaceId } ?: wallpapers[index]
                 val next = old.copy(
                     gaussianUri = uri.toString(),
                     displayName = displayName.ifBlank { uri.lastPathSegment.orEmpty() },
                     blurStrength = DEPTH_BLUR_DISABLED
                 ).normalizedDepthParams()
-                wallpapers[index] = next
                 selectedId = next.id
                 previewModel = next
                 pendingReplaceId = null
-                saveWallpapers()
                 return
             }
             pendingReplaceId = null
@@ -258,14 +257,14 @@ fun DepthRouteScreen(
             Toast.makeText(context, "Add a depth wallpaper first", Toast.LENGTH_SHORT).show()
             return
         }
-        saveWallpapers()
-        persistActiveWallpaperId(target.id)
         val hostActivity = activity ?: return
         runCatching {
             WallpaperManager.getInstance(hostActivity).clear()
         }.onFailure {
             android.util.Log.w("DepthRouteScreen", "Clear wallpaper failed before applying depth wallpaper", it)
         }
+        saveWallpapers()
+        persistActiveWallpaperId(target.id)
         val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
             putExtra(
                 WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
@@ -385,6 +384,18 @@ fun DepthRouteScreen(
         saveWallpapers()
     }
 
+    fun commitWallpaperDraft(model: DepthWallpaperModel): DepthWallpaperModel {
+        val normalized = model.normalizedDepthParams()
+        val index = wallpapers.indexOfFirst { it.id == normalized.id }
+        if (index >= 0) {
+            wallpapers[index] = normalized
+        }
+        selectedId = normalized.id
+        previewModel = normalized
+        saveWallpapers()
+        return normalized
+    }
+
     LaunchedEffect(Unit) {
         loadWallpapers()
     }
@@ -405,7 +416,7 @@ fun DepthRouteScreen(
             .subscribe { applyDepthWallpaper() }
         val triggerPreview = RxBus.getDefault()
             .toObservableWithCode(RxConstants.RX_TRIGGER_PREVIEW_DEPTH, Unit::class.java)
-            .subscribe { previewModel = selectedWallpaper() }
+            .subscribe { previewModel = selectedWallpaper()?.normalizedDepthParams() }
         onDispose {
             triggerAdd.dispose()
             triggerApply.dispose()
@@ -437,10 +448,11 @@ fun DepthRouteScreen(
                 DepthWallpaperCard(
                     model = model,
                     active = model.id == activeId,
+                    selected = model.id == selectedId,
                     cardBackground = cardBackground,
                     onClick = {
                         selectedId = model.id
-                        previewModel = model
+                        previewModel = model.normalizedDepthParams()
                     },
                     onDelete = { removeWallpaper(model) }
                 )
@@ -521,10 +533,11 @@ fun DepthRouteScreen(
                 accentColor = accentColor,
                 onDismiss = { previewModel = null },
                 onApply = {
-                    applyDepthWallpaper(model)
+                    val committed = commitWallpaperDraft(model)
+                    applyDepthWallpaper(committed)
                 },
                 onPickGaussian = { replacePreview(DepthAddKind.Gaussian) },
-                onModelChange = { updateWallpaper(it) },
+                onModelChange = { previewModel = it.normalizedDepthParams() },
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(4f)
@@ -791,6 +804,7 @@ private fun DepthPreviewKindPill(
 private fun DepthWallpaperCard(
     model: DepthWallpaperModel,
     active: Boolean,
+    selected: Boolean,
     cardBackground: Color,
     onClick: () -> Unit,
     onDelete: () -> Unit
@@ -805,6 +819,13 @@ private fun DepthWallpaperCard(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(screenAspect)
+            .then(
+                if (selected) {
+                    Modifier.border(2.dp, Color(0xFF2A83FF), RoundedCornerShape(16.dp))
+                } else {
+                    Modifier
+                }
+            )
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black)
             .clickable(onClick = onClick)
@@ -823,7 +844,7 @@ private fun DepthWallpaperCard(
         )
         if (active) {
             Text(
-                text = "Active",
+                text = "使用中",
                 color = Color.White,
                 fontSize = 11.sp,
                 modifier = Modifier

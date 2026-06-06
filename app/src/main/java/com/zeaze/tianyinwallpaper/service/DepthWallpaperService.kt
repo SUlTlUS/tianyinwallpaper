@@ -271,7 +271,16 @@ class DepthWallpaperService : WallpaperService() {
         }
 
         private fun loadContent() {
-            val target = model ?: return
+            val target = model
+            if (target == null) {
+                loadVersion++
+                loadedImageKey = null
+                stopWebSplatMode(destroy = true)
+                renderer?.showLoading(false)
+                renderer?.setRenderingEnabled(false)
+                Log.d(TAG, "loadContent skipped: no active depth wallpaper")
+                return
+            }
             val targetKey = target.contentKey()
             Log.d(
                 TAG,
