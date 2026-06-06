@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 class DepthGLRenderer : NativeGaussianRenderer {
@@ -55,6 +56,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
         data class LoadGaussians(val scene: GaussianPlyLoader.GaussianScene) : RenderMessage()
         data class SetParams(val parallaxStrength: Float, val blurStrength: Float) : RenderMessage()
         data class SetGaussianParams(val params: GaussianRenderParams) : RenderMessage()
+        data class SetLoading(val enabled: Boolean) : RenderMessage()
         object Render : RenderMessage()
     }
 
@@ -197,6 +199,11 @@ class DepthGLRenderer : NativeGaussianRenderer {
         requestRender()
     }
 
+    override fun showLoading(enabled: Boolean) {
+        messageQueue.offer(RenderMessage.SetLoading(enabled))
+        requestRender()
+    }
+
     override fun requestRender() {
         if (renderQueued.compareAndSet(false, true)) {
             messageQueue.offer(RenderMessage.Render)
@@ -253,6 +260,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
         private var gaussianLayerTextureHeight = 1
         private var currentSplatBudget = 0
         private var targetSplatBudget = 0
+        private var loadingVisible = false
         private var lastSplatBudgetStepMs = 0L
         private var drawCount = 0L
         private var lastDrawLogMs = 0L
@@ -341,6 +349,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
                             sH = message.height.coerceAtLeast(1)
                         }
                         is RenderMessage.LoadGaussians -> {
+                            loadingVisible = false
                             deleteGaussianLayerTextures()
                             deleteGaussianBuffers()
                             val retainedScene = uploadGaussianBuffers(message.scene)
@@ -365,6 +374,12 @@ class DepthGLRenderer : NativeGaussianRenderer {
                             if (gaussianParams != message.params) {
                                 gaussianParams = message.params
                                 deleteGaussianLayerTextures()
+                            }
+                            needsDraw = true
+                        }
+                        is RenderMessage.SetLoading -> {
+                            if (loadingVisible != message.enabled) {
+                                loadingVisible = message.enabled
                             }
                             needsDraw = true
                         }
@@ -506,6 +521,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
         }
 
         private fun nextTimedRenderDelayMs(): Long {
+            if (loadingVisible && gaussianScene == null) return LOADING_FRAME_INTERVAL_MS
             if (gaussianScene == null || currentSplatBudget >= targetSplatBudget) {
                 return Long.MAX_VALUE
             }
@@ -537,7 +553,29 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 return
             }
 
+            if (loadingVisible) {
+                drawLoadingFrame()
+                if (isThreadActive()) {
+                    val swapped = EGL14.eglSwapBuffers(display, eglSurface)
+                    logDraw("gaussian_loading", swapped)
+                }
+                return
+            }
+
             logNoContent("skip draw: no gaussian scene")
+        }
+
+        private fun drawLoadingFrame() {
+            GLES20.glViewport(0, 0, sW, sH)
+            val t = (SystemClock.elapsedRealtime() % 1_200L) / 1_200f
+            val pulse = ((sin(t * TWO_PI) + 1f) * 0.5f).coerceIn(0f, 1f)
+            GLES20.glClearColor(
+                0.015f + pulse * 0.025f,
+                0.018f + pulse * 0.035f,
+                0.028f + pulse * 0.060f,
+                1f
+            )
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         }
 
         private fun logNoContent(message: String) {
@@ -1321,7 +1359,9 @@ class DepthGLRenderer : NativeGaussianRenderer {
         private const val EGL_OPENGL_ES3_BIT_KHR = 0x00000040
         private const val RENDER_THREAD_STOP_TIMEOUT_MS = 1_500L
         private const val DRAW_LOG_INTERVAL_MS = 1_000L
+        private const val LOADING_FRAME_INTERVAL_MS = 120L
         private const val MAX_VIEW_TILT = 0.72f
+        private const val TWO_PI = 6.2831855f
         private const val GAUSSIAN_SPLAT_SCALE = 1.0f
         private const val GAUSSIAN_QUAD_EXTENT = 1.0f
         private const val GAUSSIAN_QUAD_VERTEX_COUNT = 6

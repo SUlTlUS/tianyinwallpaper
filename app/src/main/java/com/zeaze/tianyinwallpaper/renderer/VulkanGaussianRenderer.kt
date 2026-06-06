@@ -57,6 +57,10 @@ class VulkanGaussianRenderer(
         fallback.resetCamera()
     }
 
+    override fun showLoading(enabled: Boolean) {
+        fallback.showLoading(enabled)
+    }
+
     override fun requestRender() {
         fallback.requestRender()
     }

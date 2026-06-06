@@ -345,6 +345,7 @@ class DepthWallpaperService : WallpaperService() {
             renderer?.setRenderingEnabled(isVisible)
             renderer?.updateParams(target.renderParallaxStrength(), 0f)
             renderer?.updateGaussianParams(target.nativeGaussianParams())
+            renderer?.showLoading(true)
             resetSensorState()
             Thread {
                 val viewportAspect = surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1).toFloat()
@@ -370,6 +371,7 @@ class DepthWallpaperService : WallpaperService() {
                             "visible=$isVisible surfaceReady=$surfaceReady"
                     )
                     if (currentVersion == loadVersion && isVisible && surfaceReady) {
+                        renderer?.showLoading(false)
                         fallbackNativeGaussianToWeb(target, targetKey, currentVersion, "fast-load-failed", fastResult.error)
                     }
                     return@Thread
@@ -438,6 +440,7 @@ class DepthWallpaperService : WallpaperService() {
             viewportAspect: Float,
             loadElapsedMs: Long
         ) {
+            renderer?.showLoading(false)
             loadedImageKey = targetKey
             Log.d(
                 TAG,

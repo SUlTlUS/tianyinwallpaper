@@ -128,6 +128,7 @@ fun DepthRouteScreen(
     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
     var activeId by remember { mutableStateOf(pref.getString(DepthPrefs.PREF_DEPTH_ACTIVE_ID, null)) }
+    var selectedId by remember { mutableStateOf(activeId) }
     var showAddDialog by remember { mutableStateOf(false) }
     var pendingAddKind by remember { mutableStateOf(DepthAddKind.Gaussian) }
     var pendingReplaceId by remember { mutableStateOf<String?>(null) }
@@ -153,15 +154,26 @@ fun DepthRouteScreen(
         val parsed = DepthPrefs.loadWallpapers(pref).map { it.normalizedDepthParams() }
         wallpapers.clear()
         wallpapers.addAll(parsed)
-        if (activeId == null || wallpapers.none { it.id == activeId }) {
-            activeId = wallpapers.firstOrNull()?.id
+        if (activeId != null && wallpapers.none { it.id == activeId }) {
+            activeId = null
+        }
+        if (selectedId == null || wallpapers.none { it.id == selectedId }) {
+            selectedId = activeId ?: wallpapers.firstOrNull()?.id
         }
         DepthPrefs.saveWallpapers(pref, wallpapers.toList())
     }
 
     fun saveWallpapers() {
         DepthPrefs.saveWallpapers(pref, wallpapers.toList())
-        activeId?.let { DepthPrefs.setActiveWallpaperId(pref, it) }
+    }
+
+    fun persistActiveWallpaperId(id: String?) {
+        activeId = id
+        if (id == null) {
+            pref.edit().remove(DepthPrefs.PREF_DEPTH_ACTIVE_ID).apply()
+        } else {
+            DepthPrefs.setActiveWallpaperId(pref, id)
+        }
     }
 
     fun takeReadPermission(uri: Uri) {
@@ -187,7 +199,7 @@ fun DepthRouteScreen(
                     blurStrength = DEPTH_BLUR_DISABLED
                 ).normalizedDepthParams()
                 wallpapers[index] = next
-                activeId = next.id
+                selectedId = next.id
                 previewModel = next
                 pendingReplaceId = null
                 saveWallpapers()
@@ -211,12 +223,17 @@ fun DepthRouteScreen(
             blurStrength = DEPTH_BLUR_DISABLED
         ).normalizedDepthParams()
         wallpapers.add(0, model)
-        activeId = model.id
+        selectedId = model.id
+        previewModel = model
         saveWallpapers()
     }
 
     fun activeWallpaper(): DepthWallpaperModel? {
-        return wallpapers.firstOrNull { it.id == activeId } ?: wallpapers.firstOrNull()
+        return wallpapers.firstOrNull { it.id == activeId }
+    }
+
+    fun selectedWallpaper(): DepthWallpaperModel? {
+        return wallpapers.firstOrNull { it.id == selectedId } ?: activeWallpaper() ?: wallpapers.firstOrNull()
     }
 
     val wallpaperLauncher = rememberLauncherForActivityResult(
@@ -229,15 +246,20 @@ fun DepthRouteScreen(
         }
     }
 
-    fun applyDepthWallpaper() {
-        val target = activeWallpaper()
+    fun applyDepthWallpaper(targetModel: DepthWallpaperModel? = null) {
+        val target = targetModel ?: selectedWallpaper()
         if (target == null) {
             Toast.makeText(context, "Add a depth wallpaper first", Toast.LENGTH_SHORT).show()
             return
         }
-        activeId = target.id
         saveWallpapers()
+        persistActiveWallpaperId(target.id)
         val hostActivity = activity ?: return
+        runCatching {
+            WallpaperManager.getInstance(hostActivity).clear()
+        }.onFailure {
+            android.util.Log.w("DepthRouteScreen", "Clear wallpaper failed before applying depth wallpaper", it)
+        }
         val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
             putExtra(
                 WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
@@ -289,8 +311,9 @@ fun DepthRouteScreen(
         wallpapers.removeAll { it.id == model.id }
         removeGaussianThumbnailCache(context, model)
         if (activeId == model.id) {
-            activeId = wallpapers.firstOrNull()?.id
+            persistActiveWallpaperId(null)
         }
+        if (selectedId == model.id) selectedId = activeId ?: wallpapers.firstOrNull()?.id
         if (previewModel?.id == model.id) {
             previewModel = null
         }
@@ -306,8 +329,8 @@ fun DepthRouteScreen(
         if (previewModel?.id == model.id) {
             previewModel = normalized
         }
-        if (activeId == normalized.id) {
-            activeId = normalized.id
+        if (selectedId == normalized.id) {
+            selectedId = normalized.id
         }
         saveWallpapers()
     }
@@ -332,7 +355,7 @@ fun DepthRouteScreen(
             .subscribe { applyDepthWallpaper() }
         val triggerPreview = RxBus.getDefault()
             .toObservableWithCode(RxConstants.RX_TRIGGER_PREVIEW_DEPTH, Unit::class.java)
-            .subscribe { previewModel = activeWallpaper() }
+            .subscribe { previewModel = selectedWallpaper() }
         onDispose {
             triggerAdd.dispose()
             triggerApply.dispose()
@@ -366,8 +389,7 @@ fun DepthRouteScreen(
                     active = model.id == activeId,
                     cardBackground = cardBackground,
                     onClick = {
-                        activeId = model.id
-                        saveWallpapers()
+                        selectedId = model.id
                         previewModel = model
                     },
                     onDelete = { removeWallpaper(model) }
@@ -434,9 +456,7 @@ fun DepthRouteScreen(
                 accentColor = accentColor,
                 onDismiss = { previewModel = null },
                 onApply = {
-                    activeId = model.id
-                    saveWallpapers()
-                    applyDepthWallpaper()
+                    applyDepthWallpaper(model)
                 },
                 onPickGaussian = { replacePreview(DepthAddKind.Gaussian) },
                 onModelChange = { updateWallpaper(it) },

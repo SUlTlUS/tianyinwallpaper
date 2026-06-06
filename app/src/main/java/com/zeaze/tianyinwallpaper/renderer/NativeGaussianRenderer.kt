@@ -15,6 +15,7 @@ interface NativeGaussianRenderer {
     fun updateParams(parallaxStrength: Float, blurStrength: Float)
     fun updateGaussianParams(params: DepthGLRenderer.GaussianRenderParams)
     fun resetCamera()
+    fun showLoading(enabled: Boolean)
     fun requestRender()
     fun setRenderingEnabled(enabled: Boolean)
 }
