@@ -853,6 +853,7 @@
             });
 
             window.firstFrame = () => {
+                window.TianyinSplat?.onFirstFrame?.();
                 window.tianyinResetCamera?.();
             };
 

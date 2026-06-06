@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
@@ -50,6 +51,7 @@ class SuperSplatWebController(
     var pendingParams: SuperSplatWebParams? = null
     var pageReady: Boolean = false
         private set
+    private var loadStartedMs: Long = 0L
     @Volatile
     var modelUri: Uri? = null
     @Volatile
@@ -98,6 +100,7 @@ class SuperSplatWebController(
         }
         pageReady = false
         loadedUriString = uriString
+        loadStartedMs = SystemClock.elapsedRealtime()
         target.loadUrl(SUPER_SPLAT_URL)
     }
 
@@ -106,9 +109,14 @@ class SuperSplatWebController(
     }
 
     fun onViewerReady() {
-        Log.d(TAG, "viewer ready uri=$loadedUriString")
+        Log.d(TAG, "viewer ready elapsedMs=${elapsedSinceLoadStart()} uri=$loadedUriString")
         pageReady = true
         applyParams(resetCamera = true)
+        onRenderRequested?.invoke()
+    }
+
+    fun onFirstFrame() {
+        Log.d(TAG, "first frame elapsedMs=${elapsedSinceLoadStart()} uri=$loadedUriString")
         onRenderRequested?.invoke()
     }
 
@@ -137,6 +145,14 @@ class SuperSplatWebController(
                 null
             )
             onRenderRequested?.invoke()
+        }
+    }
+
+    private fun elapsedSinceLoadStart(): Long {
+        return if (loadStartedMs > 0L) {
+            SystemClock.elapsedRealtime() - loadStartedMs
+        } else {
+            0L
         }
     }
 
@@ -171,6 +187,13 @@ class SuperSplatWebController(
         fun onViewerReady() {
             mainHandler.post {
                 controller.onViewerReady()
+            }
+        }
+
+        @JavascriptInterface
+        fun onFirstFrame() {
+            mainHandler.post {
+                controller.onFirstFrame()
             }
         }
     }
