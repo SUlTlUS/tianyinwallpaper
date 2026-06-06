@@ -38,6 +38,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Slider
 import androidx.compose.material.Text
@@ -85,6 +86,7 @@ import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.service.DepthWallpaperService
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
+import com.zeaze.tianyinwallpaper.utils.GradioMcpSogGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -93,7 +95,8 @@ import java.security.MessageDigest
 import java.util.UUID
 
 private enum class DepthAddKind {
-    Gaussian
+    Gaussian,
+    OnlineGaussian
 }
 
 private const val DEPTH_BLUR_DISABLED = 0f
@@ -134,6 +137,9 @@ fun DepthRouteScreen(
     var pendingReplaceId by remember { mutableStateOf<String?>(null) }
     var previewModel by remember { mutableStateOf<DepthWallpaperModel?>(null) }
     var showPermissionDialog by remember { mutableStateOf(false) }
+    var showOnlineGenerateDialog by remember { mutableStateOf(false) }
+    var onlineImageUrl by remember { mutableStateOf("") }
+    var onlineGenerationBusy by remember { mutableStateOf(false) }
 
     fun DepthWallpaperModel.normalizedDepthParams(): DepthWallpaperModel {
         return copy(
@@ -297,7 +303,51 @@ fun DepthRouteScreen(
         pendingReplaceId = null
         pendingAddKind = kind
         showAddDialog = false
+        if (kind == DepthAddKind.OnlineGaussian) {
+            showOnlineGenerateDialog = true
+            return
+        }
         filePicker.launch(arrayOf("*/*"))
+    }
+
+    fun generateOnlineGaussian() {
+        val imageUrl = onlineImageUrl.trim()
+        if (imageUrl.isBlank() || onlineGenerationBusy) return
+        onlineGenerationBusy = true
+        coroutineScope.launch {
+            Toast.makeText(context, "Generating SOG", Toast.LENGTH_SHORT).show()
+            val uri = withContext(Dispatchers.IO) {
+                runCatching {
+                    GradioMcpSogGenerator.generateFromImageUrl(
+                        context = context.applicationContext,
+                        imageUrl = imageUrl,
+                        focalLength35mm = 0f
+                    )
+                }
+            }
+            uri.onSuccess { generatedUri ->
+                val result = withContext(Dispatchers.IO) {
+                    GaussianSceneLoader.loadSceneDetailed(
+                        context = context.applicationContext,
+                        uriString = generatedUri.toString()
+                    )
+                }
+                if (result.scene != null) {
+                    showOnlineGenerateDialog = false
+                    onlineImageUrl = ""
+                    addWallpaper(generatedUri, DepthAddKind.Gaussian)
+                } else {
+                    Toast.makeText(
+                        context,
+                        result.error?.takeIf { it.isNotBlank() } ?: "Generated SOG load failed",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }.onFailure {
+                Toast.makeText(context, it.message ?: "Online SOG generation failed", Toast.LENGTH_LONG).show()
+            }
+            onlineGenerationBusy = false
+        }
     }
 
     fun replacePreview(kind: DepthAddKind) {
@@ -413,6 +463,21 @@ fun DepthRouteScreen(
                 liquidBackdrop = liquidBackdrop,
                 onDismiss = { showAddDialog = false },
                 onPick = { launchAdd(it) }
+            )
+        }
+
+        if (showOnlineGenerateDialog) {
+            DepthOnlineGenerateDialog(
+                imageUrl = onlineImageUrl,
+                busy = onlineGenerationBusy,
+                accentColor = accentColor,
+                contentColor = contentColor,
+                containerColor = containerColor,
+                onImageUrlChange = { onlineImageUrl = it },
+                onGenerate = { generateOnlineGaussian() },
+                onDismiss = {
+                    if (!onlineGenerationBusy) showOnlineGenerateDialog = false
+                }
             )
         }
 
@@ -898,10 +963,61 @@ private fun DepthAddDialog(
                     )
                     Spacer(Modifier.height(4.dp))
                     DialogButton("Gaussian SOG", accentColor, Color.White) { onPick(DepthAddKind.Gaussian) }
+                    DialogButton("在线生成 SOG", accentColor.copy(alpha = 0.82f), Color.White) {
+                        onPick(DepthAddKind.OnlineGaussian)
+                    }
                     Spacer(Modifier.height(4.dp))
                     DialogButton("取消", containerColor.copy(0.2f), contentColor) { onDismiss() }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DepthOnlineGenerateDialog(
+    imageUrl: String,
+    busy: Boolean,
+    accentColor: Color,
+    contentColor: Color,
+    containerColor: Color,
+    onImageUrlChange: (String) -> Unit,
+    onGenerate: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(24.dp))
+                .background(MaterialTheme.colors.surface)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("在线生成 SOG", color = contentColor, fontWeight = FontWeight.Bold)
+            BasicTextField(
+                value = imageUrl,
+                onValueChange = onImageUrlChange,
+                enabled = !busy,
+                textStyle = TextStyle(color = contentColor, fontSize = 14.sp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(containerColor.copy(alpha = 0.22f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                decorationBox = { innerTextField ->
+                    if (imageUrl.isBlank()) {
+                        Text(
+                            "https://.../image.png",
+                            color = contentColor.copy(alpha = 0.42f),
+                            fontSize = 14.sp
+                        )
+                    }
+                    innerTextField()
+                }
+            )
+            DialogButton(if (busy) "生成中" else "生成并添加", accentColor, Color.White, onGenerate)
+            DialogButton("取消", containerColor.copy(0.2f), contentColor, onDismiss)
         }
     }
 }
