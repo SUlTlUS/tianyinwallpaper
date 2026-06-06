@@ -186,6 +186,13 @@ class DepthGLRenderer : NativeGaussianRenderer {
         requestRender()
     }
 
+    override fun resetCamera() {
+        pendingTiltX = 0f
+        pendingTiltY = 0f
+        tiltQueued.set(true)
+        requestRender()
+    }
+
     override fun requestRender() {
         if (renderQueued.compareAndSet(false, true)) {
             messageQueue.offer(RenderMessage.Render)

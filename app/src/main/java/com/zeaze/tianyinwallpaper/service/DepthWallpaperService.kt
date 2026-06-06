@@ -321,6 +321,7 @@ class DepthWallpaperService : WallpaperService() {
             renderer?.setRenderingEnabled(isVisible)
             renderer?.updateParams(target.renderParallaxStrength(), 0f)
             renderer?.updateGaussianParams(target.nativeGaussianParams())
+            renderer?.resetCamera()
             Thread {
                 val viewportAspect = surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1).toFloat()
                 val fastResult = GaussianSceneLoader.loadSceneDetailed(
@@ -583,11 +584,11 @@ class DepthWallpaperService : WallpaperService() {
             lastDispatchLogMs = 0L
             hasGravity = false
             gravity.fill(0f)
-            if (model?.isGaussian() == true) {
+            if (model?.isGaussian() == true && gaussianWebActive) {
                 webSplatController?.resetSensorBaseline = true
                 webSplatController?.setTilt(0f, 0f)
             } else {
-                renderer?.updateTilt(0f, 0f)
+                renderer?.resetCamera()
             }
         }
 

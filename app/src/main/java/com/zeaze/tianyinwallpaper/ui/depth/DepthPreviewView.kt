@@ -114,6 +114,7 @@ private fun NativeGaussianPreviewView(
             result.scene
         }
         scene?.let { renderer.loadGaussians(it) }
+        renderer.resetCamera()
     }
 
     LaunchedEffect(model.parallaxStrength, model.cameraZoom, model.centerOffsetX, model.centerOffsetY, model.focusDepth) {

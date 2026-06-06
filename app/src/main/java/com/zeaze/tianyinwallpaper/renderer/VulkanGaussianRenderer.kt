@@ -45,6 +45,10 @@ class VulkanGaussianRenderer(
         fallback.updateGaussianParams(params)
     }
 
+    override fun resetCamera() {
+        fallback.resetCamera()
+    }
+
     override fun requestRender() {
         fallback.requestRender()
     }
