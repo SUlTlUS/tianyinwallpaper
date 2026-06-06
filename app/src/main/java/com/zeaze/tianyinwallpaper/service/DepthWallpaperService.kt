@@ -332,11 +332,12 @@ class DepthWallpaperService : WallpaperService() {
                 )
                 val fastScene = fastResult.scene
                 if (fastScene != null && currentVersion == loadVersion && isVisible && surfaceReady) {
-                    deliverNativeGaussianScene(fastScene, targetKey, reason, "fast", viewportAspect)
+                    deliverNativeGaussianScene(fastScene, targetKey, reason, "fast", viewportAspect, fastResult.elapsedMs)
                 } else {
                     Log.w(
                         TAG,
                         "loadContent gaussian native fast skipped reason=$reason scene=${fastScene != null} " +
+                            "elapsedMs=${fastResult.elapsedMs} " +
                             "error=${fastResult.error} current=$currentVersion loadVersion=$loadVersion " +
                             "visible=$isVisible surfaceReady=$surfaceReady"
                     )
@@ -361,9 +362,13 @@ class DepthWallpaperService : WallpaperService() {
                     isVisible &&
                     surfaceReady
                 ) {
-                    deliverNativeGaussianScene(fullScene, targetKey, reason, "full", viewportAspect)
+                    deliverNativeGaussianScene(fullScene, targetKey, reason, "full", viewportAspect, fullResult.elapsedMs)
                 } else if (fullResult.error != null) {
-                    Log.w(TAG, "loadContent gaussian native full skipped reason=$reason error=${fullResult.error}")
+                    Log.w(
+                        TAG,
+                        "loadContent gaussian native full skipped reason=$reason " +
+                            "elapsedMs=${fullResult.elapsedMs} error=${fullResult.error}"
+                    )
                 }
             }.also { it.name = "DepthGaussianFallbackLoader" }.start()
         }
@@ -394,12 +399,14 @@ class DepthWallpaperService : WallpaperService() {
             targetKey: String,
             reason: String,
             quality: String,
-            viewportAspect: Float
+            viewportAspect: Float,
+            loadElapsedMs: Long
         ) {
             loadedImageKey = targetKey
             Log.d(
                 TAG,
                 "loadContent gaussian native loaded reason=$reason quality=$quality count=${scene.count} " +
+                    "loadElapsedMs=$loadElapsedMs " +
                     "visible=${scene.screenVisibleSplatCount} aux=${scene.auxiliarySplatCount} " +
                     "image=${scene.imageWidth}x${scene.imageHeight} viewportAspect=$viewportAspect"
             )

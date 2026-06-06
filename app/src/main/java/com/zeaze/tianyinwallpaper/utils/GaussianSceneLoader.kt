@@ -21,7 +21,8 @@ object GaussianSceneLoader {
 
     data class SceneLoadResult(
         val scene: GaussianPlyLoader.GaussianScene?,
-        val error: String? = null
+        val error: String? = null,
+        val elapsedMs: Long = 0L
     )
 
     private data class CacheKey(
@@ -74,20 +75,22 @@ object GaussianSceneLoader {
             }
         }.fold(
             onSuccess = {
+                val elapsedMs = SystemClock.elapsedRealtime() - startMs
                 Log.d(
                     TAG,
-                    "loadScene ok maxSplats=$maxSplats count=${it.count} elapsedMs=${SystemClock.elapsedRealtime() - startMs} uri=$uriString"
+                    "loadScene ok maxSplats=$maxSplats count=${it.count} elapsedMs=$elapsedMs uri=$uriString"
                 )
-                SceneLoadResult(scene = it)
+                SceneLoadResult(scene = it, elapsedMs = elapsedMs)
             },
             onFailure = {
+                val elapsedMs = SystemClock.elapsedRealtime() - startMs
                 val error = "SOG: ${it.message ?: it.javaClass.simpleName}"
                 Log.w(
                     TAG,
-                    "loadScene failed maxSplats=$maxSplats elapsedMs=${SystemClock.elapsedRealtime() - startMs} error=$error uri=$uriString",
+                    "loadScene failed maxSplats=$maxSplats elapsedMs=$elapsedMs error=$error uri=$uriString",
                     it
                 )
-                SceneLoadResult(scene = null, error = error)
+                SceneLoadResult(scene = null, error = error, elapsedMs = elapsedMs)
             }
         )
     }
