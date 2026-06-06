@@ -205,6 +205,7 @@ class DepthWallpaperService : WallpaperService() {
                     }
                 }
                 registerSensor()
+                resumeMotionRendering()
                 if (surfaceReady && model?.contentKey() != loadedImageKey) {
                     loadContent()
                 } else {
@@ -219,6 +220,28 @@ class DepthWallpaperService : WallpaperService() {
                 renderer?.setRenderingEnabled(false)
                 stopWebDrawLoop()
             }
+        }
+
+        private fun resumeMotionRendering() {
+            if (!isVisible || !surfaceReady) return
+            if (model?.isGaussian() == true && gaussianWebActive) {
+                webSplatController?.setTilt(0f, 0f)
+                startWebDrawLoop()
+            } else {
+                renderer?.setRenderingEnabled(true)
+                renderer?.updateTilt(0f, 0f)
+                renderer?.requestRender()
+            }
+            mainHandler.postDelayed({
+                if (!isVisible || !surfaceReady) return@postDelayed
+                if (model?.isGaussian() == true && gaussianWebActive) {
+                    webSplatController?.setTilt(0f, 0f)
+                    startWebDrawLoop()
+                } else {
+                    renderer?.setRenderingEnabled(true)
+                    renderer?.requestRender()
+                }
+            }, RESUME_RENDER_KICK_MS)
         }
 
         override fun onDestroy() {
@@ -324,10 +347,12 @@ class DepthWallpaperService : WallpaperService() {
             resetSensorState()
             Thread {
                 val viewportAspect = surfaceWidth.toFloat() / surfaceHeight.coerceAtLeast(1).toFloat()
+                val targetMaxSplats = target.renderGaussianMaxSplats()
+                val fastMaxSplats = minOf(SERVICE_FAST_GAUSSIAN_SPLATS, targetMaxSplats)
                 val fastResult = GaussianSceneLoader.loadSceneDetailed(
                     context = applicationContext,
                     uriString = target.gaussianUri,
-                    maxSplats = SERVICE_FAST_GAUSSIAN_SPLATS,
+                    maxSplats = fastMaxSplats,
                     viewportAspect = viewportAspect
                 )
                 val fastScene = fastResult.scene
@@ -347,11 +372,11 @@ class DepthWallpaperService : WallpaperService() {
                     return@Thread
                 }
 
-                if (SERVICE_MAX_GAUSSIAN_SPLATS <= SERVICE_FAST_GAUSSIAN_SPLATS) return@Thread
+                if (targetMaxSplats <= fastMaxSplats) return@Thread
                 val fullResult = GaussianSceneLoader.loadSceneDetailed(
                     context = applicationContext,
                     uriString = target.gaussianUri,
-                    maxSplats = SERVICE_MAX_GAUSSIAN_SPLATS,
+                    maxSplats = targetMaxSplats,
                     viewportAspect = viewportAspect
                 )
                 val fullScene = fullResult.scene
@@ -520,7 +545,7 @@ class DepthWallpaperService : WallpaperService() {
         }
 
         private fun DepthWallpaperModel.contentKey(): String {
-            return "$id|$gaussianUri|$gaussianRenderMode|gaussian-v10"
+            return "$id|$gaussianUri|$gaussianRenderMode|${renderGaussianMaxSplats()}|gaussian-v11"
         }
 
         private fun DepthWallpaperModel.renderParallaxStrength(): Float {
@@ -529,6 +554,10 @@ class DepthWallpaperService : WallpaperService() {
 
         private fun DepthWallpaperModel.renderSensorSensitivity(): Float {
             return sensorSensitivity
+        }
+
+        private fun DepthWallpaperModel.renderGaussianMaxSplats(): Int {
+            return gaussianMaxSplats.coerceIn(SERVICE_MIN_GAUSSIAN_SPLATS, SERVICE_MAX_GAUSSIAN_SPLATS)
         }
 
         private fun registerSensor() {
@@ -872,7 +901,9 @@ class DepthWallpaperService : WallpaperService() {
         private const val DISPATCH_LOG_INTERVAL_MS = 1_000L
         private const val WEBVIEW_FRAME_INTERVAL_MS = 16L
         private const val WEBVIEW_READY_TIMEOUT_MS = 4_000L
-        private const val SERVICE_FAST_GAUSSIAN_SPLATS = 500_000
+        private const val RESUME_RENDER_KICK_MS = 250L
+        private const val SERVICE_MIN_GAUSSIAN_SPLATS = 500_000
+        private const val SERVICE_FAST_GAUSSIAN_SPLATS = 800_000
         private const val SERVICE_MAX_GAUSSIAN_SPLATS = 1_500_000
     }
 }

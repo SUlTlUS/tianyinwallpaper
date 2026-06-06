@@ -97,6 +97,10 @@ private enum class DepthAddKind {
 }
 
 private const val DEPTH_BLUR_DISABLED = 0f
+private const val GAUSSIAN_MIN_SPLAT_BUDGET = 500_000
+private const val GAUSSIAN_FAST_SPLAT_BUDGET = 800_000
+private const val GAUSSIAN_FULL_SPLAT_BUDGET = 1_500_000
+private const val GAUSSIAN_SPLAT_BUDGET_STEP = 100_000
 
 @Composable
 fun DepthRouteScreen(
@@ -137,6 +141,10 @@ fun DepthRouteScreen(
             centerOffsetX = centerOffsetX.coerceIn(-2.5f, 2.5f),
             centerOffsetY = centerOffsetY.coerceIn(-2.5f, 2.5f),
             focusDepth = if (focusDepth.isFinite()) focusDepth.coerceIn(-1f, 1f) else 0.25f,
+            gaussianMaxSplats = gaussianMaxSplats.coerceIn(
+                GAUSSIAN_MIN_SPLAT_BUDGET,
+                GAUSSIAN_FULL_SPLAT_BUDGET
+            ),
             blurStrength = DEPTH_BLUR_DISABLED
         )
     }
@@ -199,6 +207,7 @@ fun DepthRouteScreen(
             centerOffsetX = 0f,
             centerOffsetY = 0f,
             focusDepth = 0.25f,
+            gaussianMaxSplats = GAUSSIAN_FAST_SPLAT_BUDGET,
             blurStrength = DEPTH_BLUR_DISABLED
         ).normalizedDepthParams()
         wallpapers.add(0, model)
@@ -556,6 +565,18 @@ private fun DepthParamPanel(
                 )
             }
             DepthParamSlider(
+                label = "密度",
+                value = model.gaussianMaxSplats.toFloat(),
+                valueText = formatSplatBudget(model.gaussianMaxSplats),
+                range = GAUSSIAN_MIN_SPLAT_BUDGET.toFloat()..GAUSSIAN_FULL_SPLAT_BUDGET.toFloat(),
+                onValueChange = {
+                    val budget = it.toInt()
+                        .roundToNearest(GAUSSIAN_SPLAT_BUDGET_STEP)
+                        .coerceIn(GAUSSIAN_MIN_SPLAT_BUDGET, GAUSSIAN_FULL_SPLAT_BUDGET)
+                    onModelChange(model.copy(gaussianMaxSplats = budget))
+                }
+            )
+            DepthParamSlider(
                 label = "距离",
                 value = model.cameraZoom,
                 valueText = String.format("%.2f", model.cameraZoom),
@@ -888,6 +909,15 @@ private fun DialogButton(
 
 private fun DepthWallpaperModel.typeLabel(): String {
     return "Gaussian"
+}
+
+private fun formatSplatBudget(value: Int): String {
+    return String.format("%.1fM", value / 1_000_000f)
+}
+
+private fun Int.roundToNearest(step: Int): Int {
+    if (step <= 0) return this
+    return ((this + step / 2) / step) * step
 }
 
 private fun queryDisplayName(context: Context, uri: Uri): String? {

@@ -14,6 +14,7 @@ data class DepthWallpaperModel(
     var centerOffsetX: Float = 0f,
     var centerOffsetY: Float = 0f,
     var focusDepth: Float = 0.25f,
+    var gaussianMaxSplats: Int = 800_000,
     var blurStrength: Float = 0f
 ) {
     @JSONField(serialize = false, deserialize = false)
