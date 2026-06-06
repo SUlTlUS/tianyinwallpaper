@@ -97,7 +97,7 @@ class DepthWallpaperService : WallpaperService() {
             if (key == DepthPrefs.PREF_DEPTH_WALLPAPERS || key == DepthPrefs.PREF_DEPTH_ACTIVE_ID) {
                 loadActiveModel()
                 model?.let {
-                    if (it.isGaussian() && it.useWebGaussianRenderer() && gaussianWebActive) {
+                    if (it.isGaussian() && gaussianWebActive) {
                         updateWebSplatParams(it)
                     } else {
                         renderer?.updateParams(it.renderParallaxStrength(), 0f)
@@ -340,6 +340,9 @@ class DepthWallpaperService : WallpaperService() {
                             "error=${fastResult.error} current=$currentVersion loadVersion=$loadVersion " +
                             "visible=$isVisible surfaceReady=$surfaceReady"
                     )
+                    if (currentVersion == loadVersion && isVisible && surfaceReady) {
+                        fallbackNativeGaussianToWeb(target, targetKey, currentVersion, "fast-load-failed", fastResult.error)
+                    }
                     return@Thread
                 }
 
@@ -363,6 +366,27 @@ class DepthWallpaperService : WallpaperService() {
                     Log.w(TAG, "loadContent gaussian native full skipped reason=$reason error=${fullResult.error}")
                 }
             }.also { it.name = "DepthGaussianFallbackLoader" }.start()
+        }
+
+        private fun fallbackNativeGaussianToWeb(
+            target: DepthWallpaperModel,
+            targetKey: String,
+            currentVersion: Int,
+            reason: String,
+            error: String?
+        ) {
+            mainHandler.post {
+                if (currentVersion != loadVersion || !isVisible || !surfaceReady || model?.contentKey() != targetKey) {
+                    Log.w(
+                        TAG,
+                        "native gaussian web fallback skipped reason=$reason current=$currentVersion " +
+                            "loadVersion=$loadVersion visible=$isVisible surfaceReady=$surfaceReady error=$error"
+                    )
+                    return@post
+                }
+                Log.w(TAG, "native gaussian fallback to WebView reason=$reason error=$error uri=${target.gaussianUri}")
+                loadGaussianWebContent(target, targetKey, currentVersion)
+            }
         }
 
         private fun deliverNativeGaussianScene(
