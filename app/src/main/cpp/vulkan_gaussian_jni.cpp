@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <mutex>
 #include <vector>
 
@@ -254,6 +255,31 @@ public:
         return true;
     }
 
+    bool uploadScene(
+            JNIEnv* env,
+            jobject positions,
+            jobject colors,
+            jobject scales,
+            jobject rotations,
+            int count) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (device_ == VK_NULL_HANDLE || physicalDevice_ == VK_NULL_HANDLE || count <= 0) return false;
+        destroySceneBuffersLocked();
+        const VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        const bool ok =
+                uploadFloatBuffer(env, positions, static_cast<VkDeviceSize>(count) * 3u * sizeof(float), usage, scenePositions_) &&
+                uploadFloatBuffer(env, colors, static_cast<VkDeviceSize>(count) * 4u * sizeof(float), usage, sceneColors_) &&
+                uploadFloatBuffer(env, scales, static_cast<VkDeviceSize>(count) * 3u * sizeof(float), usage, sceneScales_) &&
+                (rotations == nullptr || uploadFloatBuffer(env, rotations, static_cast<VkDeviceSize>(count) * 4u * sizeof(float), usage, sceneRotations_));
+        if (!ok) {
+            destroySceneBuffersLocked();
+            return false;
+        }
+        sceneCount_ = count;
+        __android_log_print(ANDROID_LOG_INFO, kTag, "Vulkan scene uploaded count=%d", sceneCount_);
+        return true;
+    }
+
 private:
     bool createInstance() {
         VkApplicationInfo appInfo{};
@@ -495,6 +521,85 @@ private:
         return true;
     }
 
+    struct BufferResource {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VkDeviceSize size = 0;
+    };
+
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+        VkPhysicalDeviceMemoryProperties memProperties{};
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memProperties);
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; ++i) {
+            if ((typeFilter & (1u << i)) != 0 &&
+                (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+                return i;
+            }
+        }
+        return UINT32_MAX;
+    }
+
+    bool uploadFloatBuffer(
+            JNIEnv* env,
+            jobject source,
+            VkDeviceSize size,
+            VkBufferUsageFlags usage,
+            BufferResource& out) {
+        if (source == nullptr || size == 0) return false;
+        void* sourcePtr = env->GetDirectBufferAddress(source);
+        if (sourcePtr == nullptr) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "GetDirectBufferAddress failed for scene buffer");
+            return false;
+        }
+
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VkResult result = vkCreateBuffer(device_, &bufferInfo, nullptr, &out.buffer);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreateBuffer failed result=%d size=%llu", result, static_cast<unsigned long long>(size));
+            return false;
+        }
+
+        VkMemoryRequirements memRequirements{};
+        vkGetBufferMemoryRequirements(device_, out.buffer, &memRequirements);
+        const uint32_t memoryType = findMemoryType(
+                memRequirements.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (memoryType == UINT32_MAX) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "no host-visible memory type for scene buffer");
+            return false;
+        }
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = memoryType;
+        result = vkAllocateMemory(device_, &allocInfo, nullptr, &out.memory);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkAllocateMemory failed result=%d size=%llu", result, static_cast<unsigned long long>(memRequirements.size));
+            return false;
+        }
+        result = vkBindBufferMemory(device_, out.buffer, out.memory, 0);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkBindBufferMemory failed result=%d", result);
+            return false;
+        }
+
+        void* mapped = nullptr;
+        result = vkMapMemory(device_, out.memory, 0, size, 0, &mapped);
+        if (result != VK_SUCCESS || mapped == nullptr) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkMapMemory failed result=%d", result);
+            return false;
+        }
+        std::memcpy(mapped, sourcePtr, static_cast<size_t>(size));
+        vkUnmapMemory(device_, out.memory);
+        out.size = size;
+        return true;
+    }
+
     bool recreateSwapchainLocked() {
         if (device_ == VK_NULL_HANDLE) return false;
         vkDeviceWaitIdle(device_);
@@ -527,8 +632,24 @@ private:
         swapchainImages_.clear();
     }
 
+    void destroyBufferLocked(BufferResource& resource) {
+        if (device_ == VK_NULL_HANDLE) return;
+        if (resource.buffer != VK_NULL_HANDLE) vkDestroyBuffer(device_, resource.buffer, nullptr);
+        if (resource.memory != VK_NULL_HANDLE) vkFreeMemory(device_, resource.memory, nullptr);
+        resource = BufferResource{};
+    }
+
+    void destroySceneBuffersLocked() {
+        destroyBufferLocked(scenePositions_);
+        destroyBufferLocked(sceneColors_);
+        destroyBufferLocked(sceneScales_);
+        destroyBufferLocked(sceneRotations_);
+        sceneCount_ = 0;
+    }
+
     void stopLocked() {
         if (device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(device_);
+        destroySceneBuffersLocked();
         destroySwapchainLocked();
         if (imageAvailable_ != VK_NULL_HANDLE) vkDestroySemaphore(device_, imageAvailable_, nullptr);
         if (renderFinished_ != VK_NULL_HANDLE) vkDestroySemaphore(device_, renderFinished_, nullptr);
@@ -574,6 +695,11 @@ private:
     std::vector<VkImageView> imageViews_;
     std::vector<VkFramebuffer> framebuffers_;
     std::vector<VkCommandBuffer> commandBuffers_;
+    BufferResource scenePositions_;
+    BufferResource sceneColors_;
+    BufferResource sceneScales_;
+    BufferResource sceneRotations_;
+    int sceneCount_ = 0;
 };
 
 VulkanClearRenderer* fromHandle(jlong handle) {
@@ -660,4 +786,19 @@ Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeRenderClea
         JNIEnv*, jobject, jlong handle, jfloat r, jfloat g, jfloat b) {
     auto* renderer = fromHandle(handle);
     return renderer != nullptr && renderer->render(r, g, b) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeUploadScene(
+        JNIEnv* env,
+        jobject,
+        jlong handle,
+        jobject positions,
+        jobject colors,
+        jobject scales,
+        jobject rotations,
+        jint count) {
+    auto* renderer = fromHandle(handle);
+    return renderer != nullptr &&
+           renderer->uploadScene(env, positions, colors, scales, rotations, count) ? JNI_TRUE : JNI_FALSE;
 }

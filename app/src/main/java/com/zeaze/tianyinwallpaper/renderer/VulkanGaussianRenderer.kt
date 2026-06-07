@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
+import java.nio.Buffer
 import kotlin.math.sin
 
 class VulkanGaussianRenderer(
@@ -83,6 +84,7 @@ class VulkanGaussianRenderer(
         synchronized(lock) {
             latestScene = scene
             if (activeBackend == Backend.Vulkan) {
+                uploadSceneToVulkanLocked(scene)
                 switchToFallbackLocked("Vulkan splat pipeline pending", scene)
             } else if (activeBackend == Backend.Gles) {
                 fallback.loadGaussians(scene)
@@ -204,6 +206,27 @@ class VulkanGaussianRenderer(
         startFallbackLocked(reason)
     }
 
+    private fun uploadSceneToVulkanLocked(scene: GaussianPlyLoader.GaussianScene) {
+        if (nativeHandle == 0L) return
+        val positions = scene.positions.duplicate().apply { position(0) }
+        val colors = scene.colors.duplicate().apply { position(0) }
+        val scales = scene.scales.duplicate().apply { position(0) }
+        val rotations = scene.rotations?.duplicate()?.apply { position(0) }
+        val uploaded = runCatching {
+            nativeUploadScene(
+                nativeHandle,
+                positions,
+                colors,
+                scales,
+                rotations,
+                scene.count
+            )
+        }.onFailure {
+            Log.w(TAG, "native Vulkan scene upload failed", it)
+        }.getOrDefault(false)
+        Log.d(TAG, "native Vulkan scene upload uploaded=$uploaded count=${scene.count}")
+    }
+
     private fun stopVulkanLocked() {
         if (nativeHandle != 0L) {
             runCatching { nativeStopRenderer(nativeHandle) }
@@ -244,6 +267,14 @@ class VulkanGaussianRenderer(
     private external fun nativeStopRenderer(handle: Long)
     private external fun nativeResizeRenderer(handle: Long, width: Int, height: Int): Boolean
     private external fun nativeRenderClear(handle: Long, r: Float, g: Float, b: Float): Boolean
+    private external fun nativeUploadScene(
+        handle: Long,
+        positions: Buffer,
+        colors: Buffer,
+        scales: Buffer,
+        rotations: Buffer?,
+        count: Int
+    ): Boolean
 
     companion object {
         private const val TAG = "VulkanGaussianRenderer"
