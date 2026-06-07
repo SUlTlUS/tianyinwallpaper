@@ -884,6 +884,37 @@ private fun DepthPreviewOverlay(
             }
         }
 
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = bottomActionPadding)
+        ) {
+            if (detailBackdrop != null) {
+                LiquidButton(
+                    onClick = { showParamPanel = true },
+                    backdrop = detailBackdrop,
+                    surfaceColor = accentColor.copy(alpha = 0.75f),
+                    tint = accentColor,
+                    luminanceState = gaussianLuminanceState,
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    BasicText(
+                        "参数调节",
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        style = TextStyle(Color.White, 15.sp)
+                    )
+                }
+            } else {
+                DepthPreviewKindPill(
+                    text = "参数调节",
+                    selected = true,
+                    contentColor = contentColor,
+                    accentColor = accentColor,
+                    onClick = { showParamPanel = true }
+                )
+            }
+        }
+
         if (showParamPanel) {
             Box(
                 modifier = Modifier
@@ -932,39 +963,6 @@ private fun DepthPreviewOverlay(
                 },
                 modifier = Modifier
             )
-        }
-
-        if (!showParamPanel) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = bottomActionPadding)
-            ) {
-                if (detailBackdrop != null) {
-                    LiquidButton(
-                        onClick = { showParamPanel = true },
-                        backdrop = detailBackdrop,
-                        surfaceColor = accentColor.copy(alpha = 0.75f),
-                        tint = accentColor,
-                        luminanceState = gaussianLuminanceState,
-                        modifier = Modifier.height(44.dp)
-                    ) {
-                        BasicText(
-                            "参数调节",
-                            modifier = Modifier.padding(horizontal = 14.dp),
-                            style = TextStyle(Color.White, 15.sp)
-                        )
-                    }
-                } else {
-                    DepthPreviewKindPill(
-                        text = "参数调节",
-                        selected = true,
-                        contentColor = contentColor,
-                        accentColor = accentColor,
-                        onClick = { showParamPanel = true }
-                    )
-                }
-            }
         }
     }
 }
