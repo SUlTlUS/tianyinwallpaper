@@ -8,26 +8,4 @@ object DepthPrefs {
     const val PREF_DEPTH_WALLPAPERS = "depthWallpapers"
     const val PREF_DEPTH_ACTIVE_ID = "depthActiveWallpaperId"
 
-    fun loadWallpapers(pref: SharedPreferences): List<DepthWallpaperModel> {
-        val json = pref.getString(PREF_DEPTH_WALLPAPERS, "[]") ?: "[]"
-        return try {
-            JSON.parseArray(json, DepthWallpaperModel::class.java) ?: emptyList()
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    fun saveWallpapers(pref: SharedPreferences, wallpapers: List<DepthWallpaperModel>) {
-        pref.edit().putString(PREF_DEPTH_WALLPAPERS, JSON.toJSONString(wallpapers)).apply()
-    }
-
-    fun loadActiveWallpaper(pref: SharedPreferences): DepthWallpaperModel? {
-        val activeId = pref.getString(PREF_DEPTH_ACTIVE_ID, null)
-        val wallpapers = loadWallpapers(pref)
-        return wallpapers.firstOrNull { it.id == activeId } ?: wallpapers.firstOrNull()
-    }
-
-    fun setActiveWallpaperId(pref: SharedPreferences, id: String) {
-        pref.edit().putString(PREF_DEPTH_ACTIVE_ID, id).apply()
-    }
-}
+    fun loadWallpapers(pref: SharedPreferences): List<DepthWallpaper
