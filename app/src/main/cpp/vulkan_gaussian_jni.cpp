@@ -29,6 +29,7 @@ struct SceneMetadata {
     float sceneCenterY = 0.0f;
     float sceneCenterZ = 1.0f;
     float sceneRadius = 1.0f;
+    float defaultCameraDistance = 1.0f;
 };
 
 struct RenderState {
@@ -41,11 +42,11 @@ struct RenderState {
     float focusDepthOffset = 0.25f;
     float splatScale = 1.0f;
     float opacity = 1.0f;
-    float minPointSize = 0.5f;
-    float maxPointSize = 120.0f;
+    float alphaFalloff = 1.0f;
 };
 
-struct PointPushConstants {
+struct QuadPushConstants {
+    float surfaceSize[2];
     float fillScale[2];
     float tilt[2];
     float centerOffset[2];
@@ -56,11 +57,14 @@ struct PointPushConstants {
     float sceneCenterY;
     float sceneCenterZ;
     float sceneRadius;
+    float defaultCameraDistance;
+    float tanHalfFov;
     float cameraZoom;
+    float focusDepthOffset;
     float pointScale;
+    float quadExtent;
     float opacity;
-    float minPointSize;
-    float maxPointSize;
+    float alphaFalloff;
 };
 
 struct VulkanProbeHandles {
@@ -196,7 +200,7 @@ public:
         width_ = std::max(1, ANativeWindow_getWidth(window_));
         height_ = std::max(1, ANativeWindow_getHeight(window_));
         if (!createInstance() || !createSurface() || !choosePhysicalDevice() || !createDevice() ||
-            !createCommandPool() || !createSyncObjects() || !createSwapchain()) {
+            !createCommandPool() || !createSyncObjects() || !createQuadCornerBuffer() || !createSwapchain()) {
             stopLocked();
             return false;
         }
@@ -222,12 +226,15 @@ public:
         return renderLocked(r, g, b, false);
     }
 
-    bool renderScene() {
+    bool renderScene(int drawCount) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (sceneCount_ <= 0 || pointPipeline_ == VK_NULL_HANDLE ||
-            scenePositions_.buffer == VK_NULL_HANDLE || sceneColors_.buffer == VK_NULL_HANDLE) {
+        if (sceneCount_ <= 0 || quadPipeline_ == VK_NULL_HANDLE || quadCornerBuffer_.buffer == VK_NULL_HANDLE ||
+            scenePositions_.buffer == VK_NULL_HANDLE || sceneColors_.buffer == VK_NULL_HANDLE ||
+            sceneScales_.buffer == VK_NULL_HANDLE || sceneRotations_.buffer == VK_NULL_HANDLE) {
             return false;
         }
+        drawCount_ = std::clamp(drawCount, 0, sceneCount_);
+        if (drawCount_ <= 0) return false;
         return renderLocked(sceneMetadata_.backgroundR, sceneMetadata_.backgroundG, sceneMetadata_.backgroundB, true);
     }
 
@@ -281,7 +288,7 @@ private:
         renderPassInfo.pClearValues = &clearValue;
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
         if (drawScene) {
-            recordPointScene(commandBuffer);
+            recordQuadScene(commandBuffer);
         }
         vkCmdEndRenderPass(commandBuffer);
 
@@ -336,13 +343,17 @@ public:
             SceneMetadata metadata) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (device_ == VK_NULL_HANDLE || physicalDevice_ == VK_NULL_HANDLE || count <= 0) return false;
+        if (rotations == nullptr) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "Vulkan quad renderer requires rotation buffer");
+            return false;
+        }
         destroySceneBuffersLocked();
         const VkBufferUsageFlags usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
         const bool ok =
                 uploadFloatBuffer(env, positions, static_cast<VkDeviceSize>(count) * 3u * sizeof(float), usage, scenePositions_) &&
                 uploadFloatBuffer(env, colors, static_cast<VkDeviceSize>(count) * 4u * sizeof(float), usage, sceneColors_) &&
                 uploadFloatBuffer(env, scales, static_cast<VkDeviceSize>(count) * 3u * sizeof(float), usage, sceneScales_) &&
-                (rotations == nullptr || uploadFloatBuffer(env, rotations, static_cast<VkDeviceSize>(count) * 4u * sizeof(float), usage, sceneRotations_));
+                uploadFloatBuffer(env, rotations, static_cast<VkDeviceSize>(count) * 4u * sizeof(float), usage, sceneRotations_);
         if (!ok) {
             destroySceneBuffersLocked();
             return false;
@@ -489,7 +500,7 @@ private:
         vkGetSwapchainImagesKHR(device_, swapchain_, &actualImageCount, nullptr);
         swapchainImages_.resize(actualImageCount);
         vkGetSwapchainImagesKHR(device_, swapchain_, &actualImageCount, swapchainImages_.data());
-        return createRenderPass() && createPointPipeline() && createImageViews() && createFramebuffers() && createCommandBuffers();
+        return createRenderPass() && createQuadPipeline() && createImageViews() && createFramebuffers() && createCommandBuffers();
     }
 
     bool createRenderPass() {
@@ -549,13 +560,13 @@ private:
         return shaderModule;
     }
 
-    bool createPointPipeline() {
+    bool createQuadPipeline() {
         VkShaderModule vertModule = createShaderModule(
-                tianyin_vulkan_shaders::kGaussianPointVert,
-                tianyin_vulkan_shaders::kGaussianPointVertSize);
+                tianyin_vulkan_shaders::kGaussianQuadVert,
+                tianyin_vulkan_shaders::kGaussianQuadVertSize);
         VkShaderModule fragModule = createShaderModule(
-                tianyin_vulkan_shaders::kGaussianPointFrag,
-                tianyin_vulkan_shaders::kGaussianPointFragSize);
+                tianyin_vulkan_shaders::kGaussianQuadFrag,
+                tianyin_vulkan_shaders::kGaussianQuadFragSize);
         if (vertModule == VK_NULL_HANDLE || fragModule == VK_NULL_HANDLE) {
             if (vertModule != VK_NULL_HANDLE) vkDestroyShaderModule(device_, vertModule, nullptr);
             if (fragModule != VK_NULL_HANDLE) vkDestroyShaderModule(device_, fragModule, nullptr);
@@ -572,23 +583,44 @@ private:
         shaderStages[1].module = fragModule;
         shaderStages[1].pName = "main";
 
-        std::array<VkVertexInputBindingDescription, 2> bindings{};
+        std::array<VkVertexInputBindingDescription, 5> bindings{};
         bindings[0].binding = 0;
-        bindings[0].stride = sizeof(float) * 3;
+        bindings[0].stride = sizeof(float) * 2;
         bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
         bindings[1].binding = 1;
-        bindings[1].stride = sizeof(float) * 4;
-        bindings[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        bindings[1].stride = sizeof(float) * 3;
+        bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+        bindings[2].binding = 2;
+        bindings[2].stride = sizeof(float) * 4;
+        bindings[2].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+        bindings[3].binding = 3;
+        bindings[3].stride = sizeof(float) * 3;
+        bindings[3].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+        bindings[4].binding = 4;
+        bindings[4].stride = sizeof(float) * 4;
+        bindings[4].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-        std::array<VkVertexInputAttributeDescription, 2> attributes{};
+        std::array<VkVertexInputAttributeDescription, 5> attributes{};
         attributes[0].binding = 0;
         attributes[0].location = 0;
-        attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributes[0].format = VK_FORMAT_R32G32_SFLOAT;
         attributes[0].offset = 0;
         attributes[1].binding = 1;
         attributes[1].location = 1;
-        attributes[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attributes[1].format = VK_FORMAT_R32G32B32_SFLOAT;
         attributes[1].offset = 0;
+        attributes[2].binding = 2;
+        attributes[2].location = 2;
+        attributes[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attributes[2].offset = 0;
+        attributes[3].binding = 3;
+        attributes[3].location = 3;
+        attributes[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributes[3].offset = 0;
+        attributes[4].binding = 4;
+        attributes[4].location = 4;
+        attributes[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attributes[4].offset = 0;
 
         VkPipelineVertexInputStateCreateInfo vertexInput{};
         vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -599,7 +631,7 @@ private:
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         inputAssembly.primitiveRestartEnable = VK_FALSE;
 
         VkPipelineViewportStateCreateInfo viewportState{};
@@ -646,15 +678,15 @@ private:
         dynamicState.pDynamicStates = dynamicStates;
 
         VkPushConstantRange pushRange{};
-        pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pushRange.offset = 0;
-        pushRange.size = sizeof(PointPushConstants);
+        pushRange.size = sizeof(QuadPushConstants);
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.pushConstantRangeCount = 1;
         pipelineLayoutInfo.pPushConstantRanges = &pushRange;
-        VkResult result = vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &pointPipelineLayout_);
+        VkResult result = vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &quadPipelineLayout_);
         if (result != VK_SUCCESS) {
             __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreatePipelineLayout failed result=%d", result);
             vkDestroyShaderModule(device_, vertModule, nullptr);
@@ -673,10 +705,10 @@ private:
         pipelineInfo.pMultisampleState = &multisampling;
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
-        pipelineInfo.layout = pointPipelineLayout_;
+        pipelineInfo.layout = quadPipelineLayout_;
         pipelineInfo.renderPass = renderPass_;
         pipelineInfo.subpass = 0;
-        result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pointPipeline_);
+        result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &quadPipeline_);
         vkDestroyShaderModule(device_, vertModule, nullptr);
         vkDestroyShaderModule(device_, fragModule, nullptr);
         if (result != VK_SUCCESS) {
@@ -745,7 +777,7 @@ private:
         return true;
     }
 
-    void recordPointScene(VkCommandBuffer commandBuffer) {
+    void recordQuadScene(VkCommandBuffer commandBuffer) {
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
@@ -775,7 +807,9 @@ private:
                 static_cast<float>(swapchainExtent_.width) / static_cast<float>(std::max(1, sceneMetadata_.imageWidth)),
                 static_cast<float>(swapchainExtent_.height) / static_cast<float>(std::max(1, sceneMetadata_.imageHeight)));
 
-        PointPushConstants push{};
+        QuadPushConstants push{};
+        push.surfaceSize[0] = static_cast<float>(std::max(1u, swapchainExtent_.width));
+        push.surfaceSize[1] = static_cast<float>(std::max(1u, swapchainExtent_.height));
         push.fillScale[0] = fillX;
         push.fillScale[1] = fillY;
         push.tilt[0] = renderState_.tiltX;
@@ -789,24 +823,33 @@ private:
         push.sceneCenterY = sceneMetadata_.sceneCenterY;
         push.sceneCenterZ = sceneMetadata_.sceneCenterZ;
         push.sceneRadius = std::max(0.001f, sceneMetadata_.sceneRadius);
+        push.defaultCameraDistance = sceneMetadata_.defaultCameraDistance;
+        push.tanHalfFov = 0.57735026f;
         push.cameraZoom = std::max(0.001f, renderState_.cameraZoom);
+        push.focusDepthOffset = renderState_.focusDepthOffset;
         push.pointScale = std::clamp(textureScale * renderState_.splatScale, 0.35f, 30.0f);
+        push.quadExtent = 1.0f;
         push.opacity = renderState_.opacity;
-        push.minPointSize = renderState_.minPointSize;
-        push.maxPointSize = renderState_.maxPointSize;
+        push.alphaFalloff = renderState_.alphaFalloff;
 
-        VkBuffer vertexBuffers[] = {scenePositions_.buffer, sceneColors_.buffer};
-        VkDeviceSize offsets[] = {0, 0};
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pointPipeline_);
-        vkCmdBindVertexBuffers(commandBuffer, 0, 2, vertexBuffers, offsets);
+        VkBuffer vertexBuffers[] = {
+                quadCornerBuffer_.buffer,
+                scenePositions_.buffer,
+                sceneColors_.buffer,
+                sceneScales_.buffer,
+                sceneRotations_.buffer
+        };
+        VkDeviceSize offsets[] = {0, 0, 0, 0, 0};
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, quadPipeline_);
+        vkCmdBindVertexBuffers(commandBuffer, 0, 5, vertexBuffers, offsets);
         vkCmdPushConstants(
                 commandBuffer,
-                pointPipelineLayout_,
-                VK_SHADER_STAGE_VERTEX_BIT,
+                quadPipelineLayout_,
+                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                 0,
-                sizeof(PointPushConstants),
+                sizeof(QuadPushConstants),
                 &push);
-        vkCmdDraw(commandBuffer, static_cast<uint32_t>(sceneCount_), 1, 0, 0);
+        vkCmdDraw(commandBuffer, 6, static_cast<uint32_t>(drawCount_), 0, 0);
     }
 
     struct BufferResource {
@@ -888,6 +931,63 @@ private:
         return true;
     }
 
+    bool uploadHostBuffer(
+            const void* sourcePtr,
+            VkDeviceSize size,
+            VkBufferUsageFlags usage,
+            BufferResource& out) {
+        if (sourcePtr == nullptr || size == 0) return false;
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VkResult result = vkCreateBuffer(device_, &bufferInfo, nullptr, &out.buffer);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreateBuffer failed result=%d size=%llu", result, static_cast<unsigned long long>(size));
+            return false;
+        }
+        VkMemoryRequirements memRequirements{};
+        vkGetBufferMemoryRequirements(device_, out.buffer, &memRequirements);
+        const uint32_t memoryType = findMemoryType(
+                memRequirements.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (memoryType == UINT32_MAX) return false;
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = memoryType;
+        result = vkAllocateMemory(device_, &allocInfo, nullptr, &out.memory);
+        if (result != VK_SUCCESS) return false;
+        result = vkBindBufferMemory(device_, out.buffer, out.memory, 0);
+        if (result != VK_SUCCESS) return false;
+        void* mapped = nullptr;
+        result = vkMapMemory(device_, out.memory, 0, size, 0, &mapped);
+        if (result != VK_SUCCESS || mapped == nullptr) return false;
+        std::memcpy(mapped, sourcePtr, static_cast<size_t>(size));
+        vkUnmapMemory(device_, out.memory);
+        out.size = size;
+        return true;
+    }
+
+    bool createQuadCornerBuffer() {
+        static constexpr float kCorners[] = {
+                -1.0f, -1.0f,
+                 1.0f, -1.0f,
+                -1.0f,  1.0f,
+                -1.0f,  1.0f,
+                 1.0f, -1.0f,
+                 1.0f,  1.0f
+        };
+        destroyBufferLocked(quadCornerBuffer_);
+        return uploadHostBuffer(
+                kCorners,
+                sizeof(kCorners),
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                quadCornerBuffer_);
+    }
+
     bool recreateSwapchainLocked() {
         if (device_ == VK_NULL_HANDLE) return false;
         vkDeviceWaitIdle(device_);
@@ -909,13 +1009,13 @@ private:
             if (imageView != VK_NULL_HANDLE) vkDestroyImageView(device_, imageView, nullptr);
         }
         imageViews_.clear();
-        if (pointPipeline_ != VK_NULL_HANDLE) {
-            vkDestroyPipeline(device_, pointPipeline_, nullptr);
-            pointPipeline_ = VK_NULL_HANDLE;
+        if (quadPipeline_ != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device_, quadPipeline_, nullptr);
+            quadPipeline_ = VK_NULL_HANDLE;
         }
-        if (pointPipelineLayout_ != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(device_, pointPipelineLayout_, nullptr);
-            pointPipelineLayout_ = VK_NULL_HANDLE;
+        if (quadPipelineLayout_ != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(device_, quadPipelineLayout_, nullptr);
+            quadPipelineLayout_ = VK_NULL_HANDLE;
         }
         if (renderPass_ != VK_NULL_HANDLE) {
             vkDestroyRenderPass(device_, renderPass_, nullptr);
@@ -946,6 +1046,7 @@ private:
     void stopLocked() {
         if (device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(device_);
         destroySceneBuffersLocked();
+        destroyBufferLocked(quadCornerBuffer_);
         destroySwapchainLocked();
         if (imageAvailable_ != VK_NULL_HANDLE) vkDestroySemaphore(device_, imageAvailable_, nullptr);
         if (renderFinished_ != VK_NULL_HANDLE) vkDestroySemaphore(device_, renderFinished_, nullptr);
@@ -991,8 +1092,9 @@ private:
     std::vector<VkImageView> imageViews_;
     std::vector<VkFramebuffer> framebuffers_;
     std::vector<VkCommandBuffer> commandBuffers_;
-    VkPipelineLayout pointPipelineLayout_ = VK_NULL_HANDLE;
-    VkPipeline pointPipeline_ = VK_NULL_HANDLE;
+    VkPipelineLayout quadPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline quadPipeline_ = VK_NULL_HANDLE;
+    BufferResource quadCornerBuffer_;
     BufferResource scenePositions_;
     BufferResource sceneColors_;
     BufferResource sceneScales_;
@@ -1000,6 +1102,7 @@ private:
     SceneMetadata sceneMetadata_;
     RenderState renderState_;
     int sceneCount_ = 0;
+    int drawCount_ = 0;
 };
 
 VulkanClearRenderer* fromHandle(jlong handle) {
@@ -1090,9 +1193,9 @@ Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeRenderClea
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeRenderScene(
-        JNIEnv*, jobject, jlong handle) {
+        JNIEnv*, jobject, jlong handle, jint drawCount) {
     auto* renderer = fromHandle(handle);
-    return renderer != nullptr && renderer->renderScene() ? JNI_TRUE : JNI_FALSE;
+    return renderer != nullptr && renderer->renderScene(drawCount) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1109,8 +1212,7 @@ Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeUpdateRend
         jfloat focusDepthOffset,
         jfloat splatScale,
         jfloat opacity,
-        jfloat minPointSize,
-        jfloat maxPointSize) {
+        jfloat alphaFalloff) {
     auto* renderer = fromHandle(handle);
     if (renderer == nullptr) return;
     RenderState state{};
@@ -1123,8 +1225,7 @@ Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeUpdateRend
     state.focusDepthOffset = focusDepthOffset;
     state.splatScale = splatScale;
     state.opacity = opacity;
-    state.minPointSize = minPointSize;
-    state.maxPointSize = maxPointSize;
+    state.alphaFalloff = alphaFalloff;
     renderer->updateRenderState(state);
 }
 
@@ -1148,7 +1249,8 @@ Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeUploadScen
         jfloat sceneCenterX,
         jfloat sceneCenterY,
         jfloat sceneCenterZ,
-        jfloat sceneRadius) {
+        jfloat sceneRadius,
+        jfloat defaultCameraDistance) {
     auto* renderer = fromHandle(handle);
     SceneMetadata metadata{};
     metadata.imageWidth = std::max(1, imageWidth);
@@ -1162,6 +1264,7 @@ Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeUploadScen
     metadata.sceneCenterY = sceneCenterY;
     metadata.sceneCenterZ = sceneCenterZ;
     metadata.sceneRadius = sceneRadius;
+    metadata.defaultCameraDistance = defaultCameraDistance;
     return renderer != nullptr &&
            renderer->uploadScene(env, positions, colors, scales, rotations, count, metadata) ? JNI_TRUE : JNI_FALSE;
 }

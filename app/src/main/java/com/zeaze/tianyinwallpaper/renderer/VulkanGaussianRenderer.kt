@@ -3,6 +3,8 @@ package com.zeaze.tianyinwallpaper.renderer
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
@@ -15,6 +17,7 @@ class VulkanGaussianRenderer(
 ) : NativeGaussianRenderer {
     private val fallback = DepthGLRenderer()
     private val lock = Any()
+    private val budgetHandler = Handler(Looper.getMainLooper())
 
     private var nativeHandle = 0L
     private var currentSurface: Surface? = null
@@ -30,6 +33,17 @@ class VulkanGaussianRenderer(
     private var latestParallaxStrength = 0f
     private var latestBlurStrength = 0f
     private var latestGaussianParams = DepthGLRenderer.GaussianRenderParams()
+    private var targetSplatBudget = 0
+    private var currentSplatBudget = 0
+    private var lastSplatBudgetStepMs = 0L
+    private val splatBudgetRunnable = Runnable {
+        synchronized(lock) {
+            if (activeBackend == Backend.Vulkan && advanceSplatBudgetLocked()) {
+                renderVulkanSceneLocked()
+            }
+            scheduleSplatBudgetStepLocked()
+        }
+    }
 
     override fun start(surface: Surface) {
         synchronized(lock) {
@@ -51,6 +65,7 @@ class VulkanGaussianRenderer(
     override fun stop() {
         synchronized(lock) {
             stopVulkanLocked()
+            budgetHandler.removeCallbacks(splatBudgetRunnable)
             fallback.stop()
             currentSurface = null
             activeBackend = Backend.Stopped
@@ -60,6 +75,7 @@ class VulkanGaussianRenderer(
     override fun stopAndWait(timeoutMs: Long) {
         synchronized(lock) {
             stopVulkanLocked()
+            budgetHandler.removeCallbacks(splatBudgetRunnable)
             fallback.stopAndWait(timeoutMs)
             currentSurface = null
             activeBackend = Backend.Stopped
@@ -196,7 +212,7 @@ class VulkanGaussianRenderer(
             return false
         }
         activeBackend = Backend.Vulkan
-        Log.d(TAG, "Vulkan backend started; Gaussian scene draw will fallback to GLES until splat pipeline lands")
+        Log.d(TAG, "Vulkan backend started")
         return true
     }
 
@@ -226,6 +242,7 @@ class VulkanGaussianRenderer(
     private fun uploadSceneToVulkanLocked(scene: GaussianPlyLoader.GaussianScene): Boolean {
         if (nativeHandle == 0L) return false
         syncVulkanRenderStateLocked()
+        resetSplatBudgetLocked(scene)
         val positions = scene.positions.duplicate().apply { position(0) }
         val colors = scene.colors.duplicate().apply { position(0) }
         val scales = scene.scales.duplicate().apply { position(0) }
@@ -248,7 +265,8 @@ class VulkanGaussianRenderer(
                 scene.sceneCenterX,
                 scene.sceneCenterY,
                 scene.sceneCenterZ,
-                scene.sceneRadius
+                scene.sceneRadius,
+                scene.defaultCameraDistance
             )
         }.onFailure {
             Log.w(TAG, "native Vulkan scene upload failed", it)
@@ -270,8 +288,7 @@ class VulkanGaussianRenderer(
             latestGaussianParams.focusDepthOffset,
             latestGaussianParams.splatScale,
             latestGaussianParams.globalOpacity,
-            latestGaussianParams.minPointSize,
-            latestGaussianParams.maxPointSize
+            latestGaussianParams.alphaFalloff
         )
     }
 
@@ -281,16 +298,54 @@ class VulkanGaussianRenderer(
             return
         }
         if (!renderingEnabled || nativeHandle == 0L) return
-        val ok = runCatching { nativeRenderScene(nativeHandle) }
+        val drawCount = currentSplatBudget.coerceIn(0, latestScene?.count ?: 0)
+        if (drawCount <= 0) return
+        val ok = runCatching { nativeRenderScene(nativeHandle, drawCount) }
             .onFailure { Log.w(TAG, "native Vulkan scene render failed", it) }
             .getOrDefault(false)
         if (!ok) {
             latestScene?.let { switchToFallbackLocked("Vulkan scene render failed", it) }
+        } else {
+            scheduleSplatBudgetStepLocked()
         }
+    }
+
+    private fun resetSplatBudgetLocked(scene: GaussianPlyLoader.GaussianScene) {
+        targetSplatBudget = scene.count.coerceAtLeast(0)
+        currentSplatBudget = if (targetSplatBudget <= SPLAT_BUDGET_INITIAL) {
+            targetSplatBudget
+        } else {
+            SPLAT_BUDGET_INITIAL
+        }
+        lastSplatBudgetStepMs = SystemClock.elapsedRealtime()
+        budgetHandler.removeCallbacks(splatBudgetRunnable)
+    }
+
+    private fun advanceSplatBudgetLocked(): Boolean {
+        if (currentSplatBudget >= targetSplatBudget) return false
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastSplatBudgetStepMs < SPLAT_BUDGET_STEP_INTERVAL_MS) return false
+        currentSplatBudget = (currentSplatBudget + SPLAT_BUDGET_STEP).coerceAtMost(targetSplatBudget)
+        lastSplatBudgetStepMs = now
+        Log.d(
+            TAG,
+            "Vulkan splat budget step ready=${currentSplatBudget >= targetSplatBudget} " +
+                "loading=${targetSplatBudget - currentSplatBudget} budget=$currentSplatBudget/$targetSplatBudget"
+        )
+        return true
+    }
+
+    private fun scheduleSplatBudgetStepLocked() {
+        if (activeBackend != Backend.Vulkan || currentSplatBudget >= targetSplatBudget) return
+        val now = SystemClock.elapsedRealtime()
+        val delay = (lastSplatBudgetStepMs + SPLAT_BUDGET_STEP_INTERVAL_MS - now).coerceAtLeast(0L)
+        budgetHandler.removeCallbacks(splatBudgetRunnable)
+        budgetHandler.postDelayed(splatBudgetRunnable, delay)
     }
 
     private fun stopVulkanLocked() {
         if (nativeHandle != 0L) {
+            budgetHandler.removeCallbacks(splatBudgetRunnable)
             runCatching { nativeStopRenderer(nativeHandle) }
                 .onFailure { Log.w(TAG, "native Vulkan stop failed", it) }
             runCatching { nativeDestroyRenderer(nativeHandle) }
@@ -329,7 +384,7 @@ class VulkanGaussianRenderer(
     private external fun nativeStopRenderer(handle: Long)
     private external fun nativeResizeRenderer(handle: Long, width: Int, height: Int): Boolean
     private external fun nativeRenderClear(handle: Long, r: Float, g: Float, b: Float): Boolean
-    private external fun nativeRenderScene(handle: Long): Boolean
+    private external fun nativeRenderScene(handle: Long, drawCount: Int): Boolean
     private external fun nativeUpdateRenderState(
         handle: Long,
         tiltX: Float,
@@ -341,8 +396,7 @@ class VulkanGaussianRenderer(
         focusDepthOffset: Float,
         splatScale: Float,
         opacity: Float,
-        minPointSize: Float,
-        maxPointSize: Float
+        alphaFalloff: Float
     )
     private external fun nativeUploadScene(
         handle: Long,
@@ -361,12 +415,16 @@ class VulkanGaussianRenderer(
         sceneCenterX: Float,
         sceneCenterY: Float,
         sceneCenterZ: Float,
-        sceneRadius: Float
+        sceneRadius: Float,
+        defaultCameraDistance: Float
     ): Boolean
 
     companion object {
         private const val TAG = "VulkanGaussianRenderer"
         private const val LIB_NAME = "tianyin_gaussian_vulkan"
+        private const val SPLAT_BUDGET_INITIAL = 500_000
+        private const val SPLAT_BUDGET_STEP = 250_000
+        private const val SPLAT_BUDGET_STEP_INTERVAL_MS = 120L
 
         @Volatile private var nativeLibraryLoaded = false
         @Volatile private var nativeLibraryLoadAttempted = false
