@@ -12,8 +12,56 @@
 #include <mutex>
 #include <vector>
 
+#include "vulkan_gaussian_shaders.h"
+
 namespace {
 constexpr const char* kTag = "TianyinVulkan";
+
+struct SceneMetadata {
+    int imageWidth = 1;
+    int imageHeight = 1;
+    float focusDepth = 1.0f;
+    float farDepth = 1.0f;
+    float backgroundR = 0.015f;
+    float backgroundG = 0.018f;
+    float backgroundB = 0.028f;
+    float sceneCenterX = 0.0f;
+    float sceneCenterY = 0.0f;
+    float sceneCenterZ = 1.0f;
+    float sceneRadius = 1.0f;
+};
+
+struct RenderState {
+    float tiltX = 0.0f;
+    float tiltY = 0.0f;
+    float parallaxStrength = 0.0f;
+    float cameraZoom = 1.0f;
+    float centerOffsetX = 0.0f;
+    float centerOffsetY = 0.0f;
+    float focusDepthOffset = 0.25f;
+    float splatScale = 1.0f;
+    float opacity = 1.0f;
+    float minPointSize = 0.5f;
+    float maxPointSize = 120.0f;
+};
+
+struct PointPushConstants {
+    float fillScale[2];
+    float tilt[2];
+    float centerOffset[2];
+    float strength;
+    float focusDepth;
+    float farDepth;
+    float sceneCenterX;
+    float sceneCenterY;
+    float sceneCenterZ;
+    float sceneRadius;
+    float cameraZoom;
+    float pointScale;
+    float opacity;
+    float minPointSize;
+    float maxPointSize;
+};
 
 struct VulkanProbeHandles {
     VkInstance instance = VK_NULL_HANDLE;
@@ -171,6 +219,25 @@ public:
 
     bool render(float r, float g, float b) {
         std::lock_guard<std::mutex> lock(mutex_);
+        return renderLocked(r, g, b, false);
+    }
+
+    bool renderScene() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (sceneCount_ <= 0 || pointPipeline_ == VK_NULL_HANDLE ||
+            scenePositions_.buffer == VK_NULL_HANDLE || sceneColors_.buffer == VK_NULL_HANDLE) {
+            return false;
+        }
+        return renderLocked(sceneMetadata_.backgroundR, sceneMetadata_.backgroundG, sceneMetadata_.backgroundB, true);
+    }
+
+    void updateRenderState(RenderState state) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        renderState_ = state;
+    }
+
+private:
+    bool renderLocked(float r, float g, float b, bool drawScene) {
         if (device_ == VK_NULL_HANDLE || swapchain_ == VK_NULL_HANDLE || framebuffers_.empty()) return false;
 
         vkWaitForFences(device_, 1, &inFlightFence_, VK_TRUE, UINT64_MAX);
@@ -213,6 +280,9 @@ public:
         renderPassInfo.clearValueCount = 1;
         renderPassInfo.pClearValues = &clearValue;
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        if (drawScene) {
+            recordPointScene(commandBuffer);
+        }
         vkCmdEndRenderPass(commandBuffer);
 
         result = vkEndCommandBuffer(commandBuffer);
@@ -255,13 +325,15 @@ public:
         return true;
     }
 
+public:
     bool uploadScene(
             JNIEnv* env,
             jobject positions,
             jobject colors,
             jobject scales,
             jobject rotations,
-            int count) {
+            int count,
+            SceneMetadata metadata) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (device_ == VK_NULL_HANDLE || physicalDevice_ == VK_NULL_HANDLE || count <= 0) return false;
         destroySceneBuffersLocked();
@@ -276,6 +348,7 @@ public:
             return false;
         }
         sceneCount_ = count;
+        sceneMetadata_ = metadata;
         __android_log_print(ANDROID_LOG_INFO, kTag, "Vulkan scene uploaded count=%d", sceneCount_);
         return true;
     }
@@ -416,7 +489,7 @@ private:
         vkGetSwapchainImagesKHR(device_, swapchain_, &actualImageCount, nullptr);
         swapchainImages_.resize(actualImageCount);
         vkGetSwapchainImagesKHR(device_, swapchain_, &actualImageCount, swapchainImages_.data());
-        return createRenderPass() && createImageViews() && createFramebuffers() && createCommandBuffers();
+        return createRenderPass() && createPointPipeline() && createImageViews() && createFramebuffers() && createCommandBuffers();
     }
 
     bool createRenderPass() {
@@ -457,6 +530,157 @@ private:
         VkResult result = vkCreateRenderPass(device_, &renderPassInfo, nullptr, &renderPass_);
         if (result != VK_SUCCESS) {
             __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreateRenderPass failed result=%d", result);
+            return false;
+        }
+        return true;
+    }
+
+    VkShaderModule createShaderModule(const uint32_t* code, size_t size) {
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = size;
+        createInfo.pCode = code;
+        VkShaderModule shaderModule = VK_NULL_HANDLE;
+        VkResult result = vkCreateShaderModule(device_, &createInfo, nullptr, &shaderModule);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreateShaderModule failed result=%d", result);
+            return VK_NULL_HANDLE;
+        }
+        return shaderModule;
+    }
+
+    bool createPointPipeline() {
+        VkShaderModule vertModule = createShaderModule(
+                tianyin_vulkan_shaders::kGaussianPointVert,
+                tianyin_vulkan_shaders::kGaussianPointVertSize);
+        VkShaderModule fragModule = createShaderModule(
+                tianyin_vulkan_shaders::kGaussianPointFrag,
+                tianyin_vulkan_shaders::kGaussianPointFragSize);
+        if (vertModule == VK_NULL_HANDLE || fragModule == VK_NULL_HANDLE) {
+            if (vertModule != VK_NULL_HANDLE) vkDestroyShaderModule(device_, vertModule, nullptr);
+            if (fragModule != VK_NULL_HANDLE) vkDestroyShaderModule(device_, fragModule, nullptr);
+            return false;
+        }
+
+        VkPipelineShaderStageCreateInfo shaderStages[2]{};
+        shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        shaderStages[0].module = vertModule;
+        shaderStages[0].pName = "main";
+        shaderStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        shaderStages[1].module = fragModule;
+        shaderStages[1].pName = "main";
+
+        std::array<VkVertexInputBindingDescription, 2> bindings{};
+        bindings[0].binding = 0;
+        bindings[0].stride = sizeof(float) * 3;
+        bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        bindings[1].binding = 1;
+        bindings[1].stride = sizeof(float) * 4;
+        bindings[1].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        std::array<VkVertexInputAttributeDescription, 2> attributes{};
+        attributes[0].binding = 0;
+        attributes[0].location = 0;
+        attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributes[0].offset = 0;
+        attributes[1].binding = 1;
+        attributes[1].location = 1;
+        attributes[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attributes[1].offset = 0;
+
+        VkPipelineVertexInputStateCreateInfo vertexInput{};
+        vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInput.vertexBindingDescriptionCount = static_cast<uint32_t>(bindings.size());
+        vertexInput.pVertexBindingDescriptions = bindings.data();
+        vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributes.size());
+        vertexInput.pVertexAttributeDescriptions = attributes.data();
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+        inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.depthClampEnable = VK_FALSE;
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0f;
+        rasterizer.cullMode = VK_CULL_MODE_NONE;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasterizer.depthBiasEnable = VK_FALSE;
+
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.sampleShadingEnable = VK_FALSE;
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+        colorBlendAttachment.colorWriteMask =
+                VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        colorBlendAttachment.blendEnable = VK_TRUE;
+        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        VkPipelineColorBlendStateCreateInfo colorBlending{};
+        colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlending.logicOpEnable = VK_FALSE;
+        colorBlending.attachmentCount = 1;
+        colorBlending.pAttachments = &colorBlendAttachment;
+
+        VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = 2;
+        dynamicState.pDynamicStates = dynamicStates;
+
+        VkPushConstantRange pushRange{};
+        pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushRange.offset = 0;
+        pushRange.size = sizeof(PointPushConstants);
+
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+        VkResult result = vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &pointPipelineLayout_);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreatePipelineLayout failed result=%d", result);
+            vkDestroyShaderModule(device_, vertModule, nullptr);
+            vkDestroyShaderModule(device_, fragModule, nullptr);
+            return false;
+        }
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = shaderStages;
+        pipelineInfo.pVertexInputState = &vertexInput;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = pointPipelineLayout_;
+        pipelineInfo.renderPass = renderPass_;
+        pipelineInfo.subpass = 0;
+        result = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pointPipeline_);
+        vkDestroyShaderModule(device_, vertModule, nullptr);
+        vkDestroyShaderModule(device_, fragModule, nullptr);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreateGraphicsPipelines failed result=%d", result);
             return false;
         }
         return true;
@@ -519,6 +743,70 @@ private:
             return false;
         }
         return true;
+    }
+
+    void recordPointScene(VkCommandBuffer commandBuffer) {
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = static_cast<float>(swapchainExtent_.width);
+        viewport.height = static_cast<float>(swapchainExtent_.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.offset = {0, 0};
+        scissor.extent = swapchainExtent_;
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+        const float imageAspect = static_cast<float>(sceneMetadata_.imageWidth) /
+                static_cast<float>(std::max(1, sceneMetadata_.imageHeight));
+        const float surfaceAspect = static_cast<float>(std::max(1u, swapchainExtent_.width)) /
+                static_cast<float>(std::max(1u, swapchainExtent_.height));
+        float fillX = 1.0f;
+        float fillY = 1.0f;
+        if (imageAspect > surfaceAspect) {
+            fillX = imageAspect / surfaceAspect;
+        } else {
+            fillY = surfaceAspect / imageAspect;
+        }
+        const float textureScale = std::max(
+                static_cast<float>(swapchainExtent_.width) / static_cast<float>(std::max(1, sceneMetadata_.imageWidth)),
+                static_cast<float>(swapchainExtent_.height) / static_cast<float>(std::max(1, sceneMetadata_.imageHeight)));
+
+        PointPushConstants push{};
+        push.fillScale[0] = fillX;
+        push.fillScale[1] = fillY;
+        push.tilt[0] = renderState_.tiltX;
+        push.tilt[1] = renderState_.tiltY;
+        push.centerOffset[0] = renderState_.centerOffsetX;
+        push.centerOffset[1] = renderState_.centerOffsetY;
+        push.strength = renderState_.parallaxStrength;
+        push.focusDepth = sceneMetadata_.focusDepth + renderState_.focusDepthOffset;
+        push.farDepth = sceneMetadata_.farDepth;
+        push.sceneCenterX = sceneMetadata_.sceneCenterX;
+        push.sceneCenterY = sceneMetadata_.sceneCenterY;
+        push.sceneCenterZ = sceneMetadata_.sceneCenterZ;
+        push.sceneRadius = std::max(0.001f, sceneMetadata_.sceneRadius);
+        push.cameraZoom = std::max(0.001f, renderState_.cameraZoom);
+        push.pointScale = std::clamp(textureScale * renderState_.splatScale, 0.35f, 30.0f);
+        push.opacity = renderState_.opacity;
+        push.minPointSize = renderState_.minPointSize;
+        push.maxPointSize = renderState_.maxPointSize;
+
+        VkBuffer vertexBuffers[] = {scenePositions_.buffer, sceneColors_.buffer};
+        VkDeviceSize offsets[] = {0, 0};
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pointPipeline_);
+        vkCmdBindVertexBuffers(commandBuffer, 0, 2, vertexBuffers, offsets);
+        vkCmdPushConstants(
+                commandBuffer,
+                pointPipelineLayout_,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                0,
+                sizeof(PointPushConstants),
+                &push);
+        vkCmdDraw(commandBuffer, static_cast<uint32_t>(sceneCount_), 1, 0, 0);
     }
 
     struct BufferResource {
@@ -621,6 +909,14 @@ private:
             if (imageView != VK_NULL_HANDLE) vkDestroyImageView(device_, imageView, nullptr);
         }
         imageViews_.clear();
+        if (pointPipeline_ != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device_, pointPipeline_, nullptr);
+            pointPipeline_ = VK_NULL_HANDLE;
+        }
+        if (pointPipelineLayout_ != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(device_, pointPipelineLayout_, nullptr);
+            pointPipelineLayout_ = VK_NULL_HANDLE;
+        }
         if (renderPass_ != VK_NULL_HANDLE) {
             vkDestroyRenderPass(device_, renderPass_, nullptr);
             renderPass_ = VK_NULL_HANDLE;
@@ -695,10 +991,14 @@ private:
     std::vector<VkImageView> imageViews_;
     std::vector<VkFramebuffer> framebuffers_;
     std::vector<VkCommandBuffer> commandBuffers_;
+    VkPipelineLayout pointPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline pointPipeline_ = VK_NULL_HANDLE;
     BufferResource scenePositions_;
     BufferResource sceneColors_;
     BufferResource sceneScales_;
     BufferResource sceneRotations_;
+    SceneMetadata sceneMetadata_;
+    RenderState renderState_;
     int sceneCount_ = 0;
 };
 
@@ -789,6 +1089,46 @@ Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeRenderClea
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeRenderScene(
+        JNIEnv*, jobject, jlong handle) {
+    auto* renderer = fromHandle(handle);
+    return renderer != nullptr && renderer->renderScene() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeUpdateRenderState(
+        JNIEnv*,
+        jobject,
+        jlong handle,
+        jfloat tiltX,
+        jfloat tiltY,
+        jfloat parallaxStrength,
+        jfloat cameraZoom,
+        jfloat centerOffsetX,
+        jfloat centerOffsetY,
+        jfloat focusDepthOffset,
+        jfloat splatScale,
+        jfloat opacity,
+        jfloat minPointSize,
+        jfloat maxPointSize) {
+    auto* renderer = fromHandle(handle);
+    if (renderer == nullptr) return;
+    RenderState state{};
+    state.tiltX = tiltX;
+    state.tiltY = tiltY;
+    state.parallaxStrength = parallaxStrength;
+    state.cameraZoom = cameraZoom;
+    state.centerOffsetX = centerOffsetX;
+    state.centerOffsetY = centerOffsetY;
+    state.focusDepthOffset = focusDepthOffset;
+    state.splatScale = splatScale;
+    state.opacity = opacity;
+    state.minPointSize = minPointSize;
+    state.maxPointSize = maxPointSize;
+    renderer->updateRenderState(state);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeUploadScene(
         JNIEnv* env,
         jobject,
@@ -797,8 +1137,31 @@ Java_com_zeaze_tianyinwallpaper_renderer_VulkanGaussianRenderer_nativeUploadScen
         jobject colors,
         jobject scales,
         jobject rotations,
-        jint count) {
+        jint count,
+        jint imageWidth,
+        jint imageHeight,
+        jfloat focusDepth,
+        jfloat farDepth,
+        jfloat backgroundR,
+        jfloat backgroundG,
+        jfloat backgroundB,
+        jfloat sceneCenterX,
+        jfloat sceneCenterY,
+        jfloat sceneCenterZ,
+        jfloat sceneRadius) {
     auto* renderer = fromHandle(handle);
+    SceneMetadata metadata{};
+    metadata.imageWidth = std::max(1, imageWidth);
+    metadata.imageHeight = std::max(1, imageHeight);
+    metadata.focusDepth = focusDepth;
+    metadata.farDepth = farDepth;
+    metadata.backgroundR = backgroundR;
+    metadata.backgroundG = backgroundG;
+    metadata.backgroundB = backgroundB;
+    metadata.sceneCenterX = sceneCenterX;
+    metadata.sceneCenterY = sceneCenterY;
+    metadata.sceneCenterZ = sceneCenterZ;
+    metadata.sceneRadius = sceneRadius;
     return renderer != nullptr &&
-           renderer->uploadScene(env, positions, colors, scales, rotations, count) ? JNI_TRUE : JNI_FALSE;
+           renderer->uploadScene(env, positions, colors, scales, rotations, count, metadata) ? JNI_TRUE : JNI_FALSE;
 }

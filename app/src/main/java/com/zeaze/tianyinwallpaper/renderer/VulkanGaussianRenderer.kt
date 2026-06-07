@@ -39,7 +39,11 @@ class VulkanGaussianRenderer(
                 return
             }
             latestScene?.let {
-                switchToFallbackLocked("Gaussian scene rendering is still on GLES fallback", it)
+                if (uploadSceneToVulkanLocked(it)) {
+                    renderVulkanSceneLocked()
+                } else {
+                    switchToFallbackLocked("Vulkan pending scene upload failed", it)
+                }
             } ?: renderVulkanLoadingLocked()
         }
     }
@@ -71,7 +75,7 @@ class VulkanGaussianRenderer(
                     if (!nativeResizeRenderer(nativeHandle, this.width, this.height)) {
                         startFallbackLocked("Vulkan resize failed")
                     } else {
-                        renderVulkanLoadingLocked()
+                        renderVulkanSceneLocked()
                     }
                 }
                 Backend.Gles -> fallback.resize(this.width, this.height)
@@ -84,8 +88,11 @@ class VulkanGaussianRenderer(
         synchronized(lock) {
             latestScene = scene
             if (activeBackend == Backend.Vulkan) {
-                uploadSceneToVulkanLocked(scene)
-                switchToFallbackLocked("Vulkan splat pipeline pending", scene)
+                if (uploadSceneToVulkanLocked(scene)) {
+                    renderVulkanSceneLocked()
+                } else {
+                    switchToFallbackLocked("Vulkan scene upload failed", scene)
+                }
             } else if (activeBackend == Backend.Gles) {
                 fallback.loadGaussians(scene)
             }
@@ -98,6 +105,9 @@ class VulkanGaussianRenderer(
             latestTiltY = y
             if (activeBackend == Backend.Gles) {
                 fallback.updateTilt(x, y)
+            } else if (activeBackend == Backend.Vulkan) {
+                syncVulkanRenderStateLocked()
+                renderVulkanSceneLocked()
             }
         }
     }
@@ -108,6 +118,9 @@ class VulkanGaussianRenderer(
             latestBlurStrength = blurStrength
             if (activeBackend == Backend.Gles) {
                 fallback.updateParams(parallaxStrength, blurStrength)
+            } else if (activeBackend == Backend.Vulkan) {
+                syncVulkanRenderStateLocked()
+                renderVulkanSceneLocked()
             }
         }
     }
@@ -117,6 +130,9 @@ class VulkanGaussianRenderer(
             latestGaussianParams = params
             if (activeBackend == Backend.Gles) {
                 fallback.updateGaussianParams(params)
+            } else if (activeBackend == Backend.Vulkan) {
+                syncVulkanRenderStateLocked()
+                renderVulkanSceneLocked()
             }
         }
     }
@@ -128,7 +144,8 @@ class VulkanGaussianRenderer(
             if (activeBackend == Backend.Gles) {
                 fallback.resetCamera()
             } else if (activeBackend == Backend.Vulkan) {
-                renderVulkanLoadingLocked()
+                syncVulkanRenderStateLocked()
+                renderVulkanSceneLocked()
             }
         }
     }
@@ -147,7 +164,7 @@ class VulkanGaussianRenderer(
     override fun requestRender() {
         synchronized(lock) {
             when (activeBackend) {
-                Backend.Vulkan -> renderVulkanLoadingLocked()
+                Backend.Vulkan -> renderVulkanSceneLocked()
                 Backend.Gles -> fallback.requestRender()
                 Backend.Stopped -> Unit
             }
@@ -160,7 +177,7 @@ class VulkanGaussianRenderer(
             if (activeBackend == Backend.Gles) {
                 fallback.setRenderingEnabled(enabled)
             } else if (activeBackend == Backend.Vulkan && enabled) {
-                renderVulkanLoadingLocked()
+                renderVulkanSceneLocked()
             }
         }
     }
@@ -206,8 +223,9 @@ class VulkanGaussianRenderer(
         startFallbackLocked(reason)
     }
 
-    private fun uploadSceneToVulkanLocked(scene: GaussianPlyLoader.GaussianScene) {
-        if (nativeHandle == 0L) return
+    private fun uploadSceneToVulkanLocked(scene: GaussianPlyLoader.GaussianScene): Boolean {
+        if (nativeHandle == 0L) return false
+        syncVulkanRenderStateLocked()
         val positions = scene.positions.duplicate().apply { position(0) }
         val colors = scene.colors.duplicate().apply { position(0) }
         val scales = scene.scales.duplicate().apply { position(0) }
@@ -219,12 +237,56 @@ class VulkanGaussianRenderer(
                 colors,
                 scales,
                 rotations,
-                scene.count
+                scene.count,
+                scene.imageWidth,
+                scene.imageHeight,
+                scene.focusDepth,
+                scene.parallaxAnchorDepth,
+                scene.backgroundR,
+                scene.backgroundG,
+                scene.backgroundB,
+                scene.sceneCenterX,
+                scene.sceneCenterY,
+                scene.sceneCenterZ,
+                scene.sceneRadius
             )
         }.onFailure {
             Log.w(TAG, "native Vulkan scene upload failed", it)
         }.getOrDefault(false)
         Log.d(TAG, "native Vulkan scene upload uploaded=$uploaded count=${scene.count}")
+        return uploaded
+    }
+
+    private fun syncVulkanRenderStateLocked() {
+        if (nativeHandle == 0L) return
+        nativeUpdateRenderState(
+            nativeHandle,
+            latestTiltX,
+            latestTiltY,
+            latestParallaxStrength,
+            latestGaussianParams.cameraZoom,
+            latestGaussianParams.centerOffsetX,
+            latestGaussianParams.centerOffsetY,
+            latestGaussianParams.focusDepthOffset,
+            latestGaussianParams.splatScale,
+            latestGaussianParams.globalOpacity,
+            latestGaussianParams.minPointSize,
+            latestGaussianParams.maxPointSize
+        )
+    }
+
+    private fun renderVulkanSceneLocked() {
+        if (latestScene == null) {
+            renderVulkanLoadingLocked()
+            return
+        }
+        if (!renderingEnabled || nativeHandle == 0L) return
+        val ok = runCatching { nativeRenderScene(nativeHandle) }
+            .onFailure { Log.w(TAG, "native Vulkan scene render failed", it) }
+            .getOrDefault(false)
+        if (!ok) {
+            latestScene?.let { switchToFallbackLocked("Vulkan scene render failed", it) }
+        }
     }
 
     private fun stopVulkanLocked() {
@@ -267,13 +329,39 @@ class VulkanGaussianRenderer(
     private external fun nativeStopRenderer(handle: Long)
     private external fun nativeResizeRenderer(handle: Long, width: Int, height: Int): Boolean
     private external fun nativeRenderClear(handle: Long, r: Float, g: Float, b: Float): Boolean
+    private external fun nativeRenderScene(handle: Long): Boolean
+    private external fun nativeUpdateRenderState(
+        handle: Long,
+        tiltX: Float,
+        tiltY: Float,
+        parallaxStrength: Float,
+        cameraZoom: Float,
+        centerOffsetX: Float,
+        centerOffsetY: Float,
+        focusDepthOffset: Float,
+        splatScale: Float,
+        opacity: Float,
+        minPointSize: Float,
+        maxPointSize: Float
+    )
     private external fun nativeUploadScene(
         handle: Long,
         positions: Buffer,
         colors: Buffer,
         scales: Buffer,
         rotations: Buffer?,
-        count: Int
+        count: Int,
+        imageWidth: Int,
+        imageHeight: Int,
+        focusDepth: Float,
+        farDepth: Float,
+        backgroundR: Float,
+        backgroundG: Float,
+        backgroundB: Float,
+        sceneCenterX: Float,
+        sceneCenterY: Float,
+        sceneCenterZ: Float,
+        sceneRadius: Float
     ): Boolean
 
     companion object {
