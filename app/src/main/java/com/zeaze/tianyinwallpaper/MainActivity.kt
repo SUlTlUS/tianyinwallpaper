@@ -385,6 +385,7 @@ class MainActivity : BaseActivity() {
                 // 选择模式状态
                 var wallpaperSelectionState by remember { mutableStateOf(SelectionBarState(false, false)) }
                 var rasterSelectionState by remember { mutableStateOf(SelectionBarState(false, false)) }
+                var depthSelectionState by remember { mutableStateOf(SelectionBarState(false, false)) }
 
                 // 监听选择模式状态变化
                 DisposableEffect(Unit) {
@@ -396,14 +397,20 @@ class MainActivity : BaseActivity() {
                         .toObservableWithCode(RxConstants.RX_RASTER_SELECTION_MODE_CHANGED, SelectionBarState::class.java)
                         .subscribe { state -> rasterSelectionState = state }
 
+                    val depthSelectionDisposable = RxBus.getDefault()
+                        .toObservableWithCode(RxConstants.RX_DEPTH_SELECTION_MODE_CHANGED, SelectionBarState::class.java)
+                        .subscribe { state -> depthSelectionState = state }
+
                     onDispose {
                         wallpaperSelectionDisposable.dispose()
                         rasterSelectionDisposable.dispose()
+                        depthSelectionDisposable.dispose()
                     }
                 }
 
                 val isInSelectionMode = (isWallpaperPage && wallpaperSelectionState.selectionMode) ||
-                                        (isRasterPage && rasterSelectionState.selectionMode)
+                                        (isRasterPage && rasterSelectionState.selectionMode) ||
+                                        (isDepthPage && depthSelectionState.selectionMode)
 
                 if (shouldShowTopBar) {
                     val density = LocalDensity.current
@@ -415,7 +422,11 @@ class MainActivity : BaseActivity() {
 
                     if (isInSelectionMode) {
                         // 选择模式顶部栏
-                        val selectionState = if (isWallpaperPage) wallpaperSelectionState else rasterSelectionState
+                        val selectionState = when {
+                            isWallpaperPage -> wallpaperSelectionState
+                            isRasterPage -> rasterSelectionState
+                            else -> depthSelectionState
+                        }
                         SelectionTopBar(
                             statusBarTopPaddingDp = statusBarTopPaddingDp,
                             enableLiquidGlass = enableLiquidGlass,
@@ -425,22 +436,28 @@ class MainActivity : BaseActivity() {
                             onCancelSelect = {
                                 if (isWallpaperPage) {
                                     RxBus.postWithCode(RxConstants.RX_SELECTION_CANCEL, Unit)
-                                } else {
+                                } else if (isRasterPage) {
                                     RxBus.postWithCode(RxConstants.RX_RASTER_SELECTION_CANCEL, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_DEPTH_SELECTION_CANCEL, Unit)
                                 }
                             },
                             onDelete = {
                                 if (isWallpaperPage) {
                                     RxBus.postWithCode(RxConstants.RX_SELECTION_DELETE, Unit)
-                                } else {
+                                } else if (isRasterPage) {
                                     RxBus.postWithCode(RxConstants.RX_RASTER_SELECTION_DELETE, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_DEPTH_SELECTION_DELETE, Unit)
                                 }
                             },
                             onToggleSelectAll = {
                                 if (isWallpaperPage) {
                                     RxBus.postWithCode(RxConstants.RX_SELECTION_TOGGLE_ALL, Unit)
-                                } else {
+                                } else if (isRasterPage) {
                                     RxBus.postWithCode(RxConstants.RX_RASTER_SELECTION_TOGGLE_ALL, Unit)
+                                } else {
+                                    RxBus.postWithCode(RxConstants.RX_DEPTH_SELECTION_TOGGLE_ALL, Unit)
                                 }
                             }
                         )
@@ -474,8 +491,8 @@ class MainActivity : BaseActivity() {
                                 }
                             },
                             showAddButton = isWallpaperPage || isRasterPage || isDepthPage,
-                            showPreviewButton = isWallpaperPage || isDepthPage,
-                            showApplyButton = isWallpaperPage || isDepthPage,
+                            showPreviewButton = isWallpaperPage,
+                            showApplyButton = isWallpaperPage,
                             showMoreButton = true,
                             keepSlotWhenHidden = true
                         )
@@ -505,6 +522,17 @@ class MainActivity : BaseActivity() {
                             "选择" to {
                                 showMoreMenu = false
                                 RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_RASTER_SELECT_MODE, Unit)
+                            },
+                            "设置" to {
+                                showMoreMenu = false
+                                openSettingPage()
+                            }
+                        )
+                    } else if (isDepthPage) {
+                        listOf(
+                            "选择" to {
+                                showMoreMenu = false
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_DEPTH_SELECT_MODE, Unit)
                             },
                             "设置" to {
                                 showMoreMenu = false

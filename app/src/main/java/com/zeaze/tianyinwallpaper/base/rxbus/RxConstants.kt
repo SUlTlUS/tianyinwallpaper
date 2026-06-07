@@ -28,4 +28,9 @@ object RxConstants {
     const val RX_TRIGGER_ADD_DEPTH = 0x30
     const val RX_TRIGGER_APPLY_DEPTH = 0x31
     const val RX_TRIGGER_PREVIEW_DEPTH = 0x32
+    const val RX_TRIGGER_ENTER_DEPTH_SELECT_MODE = 0x33
+    const val RX_DEPTH_SELECTION_MODE_CHANGED = 0x34
+    const val RX_DEPTH_SELECTION_CANCEL = 0x35
+    const val RX_DEPTH_SELECTION_DELETE = 0x36
+    const val RX_DEPTH_SELECTION_TOGGLE_ALL = 0x37
 }
