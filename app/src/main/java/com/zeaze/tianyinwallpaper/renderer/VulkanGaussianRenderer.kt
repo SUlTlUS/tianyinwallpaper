@@ -43,6 +43,10 @@ class VulkanGaussianRenderer(
     private var targetSplatBudget = 0
     private var currentSplatBudget = 0
     private var lastSplatBudgetStepMs = 0L
+    private var renderPerfFrames = 0
+    private var renderPerfTotalMs = 0L
+    private var renderPerfMaxMs = 0L
+    private var lastRenderPerfLogMs = 0L
     private val splatBudgetRunnable = Runnable {
         synchronized(lock) {
             if (activeBackend == Backend.Vulkan && advanceSplatBudgetLocked()) {
@@ -314,6 +318,7 @@ class VulkanGaussianRenderer(
         val colors = scene.colors.duplicate().apply { position(0) }
         val scales = scene.scales.duplicate().apply { position(0) }
         val rotations = scene.rotations?.duplicate()?.apply { position(0) }
+        val uploadStartMs = SystemClock.elapsedRealtime()
         val uploaded = runCatching {
             nativeUploadScene(
                 nativeHandle,
@@ -338,7 +343,8 @@ class VulkanGaussianRenderer(
         }.onFailure {
             Log.w(TAG, "native Vulkan scene upload failed", it)
         }.getOrDefault(false)
-        Log.d(TAG, "native Vulkan scene upload uploaded=$uploaded count=${scene.count}")
+        val uploadElapsedMs = SystemClock.elapsedRealtime() - uploadStartMs
+        Log.d(TAG, "native Vulkan scene upload uploaded=$uploaded count=${scene.count} elapsedMs=$uploadElapsedMs")
         return uploaded
     }
 
@@ -367,14 +373,35 @@ class VulkanGaussianRenderer(
         if (!renderingEnabled || nativeHandle == 0L) return
         val drawCount = currentSplatBudget.coerceIn(0, latestScene?.count ?: 0)
         if (drawCount <= 0) return
+        val renderStartMs = SystemClock.elapsedRealtime()
         val ok = runCatching { nativeRenderScene(nativeHandle, drawCount) }
             .onFailure { Log.w(TAG, "native Vulkan scene render failed", it) }
             .getOrDefault(false)
+        val renderElapsedMs = SystemClock.elapsedRealtime() - renderStartMs
         if (!ok) {
             latestScene?.let { switchToFallbackLocked("Vulkan scene render failed", it) }
         } else {
+            recordRenderPerfLocked(drawCount, renderElapsedMs)
             scheduleSplatBudgetStepLocked()
         }
+    }
+
+    private fun recordRenderPerfLocked(drawCount: Int, elapsedMs: Long) {
+        renderPerfFrames += 1
+        renderPerfTotalMs += elapsedMs
+        renderPerfMaxMs = maxOf(renderPerfMaxMs, elapsedMs)
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastRenderPerfLogMs < PERF_LOG_INTERVAL_MS) return
+        val avgMs = if (renderPerfFrames > 0) renderPerfTotalMs.toFloat() / renderPerfFrames else 0f
+        Log.d(
+            TAG,
+            "Vulkan perf drawCount=$drawCount budget=$currentSplatBudget/$targetSplatBudget " +
+                "frames=$renderPerfFrames avgMs=${String.format("%.2f", avgMs)} maxMs=$renderPerfMaxMs"
+        )
+        renderPerfFrames = 0
+        renderPerfTotalMs = 0L
+        renderPerfMaxMs = 0L
+        lastRenderPerfLogMs = now
     }
 
     private fun resetSplatBudgetLocked(scene: GaussianPlyLoader.GaussianScene) {
@@ -386,6 +413,10 @@ class VulkanGaussianRenderer(
         }
         lastSplatBudgetStepMs = SystemClock.elapsedRealtime()
         budgetHandler.removeCallbacks(splatBudgetRunnable)
+        renderPerfFrames = 0
+        renderPerfTotalMs = 0L
+        renderPerfMaxMs = 0L
+        lastRenderPerfLogMs = 0L
     }
 
     private fun advanceSplatBudgetLocked(): Boolean {
@@ -492,6 +523,7 @@ class VulkanGaussianRenderer(
         private const val SPLAT_BUDGET_INITIAL = 500_000
         private const val SPLAT_BUDGET_STEP = 250_000
         private const val SPLAT_BUDGET_STEP_INTERVAL_MS = 120L
+        private const val PERF_LOG_INTERVAL_MS = 3_000L
 
         @Volatile private var nativeLibraryLoaded = false
         @Volatile private var nativeLibraryLoadAttempted = false
