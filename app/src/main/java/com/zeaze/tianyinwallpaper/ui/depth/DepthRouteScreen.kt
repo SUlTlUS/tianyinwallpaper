@@ -1010,7 +1010,6 @@ private fun DepthParamPanel(
                         .background(Color(0x99000000))
                 }
             )
-            .pointerInput(Unit) { detectTapGestures { } }
             .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
     ) {
         Box(
