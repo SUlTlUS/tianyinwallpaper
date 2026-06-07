@@ -4,12 +4,16 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import java.nio.Buffer
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.sin
 
 class VulkanGaussianRenderer(
@@ -17,7 +21,10 @@ class VulkanGaussianRenderer(
 ) : NativeGaussianRenderer {
     private val fallback = DepthGLRenderer()
     private val lock = Any()
-    private val budgetHandler = Handler(Looper.getMainLooper())
+    private val renderThread = HandlerThread("TianyinVulkanRenderer").apply { start() }
+    private val renderHandler = Handler(renderThread.looper)
+    private val budgetHandler = renderHandler
+    private val renderTaskQueued = AtomicBoolean(false)
 
     private var nativeHandle = 0L
     private var currentSurface: Surface? = null
@@ -46,153 +53,213 @@ class VulkanGaussianRenderer(
     }
 
     override fun start(surface: Surface) {
-        synchronized(lock) {
-            currentSurface = surface
-            if (!tryStartVulkanLocked(surface)) {
-                startFallbackLocked("Vulkan start failed")
-                return
-            }
-            latestScene?.let {
-                if (uploadSceneToVulkanLocked(it)) {
-                    renderVulkanSceneLocked()
-                } else {
-                    switchToFallbackLocked("Vulkan pending scene upload failed", it)
+        runOnRenderThread {
+            synchronized(lock) {
+                currentSurface = surface
+                if (!tryStartVulkanLocked(surface)) {
+                    startFallbackLocked("Vulkan start failed")
+                    return@synchronized
                 }
-            } ?: renderVulkanLoadingLocked()
+                latestScene?.let {
+                    if (uploadSceneToVulkanLocked(it)) {
+                        renderVulkanSceneLocked()
+                    } else {
+                        switchToFallbackLocked("Vulkan pending scene upload failed", it)
+                    }
+                } ?: renderVulkanLoadingLocked()
+            }
         }
     }
 
     override fun stop() {
-        synchronized(lock) {
-            stopVulkanLocked()
-            budgetHandler.removeCallbacks(splatBudgetRunnable)
-            fallback.stop()
-            currentSurface = null
-            activeBackend = Backend.Stopped
+        runOnRenderThread {
+            synchronized(lock) {
+                stopVulkanLocked()
+                budgetHandler.removeCallbacks(splatBudgetRunnable)
+                renderTaskQueued.set(false)
+                fallback.stop()
+                currentSurface = null
+                activeBackend = Backend.Stopped
+            }
         }
     }
 
     override fun stopAndWait(timeoutMs: Long) {
-        synchronized(lock) {
-            stopVulkanLocked()
-            budgetHandler.removeCallbacks(splatBudgetRunnable)
-            fallback.stopAndWait(timeoutMs)
-            currentSurface = null
-            activeBackend = Backend.Stopped
+        runOnRenderThreadAndWait(timeoutMs) {
+            synchronized(lock) {
+                stopVulkanLocked()
+                budgetHandler.removeCallbacks(splatBudgetRunnable)
+                renderTaskQueued.set(false)
+                fallback.stopAndWait(timeoutMs)
+                currentSurface = null
+                activeBackend = Backend.Stopped
+            }
         }
     }
 
     override fun resize(width: Int, height: Int) {
-        synchronized(lock) {
-            this.width = width.coerceAtLeast(1)
-            this.height = height.coerceAtLeast(1)
-            when (activeBackend) {
-                Backend.Vulkan -> {
-                    if (!nativeResizeRenderer(nativeHandle, this.width, this.height)) {
-                        startFallbackLocked("Vulkan resize failed")
-                    } else {
-                        renderVulkanSceneLocked()
+        runOnRenderThread {
+            synchronized(lock) {
+                this.width = width.coerceAtLeast(1)
+                this.height = height.coerceAtLeast(1)
+                when (activeBackend) {
+                    Backend.Vulkan -> {
+                        if (!nativeResizeRenderer(nativeHandle, this.width, this.height)) {
+                            startFallbackLocked("Vulkan resize failed")
+                        } else {
+                            renderVulkanSceneLocked()
+                        }
                     }
+                    Backend.Gles -> fallback.resize(this.width, this.height)
+                    Backend.Stopped -> Unit
                 }
-                Backend.Gles -> fallback.resize(this.width, this.height)
-                Backend.Stopped -> Unit
             }
         }
     }
 
     override fun loadGaussians(scene: GaussianPlyLoader.GaussianScene) {
-        synchronized(lock) {
-            latestScene = scene
-            if (activeBackend == Backend.Vulkan) {
-                if (uploadSceneToVulkanLocked(scene)) {
-                    renderVulkanSceneLocked()
-                } else {
-                    switchToFallbackLocked("Vulkan scene upload failed", scene)
+        runOnRenderThread {
+            synchronized(lock) {
+                latestScene = scene
+                if (activeBackend == Backend.Vulkan) {
+                    if (uploadSceneToVulkanLocked(scene)) {
+                        renderVulkanSceneLocked()
+                    } else {
+                        switchToFallbackLocked("Vulkan scene upload failed", scene)
+                    }
+                } else if (activeBackend == Backend.Gles) {
+                    fallback.loadGaussians(scene)
                 }
-            } else if (activeBackend == Backend.Gles) {
-                fallback.loadGaussians(scene)
             }
         }
     }
 
     override fun updateTilt(x: Float, y: Float) {
-        synchronized(lock) {
-            latestTiltX = x
-            latestTiltY = y
-            if (activeBackend == Backend.Gles) {
-                fallback.updateTilt(x, y)
-            } else if (activeBackend == Backend.Vulkan) {
-                syncVulkanRenderStateLocked()
-                renderVulkanSceneLocked()
+        runOnRenderThread {
+            synchronized(lock) {
+                latestTiltX = x
+                latestTiltY = y
+                if (activeBackend == Backend.Gles) {
+                    fallback.updateTilt(x, y)
+                } else if (activeBackend == Backend.Vulkan) {
+                    queueVulkanRenderLocked()
+                }
             }
         }
     }
 
     override fun updateParams(parallaxStrength: Float, blurStrength: Float) {
-        synchronized(lock) {
-            latestParallaxStrength = parallaxStrength
-            latestBlurStrength = blurStrength
-            if (activeBackend == Backend.Gles) {
-                fallback.updateParams(parallaxStrength, blurStrength)
-            } else if (activeBackend == Backend.Vulkan) {
-                syncVulkanRenderStateLocked()
-                renderVulkanSceneLocked()
+        runOnRenderThread {
+            synchronized(lock) {
+                latestParallaxStrength = parallaxStrength
+                latestBlurStrength = blurStrength
+                if (activeBackend == Backend.Gles) {
+                    fallback.updateParams(parallaxStrength, blurStrength)
+                } else if (activeBackend == Backend.Vulkan) {
+                    queueVulkanRenderLocked()
+                }
             }
         }
     }
 
     override fun updateGaussianParams(params: DepthGLRenderer.GaussianRenderParams) {
-        synchronized(lock) {
-            latestGaussianParams = params
-            if (activeBackend == Backend.Gles) {
-                fallback.updateGaussianParams(params)
-            } else if (activeBackend == Backend.Vulkan) {
-                syncVulkanRenderStateLocked()
-                renderVulkanSceneLocked()
+        runOnRenderThread {
+            synchronized(lock) {
+                latestGaussianParams = params
+                if (activeBackend == Backend.Gles) {
+                    fallback.updateGaussianParams(params)
+                } else if (activeBackend == Backend.Vulkan) {
+                    queueVulkanRenderLocked()
+                }
             }
         }
     }
 
     override fun resetCamera() {
-        synchronized(lock) {
-            latestTiltX = 0f
-            latestTiltY = 0f
-            if (activeBackend == Backend.Gles) {
-                fallback.resetCamera()
-            } else if (activeBackend == Backend.Vulkan) {
-                syncVulkanRenderStateLocked()
-                renderVulkanSceneLocked()
+        runOnRenderThread {
+            synchronized(lock) {
+                latestTiltX = 0f
+                latestTiltY = 0f
+                if (activeBackend == Backend.Gles) {
+                    fallback.resetCamera()
+                } else if (activeBackend == Backend.Vulkan) {
+                    queueVulkanRenderLocked()
+                }
             }
         }
     }
 
     override fun showLoading(enabled: Boolean) {
-        synchronized(lock) {
-            loadingVisible = enabled
-            if (activeBackend == Backend.Gles) {
-                fallback.showLoading(enabled)
-            } else if (activeBackend == Backend.Vulkan) {
-                renderVulkanLoadingLocked()
+        runOnRenderThread {
+            synchronized(lock) {
+                loadingVisible = enabled
+                if (activeBackend == Backend.Gles) {
+                    fallback.showLoading(enabled)
+                } else if (activeBackend == Backend.Vulkan) {
+                    renderVulkanLoadingLocked()
+                }
             }
         }
     }
 
     override fun requestRender() {
-        synchronized(lock) {
-            when (activeBackend) {
-                Backend.Vulkan -> renderVulkanSceneLocked()
-                Backend.Gles -> fallback.requestRender()
-                Backend.Stopped -> Unit
+        runOnRenderThread {
+            synchronized(lock) {
+                when (activeBackend) {
+                    Backend.Vulkan -> queueVulkanRenderLocked()
+                    Backend.Gles -> fallback.requestRender()
+                    Backend.Stopped -> Unit
+                }
             }
         }
     }
 
     override fun setRenderingEnabled(enabled: Boolean) {
-        synchronized(lock) {
-            renderingEnabled = enabled
-            if (activeBackend == Backend.Gles) {
-                fallback.setRenderingEnabled(enabled)
-            } else if (activeBackend == Backend.Vulkan && enabled) {
+        runOnRenderThread {
+            synchronized(lock) {
+                renderingEnabled = enabled
+                if (activeBackend == Backend.Gles) {
+                    fallback.setRenderingEnabled(enabled)
+                } else if (activeBackend == Backend.Vulkan && enabled) {
+                    queueVulkanRenderLocked()
+                }
+            }
+        }
+    }
+
+    private fun runOnRenderThread(block: () -> Unit) {
+        if (Looper.myLooper() == renderThread.looper) {
+            block()
+        } else {
+            renderHandler.post { block() }
+        }
+    }
+
+    private fun runOnRenderThreadAndWait(timeoutMs: Long, block: () -> Unit) {
+        if (Looper.myLooper() == renderThread.looper) {
+            block()
+            return
+        }
+        val latch = CountDownLatch(1)
+        renderHandler.post {
+            try {
+                block()
+            } finally {
+                latch.countDown()
+            }
+        }
+        if (!latch.await(timeoutMs.coerceAtLeast(1L), TimeUnit.MILLISECONDS)) {
+            Log.w(TAG, "Vulkan render thread stop timed out after ${timeoutMs}ms")
+        }
+    }
+
+    private fun queueVulkanRenderLocked() {
+        if (renderTaskQueued.getAndSet(true)) return
+        renderHandler.post {
+            synchronized(lock) {
+                renderTaskQueued.set(false)
+                if (activeBackend != Backend.Vulkan) return@synchronized
+                syncVulkanRenderStateLocked()
                 renderVulkanSceneLocked()
             }
         }
