@@ -803,10 +803,6 @@ private:
         } else {
             fillY = surfaceAspect / imageAspect;
         }
-        const float textureScale = std::max(
-                static_cast<float>(swapchainExtent_.width) / static_cast<float>(std::max(1, sceneMetadata_.imageWidth)),
-                static_cast<float>(swapchainExtent_.height) / static_cast<float>(std::max(1, sceneMetadata_.imageHeight)));
-
         QuadPushConstants push{};
         push.surfaceSize[0] = static_cast<float>(std::max(1u, swapchainExtent_.width));
         push.surfaceSize[1] = static_cast<float>(std::max(1u, swapchainExtent_.height));
@@ -827,7 +823,7 @@ private:
         push.tanHalfFov = 0.57735026f;
         push.cameraZoom = std::max(0.001f, renderState_.cameraZoom);
         push.focusDepthOffset = renderState_.focusDepthOffset;
-        push.pointScale = std::clamp(textureScale * renderState_.splatScale, 0.35f, 30.0f);
+        push.pointScale = std::clamp(renderState_.splatScale, 0.25f, 3.0f);
         push.quadExtent = 1.0f;
         push.opacity = renderState_.opacity;
         push.alphaFalloff = renderState_.alphaFalloff;

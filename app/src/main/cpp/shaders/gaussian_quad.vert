@@ -133,7 +133,8 @@ void main() {
     vec2 local = inCorner * pc.quadExtent;
     vec2 pixelOffset = majorAxis * local.x * majorPixels + minorAxis * local.y * minorPixels;
     vec2 clipOffset = pixelOffset * vec2(2.0 / pc.surfaceSize.x, 2.0 / pc.surfaceSize.y);
-    gl_Position = vec4(center + clipOffset, 0.0, 1.0);
+    vec2 clipPosition = center + clipOffset;
+    gl_Position = vec4(clipPosition.x, -clipPosition.y, 0.0, 1.0);
     vColor = vec4(inColor.rgb, inColor.a * step(0.02, rawZ));
     vLocal = local;
     vAaFactor = clamp(sqrt(max(detOrig / detBlur, 0.0)), 0.0, 1.0);
