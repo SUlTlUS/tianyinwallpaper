@@ -258,7 +258,7 @@ private fun NativeGaussianPreviewView(
 }
 
 private const val TAG = "DepthPreviewView"
-private const val NATIVE_PREVIEW_MIN_GAUSSIAN_SPLATS = 500_000
+private const val NATIVE_PREVIEW_MIN_GAUSSIAN_SPLATS = 100_000
 private const val NATIVE_PREVIEW_MAX_GAUSSIAN_SPLATS = 800_000
 
 private fun DepthWallpaperModel.nativePreviewMaxSplats(): Int {

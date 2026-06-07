@@ -139,7 +139,7 @@ private enum class DepthAddKind {
 }
 
 private const val DEPTH_BLUR_DISABLED = 0f
-private const val GAUSSIAN_MIN_SPLAT_BUDGET = 500_000
+private const val GAUSSIAN_MIN_SPLAT_BUDGET = 100_000
 private const val GAUSSIAN_FAST_SPLAT_BUDGET = 800_000
 private const val GAUSSIAN_FULL_SPLAT_BUDGET = 1_500_000
 private const val GAUSSIAN_SPLAT_BUDGET_STEP = 100_000
@@ -1115,7 +1115,7 @@ private fun DepthParamPanel(
                 )
             }
             DepthParamSlider(
-                label = "壁纸密度",
+                label = "清晰度",
                 value = model.gaussianMaxSplats.toFloat(),
                 valueText = formatSplatBudget(model.gaussianMaxSplats),
                 range = GAUSSIAN_MIN_SPLAT_BUDGET.toFloat()..GAUSSIAN_FULL_SPLAT_BUDGET.toFloat(),
