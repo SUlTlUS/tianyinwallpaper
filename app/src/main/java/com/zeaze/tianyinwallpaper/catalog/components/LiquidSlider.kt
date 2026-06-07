@@ -35,6 +35,7 @@ import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCombinedBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
 import com.zeaze.tianyinwallpaper.catalog.utils.DampedDragAnimation
+import com.zeaze.tianyinwallpaper.catalog.utils.inspectDragGestures
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
@@ -53,7 +54,8 @@ fun LiquidSlider(
     backdrop: Backdrop,
     isLightTheme: Boolean,
     modifier: Modifier = Modifier,
-    onValueChangeFinished: (() -> Unit)? = null
+    onValueChangeFinished: (() -> Unit)? = null,
+    dragWholeTrack: Boolean = false
 ) {
     val accentColor =
         if (isLightTheme) Color(0xFF0088FF)
@@ -65,12 +67,21 @@ fun LiquidSlider(
     val trackBackdrop = rememberLayerBackdrop()
 
     BoxWithConstraints(
-        modifier.fillMaxWidth(),
+        modifier
+            .fillMaxWidth()
+            .then(if (dragWholeTrack) Modifier.height(44.dp) else Modifier),
         contentAlignment = Alignment.CenterStart
     ) {
         val trackWidth = constraints.maxWidth
 
         val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
+        fun valueForPositionX(positionX: Float): Float {
+            if (trackWidth <= 0) return value().coerceIn(valueRange)
+            val delta = (valueRange.endInclusive - valueRange.start) * (positionX / trackWidth)
+            return (if (isLtr) valueRange.start + delta else valueRange.endInclusive - delta)
+                .coerceIn(valueRange)
+        }
+
         val animationScope = rememberCoroutineScope()
         var didDrag by remember { mutableStateOf(false) }
         val dampedDragAnimation = remember(animationScope) {
@@ -210,5 +221,38 @@ fun LiquidSlider(
                 )
                 .size(40f.dp, 24f.dp)
         )
+
+        if (dragWholeTrack) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .pointerInput(trackWidth, valueRange, isLtr) {
+                        inspectDragGestures(
+                            onDragStart = { down ->
+                                didDrag = false
+                                dampedDragAnimation.press()
+                                val targetValue = valueForPositionX(down.position.x)
+                                dampedDragAnimation.updateValue(targetValue)
+                                onValueChange(targetValue)
+                            },
+                            onDragEnd = {
+                                onValueChangeFinished?.invoke()
+                                dampedDragAnimation.release()
+                            },
+                            onDragCancel = {
+                                onValueChangeFinished?.invoke()
+                                dampedDragAnimation.release()
+                            }
+                        ) { change, _ ->
+                            didDrag = true
+                            change.consume()
+                            val targetValue = valueForPositionX(change.position.x)
+                            dampedDragAnimation.updateValue(targetValue)
+                            onValueChange(targetValue)
+                        }
+                    }
+            )
+        }
     }
 }

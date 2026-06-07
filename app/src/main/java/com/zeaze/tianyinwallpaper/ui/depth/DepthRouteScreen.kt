@@ -73,10 +73,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -981,6 +985,16 @@ private fun DepthParamPanel(
     onDragEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var isSliderInteracting by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val disableScrollConnection = remember(isSliderInteracting) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                return if (isSliderInteracting) available else Offset.Zero
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1044,8 +1058,9 @@ private fun DepthParamPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f, fill = false)
+                .nestedScroll(disableScrollConnection)
                 .padding(horizontal = 8.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
         DepthParamSlider(
@@ -1057,7 +1072,8 @@ private fun DepthParamPanel(
             backdrop = backdrop,
             isLightTheme = isLightTheme,
             contentColor = contentColor,
-            visibilityThreshold = 0.1f
+            visibilityThreshold = 0.1f,
+            onInteractionChange = { isSliderInteracting = it }
         )
         DepthParamSlider(
             label = "视差强度",
@@ -1068,7 +1084,8 @@ private fun DepthParamPanel(
             backdrop = backdrop,
             isLightTheme = isLightTheme,
             contentColor = contentColor,
-            visibilityThreshold = 0.001f
+            visibilityThreshold = 0.001f,
+            onInteractionChange = { isSliderInteracting = it }
         )
         if (model.isGaussian()) {
             Row(
@@ -1103,7 +1120,8 @@ private fun DepthParamPanel(
                 backdrop = backdrop,
                 isLightTheme = isLightTheme,
                 contentColor = contentColor,
-                visibilityThreshold = GAUSSIAN_SPLAT_BUDGET_STEP.toFloat()
+                visibilityThreshold = GAUSSIAN_SPLAT_BUDGET_STEP.toFloat(),
+                onInteractionChange = { isSliderInteracting = it }
             )
             DepthParamSlider(
                 label = "距离",
@@ -1114,7 +1132,8 @@ private fun DepthParamPanel(
                 backdrop = backdrop,
                 isLightTheme = isLightTheme,
                 contentColor = contentColor,
-                visibilityThreshold = 0.01f
+                visibilityThreshold = 0.01f,
+                onInteractionChange = { isSliderInteracting = it }
             )
             DepthParamSlider(
                 label = "注视深度",
@@ -1125,7 +1144,8 @@ private fun DepthParamPanel(
                 backdrop = backdrop,
                 isLightTheme = isLightTheme,
                 contentColor = contentColor,
-                visibilityThreshold = 0.01f
+                visibilityThreshold = 0.01f,
+                onInteractionChange = { isSliderInteracting = it }
             )
             Text(
                 text = "重置注视点",
@@ -1186,7 +1206,8 @@ private fun DepthParamSlider(
     backdrop: Backdrop?,
     isLightTheme: Boolean,
     contentColor: Color,
-    visibilityThreshold: Float
+    visibilityThreshold: Float,
+    onInteractionChange: (Boolean) -> Unit = {}
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
@@ -1200,17 +1221,30 @@ private fun DepthParamSlider(
         if (backdrop != null) {
             LiquidSlider(
                 value = { value.coerceIn(range.start, range.endInclusive) },
-                onValueChange = onValueChange,
+                onValueChange = {
+                    onInteractionChange(true)
+                    onValueChange(it)
+                },
+                onValueChangeFinished = {
+                    onInteractionChange(false)
+                },
                 valueRange = range,
                 visibilityThreshold = visibilityThreshold,
                 backdrop = backdrop,
                 isLightTheme = isLightTheme,
+                dragWholeTrack = true,
                 modifier = Modifier.fillMaxWidth()
             )
         } else {
             Slider(
                 value = value.coerceIn(range.start, range.endInclusive),
-                onValueChange = onValueChange,
+                onValueChange = {
+                    onInteractionChange(true)
+                    onValueChange(it)
+                },
+                onValueChangeFinished = {
+                    onInteractionChange(false)
+                },
                 valueRange = range,
                 modifier = Modifier.fillMaxWidth()
             )
