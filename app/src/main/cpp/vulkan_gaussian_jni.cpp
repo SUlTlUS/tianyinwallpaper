@@ -866,6 +866,118 @@ private:
         return UINT32_MAX;
     }
 
+    bool createBufferResource(
+            VkDeviceSize size,
+            VkBufferUsageFlags usage,
+            VkMemoryPropertyFlags properties,
+            BufferResource& out,
+            const char* label) {
+        if (size == 0) return false;
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VkResult result = vkCreateBuffer(device_, &bufferInfo, nullptr, &out.buffer);
+        if (result != VK_SUCCESS) {
+            __android_log_print(
+                    ANDROID_LOG_WARN,
+                    kTag,
+                    "vkCreateBuffer failed label=%s result=%d size=%llu",
+                    label,
+                    result,
+                    static_cast<unsigned long long>(size));
+            return false;
+        }
+
+        VkMemoryRequirements memRequirements{};
+        vkGetBufferMemoryRequirements(device_, out.buffer, &memRequirements);
+        const uint32_t memoryType = findMemoryType(memRequirements.memoryTypeBits, properties);
+        if (memoryType == UINT32_MAX) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "no memory type for %s", label);
+            destroyBufferLocked(out);
+            return false;
+        }
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = memoryType;
+        result = vkAllocateMemory(device_, &allocInfo, nullptr, &out.memory);
+        if (result != VK_SUCCESS) {
+            __android_log_print(
+                    ANDROID_LOG_WARN,
+                    kTag,
+                    "vkAllocateMemory failed label=%s result=%d size=%llu",
+                    label,
+                    result,
+                    static_cast<unsigned long long>(memRequirements.size));
+            destroyBufferLocked(out);
+            return false;
+        }
+        result = vkBindBufferMemory(device_, out.buffer, out.memory, 0);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkBindBufferMemory failed label=%s result=%d", label, result);
+            destroyBufferLocked(out);
+            return false;
+        }
+        out.size = size;
+        return true;
+    }
+
+    bool copyBufferLocked(VkBuffer source, VkBuffer destination, VkDeviceSize size) {
+        if (commandPool_ == VK_NULL_HANDLE || queue_ == VK_NULL_HANDLE || size == 0) return false;
+
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = commandPool_;
+        allocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        VkResult result = vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkAllocateCommandBuffers copy failed result=%d", result);
+            return false;
+        }
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkBeginCommandBuffer copy failed result=%d", result);
+            vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+            return false;
+        }
+
+        VkBufferCopy copyRegion{};
+        copyRegion.size = size;
+        vkCmdCopyBuffer(commandBuffer, source, destination, 1, &copyRegion);
+
+        result = vkEndCommandBuffer(commandBuffer);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "vkEndCommandBuffer copy failed result=%d", result);
+            vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+            return false;
+        }
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        result = vkQueueSubmit(queue_, 1, &submitInfo, VK_NULL_HANDLE);
+        if (result == VK_SUCCESS) {
+            result = vkQueueWaitIdle(queue_);
+        }
+        vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
+        if (result != VK_SUCCESS) {
+            __android_log_print(ANDROID_LOG_WARN, kTag, "Vulkan buffer copy failed result=%d", result);
+            return false;
+        }
+        return true;
+    }
+
     bool uploadFloatBuffer(
             JNIEnv* env,
             jobject source,
@@ -879,51 +991,43 @@ private:
             return false;
         }
 
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = size;
-        bufferInfo.usage = usage;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        VkResult result = vkCreateBuffer(device_, &bufferInfo, nullptr, &out.buffer);
-        if (result != VK_SUCCESS) {
-            __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreateBuffer failed result=%d size=%llu", result, static_cast<unsigned long long>(size));
-            return false;
-        }
-
-        VkMemoryRequirements memRequirements{};
-        vkGetBufferMemoryRequirements(device_, out.buffer, &memRequirements);
-        const uint32_t memoryType = findMemoryType(
-                memRequirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        if (memoryType == UINT32_MAX) {
-            __android_log_print(ANDROID_LOG_WARN, kTag, "no host-visible memory type for scene buffer");
-            return false;
-        }
-
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memRequirements.size;
-        allocInfo.memoryTypeIndex = memoryType;
-        result = vkAllocateMemory(device_, &allocInfo, nullptr, &out.memory);
-        if (result != VK_SUCCESS) {
-            __android_log_print(ANDROID_LOG_WARN, kTag, "vkAllocateMemory failed result=%d size=%llu", result, static_cast<unsigned long long>(memRequirements.size));
-            return false;
-        }
-        result = vkBindBufferMemory(device_, out.buffer, out.memory, 0);
-        if (result != VK_SUCCESS) {
-            __android_log_print(ANDROID_LOG_WARN, kTag, "vkBindBufferMemory failed result=%d", result);
+        BufferResource staging{};
+        if (!createBufferResource(
+                    size,
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                    staging,
+                    "scene staging")) {
             return false;
         }
 
         void* mapped = nullptr;
-        result = vkMapMemory(device_, out.memory, 0, size, 0, &mapped);
+        VkResult result = vkMapMemory(device_, staging.memory, 0, size, 0, &mapped);
         if (result != VK_SUCCESS || mapped == nullptr) {
             __android_log_print(ANDROID_LOG_WARN, kTag, "vkMapMemory failed result=%d", result);
+            destroyBufferLocked(staging);
             return false;
         }
         std::memcpy(mapped, sourcePtr, static_cast<size_t>(size));
-        vkUnmapMemory(device_, out.memory);
-        out.size = size;
+        vkUnmapMemory(device_, staging.memory);
+
+        BufferResource deviceLocal{};
+        if (!createBufferResource(
+                    size,
+                    usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                    deviceLocal,
+                    "scene device-local")) {
+            destroyBufferLocked(staging);
+            return false;
+        }
+        if (!copyBufferLocked(staging.buffer, deviceLocal.buffer, size)) {
+            destroyBufferLocked(staging);
+            destroyBufferLocked(deviceLocal);
+            return false;
+        }
+        destroyBufferLocked(staging);
+        out = deviceLocal;
         return true;
     }
 
@@ -933,37 +1037,22 @@ private:
             VkBufferUsageFlags usage,
             BufferResource& out) {
         if (sourcePtr == nullptr || size == 0) return false;
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = size;
-        bufferInfo.usage = usage;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        VkResult result = vkCreateBuffer(device_, &bufferInfo, nullptr, &out.buffer);
-        if (result != VK_SUCCESS) {
-            __android_log_print(ANDROID_LOG_WARN, kTag, "vkCreateBuffer failed result=%d size=%llu", result, static_cast<unsigned long long>(size));
+        if (!createBufferResource(
+                    size,
+                    usage,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                    out,
+                    "host buffer")) {
             return false;
         }
-        VkMemoryRequirements memRequirements{};
-        vkGetBufferMemoryRequirements(device_, out.buffer, &memRequirements);
-        const uint32_t memoryType = findMemoryType(
-                memRequirements.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        if (memoryType == UINT32_MAX) return false;
-
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memRequirements.size;
-        allocInfo.memoryTypeIndex = memoryType;
-        result = vkAllocateMemory(device_, &allocInfo, nullptr, &out.memory);
-        if (result != VK_SUCCESS) return false;
-        result = vkBindBufferMemory(device_, out.buffer, out.memory, 0);
-        if (result != VK_SUCCESS) return false;
         void* mapped = nullptr;
-        result = vkMapMemory(device_, out.memory, 0, size, 0, &mapped);
-        if (result != VK_SUCCESS || mapped == nullptr) return false;
+        VkResult result = vkMapMemory(device_, out.memory, 0, size, 0, &mapped);
+        if (result != VK_SUCCESS || mapped == nullptr) {
+            destroyBufferLocked(out);
+            return false;
+        }
         std::memcpy(mapped, sourcePtr, static_cast<size_t>(size));
         vkUnmapMemory(device_, out.memory);
-        out.size = size;
         return true;
     }
 
