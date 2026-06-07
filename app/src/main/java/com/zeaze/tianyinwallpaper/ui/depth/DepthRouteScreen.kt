@@ -494,6 +494,14 @@ fun DepthRouteScreen(
         return normalized
     }
 
+    fun persistPreviewDraftAndClose() {
+        val draft = previewModel
+        if (draft != null) {
+            commitWallpaperDraft(draft)
+        }
+        previewModel = null
+    }
+
     LaunchedEffect(Unit) {
         loadWallpapers()
     }
@@ -554,7 +562,7 @@ fun DepthRouteScreen(
     }
 
     BackHandler(enabled = previewModel != null) {
-        previewModel = null
+        persistPreviewDraftAndClose()
     }
 
     val gridState = rememberLazyGridState()
@@ -704,9 +712,9 @@ fun DepthRouteScreen(
                 accentColor = accentColor,
                 containerColor = containerColor,
                 enableLiquidGlass = enableLiquidGlass,
-                onDismiss = { previewModel = null },
+                onDismiss = { persistPreviewDraftAndClose() },
                 onApply = {
-                    val committed = commitWallpaperDraft(model)
+                    val committed = commitWallpaperDraft(previewModel ?: model)
                     applyDepthWallpaper(committed)
                 },
                 onModelChange = { previewModel = it.normalizedDepthParams() },
