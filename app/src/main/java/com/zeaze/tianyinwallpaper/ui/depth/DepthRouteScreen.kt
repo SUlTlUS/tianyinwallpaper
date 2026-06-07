@@ -112,6 +112,8 @@ import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSamp
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.service.DepthWallpaperService
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimationMode
 import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
@@ -732,7 +734,10 @@ private fun DepthPreviewOverlay(
     val coroutineScope = rememberCoroutineScope()
     val animatedOffset = remember { Animatable(0f) }
     val dismissThreshold = with(density) { 200.dp.toPx() }
-    val bottomPadding = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 78.dp
+    val bottomActionPadding =
+        with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 24.dp
+    val sheetOuterBottomPadding =
+        with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 16.dp
     var previewLoading by remember(model.id, model.gaussianUri, model.gaussianRenderMode, model.gaussianMaxSplats) {
         mutableStateOf(true)
     }
@@ -880,6 +885,21 @@ private fun DepthPreviewOverlay(
         }
 
         if (showParamPanel) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { closeParamPanel() }
+            )
+        }
+
+        LiquidWindowAnimatedVisibility(
+            visible = showParamPanel,
+            mode = LiquidWindowAnimationMode.BottomSheet,
+            label = "DepthParamSheet",
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(start = 16.dp, end = 16.dp, bottom = sheetOuterBottomPadding)
+        ) {
             DepthParamPanel(
                 model = model,
                 onModelChange = onModelChange,
@@ -911,39 +931,39 @@ private fun DepthPreviewOverlay(
                     }
                 },
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(start = 16.dp, end = 16.dp, bottom = bottomPadding)
             )
         }
 
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 24.dp)
-        ) {
-            if (detailBackdrop != null) {
-                LiquidButton(
-                    onClick = { showParamPanel = true },
-                    backdrop = detailBackdrop,
-                    surfaceColor = accentColor.copy(alpha = 0.75f),
-                    tint = accentColor,
-                    luminanceState = gaussianLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        "参数调节",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(Color.White, 15.sp)
+        if (!showParamPanel) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomActionPadding)
+            ) {
+                if (detailBackdrop != null) {
+                    LiquidButton(
+                        onClick = { showParamPanel = true },
+                        backdrop = detailBackdrop,
+                        surfaceColor = accentColor.copy(alpha = 0.75f),
+                        tint = accentColor,
+                        luminanceState = gaussianLuminanceState,
+                        modifier = Modifier.height(44.dp)
+                    ) {
+                        BasicText(
+                            "参数调节",
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            style = TextStyle(Color.White, 15.sp)
+                        )
+                    }
+                } else {
+                    DepthPreviewKindPill(
+                        text = "参数调节",
+                        selected = true,
+                        contentColor = contentColor,
+                        accentColor = accentColor,
+                        onClick = { showParamPanel = true }
                     )
                 }
-            } else {
-                DepthPreviewKindPill(
-                    text = "参数调节",
-                    selected = true,
-                    contentColor = contentColor,
-                    accentColor = accentColor,
-                    onClick = { showParamPanel = true }
-                )
             }
         }
     }
@@ -990,9 +1010,8 @@ private fun DepthParamPanel(
                         .background(Color(0x99000000))
                 }
             )
-            .combinedClickable(onClick = {})
-            .padding(start = 14.dp, end = 14.dp, bottom = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .pointerInput(Unit) { detectTapGestures { } }
+            .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
     ) {
         Box(
             modifier = Modifier
@@ -1014,9 +1033,10 @@ private fun DepthParamPanel(
                     .padding(vertical = 4.dp)
                     .width(40.dp)
                     .height(4.dp)
-                    .background(Color.White.copy(alpha = 0.35f), RoundedCornerShape(2.dp))
+                    .background(contentColor.copy(alpha = 0.3f), RoundedCornerShape(2.dp))
             )
         }
+        Spacer(Modifier.height(4.dp))
         BasicText(
             "参数调节",
             style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold),
