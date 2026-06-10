@@ -9,6 +9,7 @@ uniform float2 centerB;
 uniform float2 radiusB;
 uniform float smoothness;
 uniform float opacity;
+uniform float neckOnly;
 
 float sdEllipse(float2 p, float2 c, float2 r) {
     float2 q = (p - c) / max(r, float2(1.0, 1.0));
@@ -23,10 +24,18 @@ float smoothUnion(float d1, float d2, float k) {
 half4 main(float2 coord) {
     float dA = sdEllipse(coord, centerA, radiusA);
     float dB = sdEllipse(coord, centerB, radiusB);
-    float d = smoothUnion(dA, dB, smoothness);
+    float dUnion = smoothUnion(dA, dB, smoothness);
 
     float edge = max(1.25, min(size.x, size.y) * 0.01);
-    float mask = 1.0 - smoothstep(-edge, edge, d);
+    float maskA = 1.0 - smoothstep(-edge, edge, dA);
+    float maskB = 1.0 - smoothstep(-edge, edge, dB);
+    float unionMask = 1.0 - smoothstep(-edge, edge, dUnion);
+
+    // 当原来的 LiquidButton / LiquidBottomTabs 仍负责绘制两个玻璃本体时，
+    // 这里只保留 smooth-union 新增出来的 neck 区域，避免叠出灰圆或重复玻璃。
+    float bodyMask = max(maskA, maskB);
+    float neckMask = clamp(unionMask - bodyMask, 0.0, 1.0);
+    float mask = mix(unionMask, neckMask, clamp(neckOnly, 0.0, 1.0));
 
     half4 color = content.eval(coord);
     color.a *= half(mask * opacity);
