@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.kyant.shapes.Capsule
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
@@ -43,6 +44,8 @@ fun LiquidMetaballBridge(
     scaleX: Float = 1f,
     scaleY: Float = 1f
 ) {
+    if (backdrop == null) return
+
     val resolvedAlpha = alpha.coerceIn(0f, 1f)
     val bridgeModifier = Modifier
         .requiredWidth(bridgeWidth)
@@ -57,38 +60,35 @@ fun LiquidMetaballBridge(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        if (backdrop != null) {
-            Box(
-                bridgeModifier.drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { RectangleShape },
-                    effects = {
-                        val w = size.width
-                        val h = size.height
-                        val radius = h * 0.50f
-                        val overlap = radius * 0.58f
-                        vibrancy()
-                        blur(blurRadius.toPx())
-                        lens(lensRadius.toPx(), lensRadius.toPx(), chromaticAberration = true)
-                        metaballMask(
-                            centerAX = -overlap,
-                            centerAY = h / 2f,
-                            radiusAX = radius,
-                            radiusAY = radius,
-                            centerBX = w + overlap,
-                            centerBY = h / 2f,
-                            radiusBX = radius,
-                            radiusBY = radius,
-                            smoothness = h * 0.42f,
-                            opacity = 1f
-                        )
-                    }
-                )
+        Box(
+            bridgeModifier.drawBackdrop(
+                backdrop = backdrop,
+                // lens() 只支持 rounded/corner-based shape；不能用 RectangleShape。
+                // 这里外层用 Capsule 只是为了满足 lens 的 SDF 参数，真正可见区域仍由 metaballMask 裁出来。
+                shape = { Capsule() },
+                effects = {
+                    val w = size.width
+                    val h = size.height
+                    val radius = h * 0.50f
+                    val overlap = radius * 0.58f
+                    vibrancy()
+                    blur(blurRadius.toPx())
+                    lens(lensRadius.toPx(), lensRadius.toPx(), chromaticAberration = true)
+                    metaballMask(
+                        centerAX = -overlap,
+                        centerAY = h / 2f,
+                        radiusAX = radius,
+                        radiusAY = radius,
+                        centerBX = w + overlap,
+                        centerBY = h / 2f,
+                        radiusBX = radius,
+                        radiusBY = radius,
+                        smoothness = h * 0.42f,
+                        opacity = 1f
+                    )
+                }
             )
-        } else {
-            // 低版本没有 RuntimeShader，宁可不画，也不要退回成一根假桥或多余圆形。
-            Box(bridgeModifier)
-        }
+        )
     }
 }
 
@@ -117,7 +117,7 @@ fun LiquidTwoBlobMetaballMorph(
     anchorContent: @Composable () -> Unit = {},
     targetContent: @Composable () -> Unit = {}
 ) {
-    if (!controller.isShowing) return
+    if (backdrop == null || !controller.isShowing) return
 
     val state = LiquidMorphPhysics.compute(
         rawValue = controller.value,
