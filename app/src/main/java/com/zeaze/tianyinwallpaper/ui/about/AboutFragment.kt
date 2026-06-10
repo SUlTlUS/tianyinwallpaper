@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.widget.Toast
 import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
-import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
@@ -34,7 +33,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -42,7 +40,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
@@ -63,7 +60,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
@@ -101,6 +97,7 @@ private data class AboutGroupUiModel(
 fun AboutRouteScreen(
     useDarkTheme: Boolean,
     onSelectionModeChange: (Boolean) -> Unit = {},
+    showBackButton: Boolean = false,
     onBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -123,10 +120,10 @@ fun AboutRouteScreen(
     val isLightTheme = !useDarkTheme
     val enableLiquidGlass = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
-    val backgroundColor = if (isLightTheme) Color(0xFFF2F2F6) else Color(0xFF121212)
+    val backgroundColor = if (isLightTheme) Color.White else Color(0xFF0A0A0C)
     val canvasBackdrop = rememberCanvasBackdrop { drawRect(backgroundColor) }
     val dialogBackdrop = liquidBackdrop ?: canvasBackdrop
-    val groupBackgroundColor = if (isLightTheme) Color.White else Color(0xFF1E1E1E)
+    val groupBackgroundColor = if (isLightTheme) Color(0xFFF2F3F7) else Color(0xFF1C1C20).copy(alpha = 0.94f)
     val groupLabelColor = if (isLightTheme) Color(0xFF1A1A1F) else Color(0xFFF5F5FA)
     val selectedIndicatorColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF4DA3FF)
 
@@ -190,7 +187,7 @@ fun AboutRouteScreen(
 
     fun deleteSelectedGroups() {
         if (selectedPositions.isEmpty()) {
-            Toast.makeText(context, "请先选择壁纸组", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "请先选择分组", Toast.LENGTH_SHORT).show()
             return
         }
         val selectedSet = selectedPositions.toSet()
@@ -203,7 +200,7 @@ fun AboutRouteScreen(
                 groupUiList.addAll(remained)
                 groupsVersion++
                 exitSelectionMode()
-                Toast.makeText(context, "已删除选中壁纸组", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "已删除选中分组", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -270,7 +267,7 @@ fun AboutRouteScreen(
                     .padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(
-                    top = statusBarTopPaddingDp + 70.dp,
+                    top = statusBarTopPaddingDp + 76.dp,
                     bottom = if (selectionMode) 90.dp else 110.dp
                 )
             ) {
@@ -366,7 +363,7 @@ fun AboutRouteScreen(
                     JSON.parseArray(group.s, TianYinWallpaperModel::class.java)
                 }.getOrNull()
                 if (normalizedList.isNullOrEmpty()) {
-                    Toast.makeText(context, "壁纸组数据无效，覆盖失败", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "分组数据无效，覆盖失败", Toast.LENGTH_SHORT).show()
                     pendingOverwriteGroup = null
                     return@LiquidConfirmOverlay
                 }
@@ -414,90 +411,88 @@ fun AboutRouteScreen(
                 modifier = Modifier
                     .zIndex(3f)
                     .fillMaxWidth()
-                    .padding(top = statusBarTopPaddingDp + 8.dp, start = 12.dp, end = 12.dp),
+                    .padding(top = statusBarTopPaddingDp + 10.dp, start = 12.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val isDark = useDarkTheme
-                val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
+                val adaptiveSurfaceColor = groupBackgroundColor
                 val textColor = if (isDark) Color.White else Color.Black
 
-                if (enableLiquidGlass && liquidBackdrop != null) {
-                    LiquidButton(
+                Text(
+                    text = "分组",
+                    color = textColor,
+                    fontSize = 32.sp,
+                    modifier = Modifier.weight(1f),
+                    style = TextStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                )
+
+                if (showBackButton) {
+                    AboutTopActionButton(
+                        text = "返回",
                         onClick = onBack,
-                        backdrop = liquidBackdrop,
+                        enableLiquidGlass = enableLiquidGlass,
+                        liquidBackdrop = liquidBackdrop,
                         surfaceColor = adaptiveSurfaceColor,
-                        modifier = Modifier.size(44.dp),
-                        buttonHeight = 44.dp,
-                        contentPadding = PaddingValues(0.dp),
-                        iconRes = R.drawable.back,
-                        iconContentDescription = "返回",
-                        iconSize = 16.dp,
-                        iconTint = textColor,
-                        iconOffsetX = (-1).dp
+                        isDark = isDark,
+                        textColor = textColor
                     )
-                } else {
-                    Surface(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clickable { onBack() },
-                        shape = CircleShape,
-                        color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-                        border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.back),
-                                contentDescription = "返回",
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .offset(x = (-1).dp),
-                                tint = textColor
-                            )
-                        }
-                    }
                 }
 
-                if (enableLiquidGlass && liquidBackdrop != null) {
-                    LiquidButton(
-                        onClick = { enterSelectionMode() },
-                        backdrop = liquidBackdrop,
-                        surfaceColor = adaptiveSurfaceColor,
-                        modifier = Modifier.height(44.dp),
-                        buttonHeight = 44.dp,
-                        contentPadding = PaddingValues(horizontal = 16.dp)
-                    ) {
-                        BasicText(
-                            text = "多选",
-                            style = TextStyle(textColor, 16.sp)
-                        )
-                    }
-                } else {
-                    Surface(
-                        modifier = Modifier
-                            .height(44.dp)
-                            .clickable { enterSelectionMode() },
-                        shape = Capsule(),
-                        color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-                        border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        ) {
-                            Text(text = "多选", color = textColor, fontSize = 16.sp)
-                        }
-                    }
-                }
+                AboutTopActionButton(
+                    text = "多选",
+                    onClick = { enterSelectionMode() },
+                    enableLiquidGlass = enableLiquidGlass,
+                    liquidBackdrop = liquidBackdrop,
+                    surfaceColor = adaptiveSurfaceColor,
+                    isDark = isDark,
+                    textColor = textColor
+                )
             }
         }
     }
 
     LaunchedEffect(selectionMode) {
         onSelectionModeChange(selectionMode)
+    }
+}
+
+@Composable
+private fun AboutTopActionButton(
+    text: String,
+    onClick: () -> Unit,
+    enableLiquidGlass: Boolean,
+    liquidBackdrop: LayerBackdrop?,
+    surfaceColor: Color,
+    isDark: Boolean,
+    textColor: Color
+) {
+    if (enableLiquidGlass && liquidBackdrop != null) {
+        LiquidButton(
+            onClick = onClick,
+            backdrop = liquidBackdrop,
+            surfaceColor = surfaceColor,
+            modifier = Modifier.height(48.dp)
+        ) {
+            BasicText(
+                text = text,
+                modifier = Modifier.padding(horizontal = 16.dp),
+                style = TextStyle(textColor, 15.sp)
+            )
+        }
+    } else {
+        Surface(
+            modifier = Modifier
+                .height(48.dp)
+                .clickable { onClick() },
+            shape = Capsule(),
+            color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+            border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                Text(text = text, color = textColor, fontSize = 15.sp)
+            }
+        }
     }
 }
 
@@ -532,7 +527,7 @@ private fun AboutGroupItem(
                     .padding(10.dp)
             ) {
                 Text(
-                    text = data.name ?: "未命名壁纸组",
+                    text = data.name ?: "未命名分组",
                     color = labelColor,
                     modifier = Modifier.padding(start = 8.dp)
                 )

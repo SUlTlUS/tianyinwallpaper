@@ -5,22 +5,44 @@ import android.app.WallpaperManager
 import android.content.Context
 import android.content.ComponentName
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.graphics.SurfaceTexture
+import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.Settings
+import android.provider.OpenableColumns
 import android.util.Log
+import android.util.LruCache
+import android.view.Surface
+import android.view.TextureView
+import android.view.ViewGroup
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -34,6 +56,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
+import androidx.compose.foundation.border
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -41,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,7 +73,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -57,6 +84,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.documentfile.provider.DocumentFile
@@ -81,11 +109,15 @@ import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedContent
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
+import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
 import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.service.DepthWallpaperService
 import com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService
 import com.zeaze.tianyinwallpaper.service.VideoRasterWallpaperService
 import com.zeaze.tianyinwallpaper.ui.depth.DepthPreviewOverlay
+import com.zeaze.tianyinwallpaper.ui.depth.DepthOnlineGenerateRoute
 import com.zeaze.tianyinwallpaper.ui.raster.RasterDetailScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
@@ -93,19 +125,27 @@ import com.zeaze.tianyinwallpaper.utils.DepthPrefs
 import com.zeaze.tianyinwallpaper.utils.RasterPrefs
 import com.zeaze.tianyinwallpaper.utils.showToast
 import io.reactivex.functions.Consumer
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.IntOffset
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.zeaze.tianyinwallpaper.ui.depth.DepthOnlineGenerateRoute
+import androidx.compose.ui.geometry.Rect
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
+import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
+import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 
 internal const val WALLPAPER_TYPE_STATIC = 0
 internal const val WALLPAPER_TYPE_DYNAMIC = 1
@@ -189,6 +229,7 @@ private fun isTimeWindowOverlap(startA: Int, endA: Int, startB: Int, endB: Int):
 @Suppress("UNUSED_PARAMETER")
 fun MainRouteScreen(
     useDarkTheme: Boolean,
+    kindFilters: Set<MainWallpaperKindFilter> = emptySet(),
     onOpenSettingPage: () -> Unit,
     onBottomBarVisibleChange: (Boolean) -> Unit
 ) {
@@ -212,7 +253,6 @@ fun MainRouteScreen(
     val depthWallpapers = remember { mutableStateListOf<DepthWallpaperModel>() }
 
     var selectionMode by remember { mutableStateOf(false) }
-    var mainFilter by remember { mutableStateOf(MainWallpaperFilter.All) }
     var groupName by remember { mutableStateOf("") }
 
     var showWallpaperTypeDialog by remember { mutableStateOf(false) }
@@ -608,7 +648,6 @@ fun MainRouteScreen(
             )
         )
         persistRasterGroups()
-        mainFilter = MainWallpaperFilter.Raster
         context.showToast("已添加光栅图片组")
     }
 
@@ -624,7 +663,6 @@ fun MainRouteScreen(
             )
         )
         persistRasterGroups()
-        mainFilter = MainWallpaperFilter.Raster
         context.showToast("已添加光栅视频")
     }
 
@@ -653,7 +691,6 @@ fun MainRouteScreen(
         copyMainRouteOnlineThumbnailToDepthCache(context, recordThumbnailUri, model.id)
         depthWallpapers.add(0, model)
         persistDepthWallpapers()
-        mainFilter = MainWallpaperFilter.Depth
         context.showToast("已添加景深 SOG")
     }
 
@@ -1002,23 +1039,18 @@ fun MainRouteScreen(
 
     val gridState = rememberLazyGridState()
 
-    LaunchedEffect(mainFilter) {
-        if (mainFilter != MainWallpaperFilter.Wallpaper && selectionMode) {
-            exitSelectionMode()
-        }
-    }
 
     val unifiedItems = remember(
         wallpapers.size,
         rasterGroups.size,
         depthWallpapers.size,
-        mainFilter
+        kindFilters
     ) {
         buildMainUnifiedWallpaperItems(
             wallpapers = wallpapers,
             rasterGroups = rasterGroups,
             depthWallpapers = depthWallpapers,
-            filter = mainFilter
+            kindFilters = kindFilters
         )
     }
 
@@ -1084,168 +1116,59 @@ fun MainRouteScreen(
                 contentPadding = PaddingValues(
                     start = 12.dp,
                     end = 12.dp,
-                    top = statusBarTopPaddingDp + 120.dp,
+                    top = statusBarTopPaddingDp + 76.dp,
                     bottom = if (selectionMode) 90.dp else 110.dp
                 ),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (mainFilter == MainWallpaperFilter.Wallpaper) {
-                itemsIndexed(wallpapers, key = { _, model -> 
-                        model.uuid ?: java.util.UUID.randomUUID().toString().also { model.uuid = it }
-                    }) { index, model ->
-                        val selected = selectedPositions.contains(index)
-                        val key = model.uuid ?: index
-    
-                        ReorderableItem(reorderableState, key = key) { isDragging ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
-                                    .zIndex(if (isDragging) 1f else 0f)
-                                    .graphicsLayer {
-                                        scaleX = if (isDragging) 1.05f else 1f
-                                        scaleY = if (isDragging) 1.05f else 1f
-                                        shadowElevation = if (isDragging) 8.dp.toPx() else 0f
-                                        shape = RoundedCornerShape(16.dp)
-                                        clip = true
-                                    }
-                                    .longPressDraggableHandle()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .pointerInput(index, selectionMode) {
-                                        awaitEachGesture {
-                                            val down = awaitFirstDown(requireUnconsumed = false)
-    
-                                            val touchSlop = viewConfiguration.touchSlop
-                                            val stayedStillForTimeout = withTimeoutOrNull(HOLD_SELECT_TIMEOUT_MS) {
-                                                while (true) {
-                                                    val event = awaitPointerEvent()
-                                                    val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull false
-                                                    if (!change.pressed) return@withTimeoutOrNull false
-                                                    if ((change.position - down.position).getDistance() > touchSlop) {
-                                                        return@withTimeoutOrNull false
-                                                    }
-                                                }
-                                            } == null
-    
-                                            if (stayedStillForTimeout && !selectionMode) {
-                                                enterSelectionMode()
-                                                if (!selectedPositions.contains(index)) {
-                                                    selectedPositions.add(index)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .clickable {
-                                        if (selectionMode) {
-                                            if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
-                                        } else {
-                                            fullScreenPreviewModel = model
-                                        }
-                                    }
-                                    .background(Color.Black)
-                            ) {
-                                WallpaperCardImage(
-                                    modifier = Modifier.fillMaxSize(),
-                                    model = model
-                                )
-                                Text(
-                                    text = if (model.type == 0) "图片" else "视频",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(3.dp)
-                                        .background(Color(0x66000000), shape = RoundedCornerShape(16.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                                if (model.independentTime && model.startTime != -1 && model.endTime != -1) {
-                                    Text(
-                                        text = "${getTimeString(model.startTime)} - ${getTimeString(model.endTime)}",
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .padding(bottom = 3.dp)
-                                            .background(Color(0x66000000), shape = RoundedCornerShape(16.dp))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                                if (selected) {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
-                                    Surface(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(4.dp),
-                                        shape = RoundedCornerShape(18.dp),
-                                        color = Color(0xD91A1A1A)
-                                    ) {
-                                        Text(
-                                            text = "✓",
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 0.dp)
-                                        )
-                                    }
-                                }
-    
-                                if (selectionMode) {
-                                    Text(
-                                        text = "×",
-                                        color = Color.White,
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .padding(6.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFE53935))
-                                            .clickable { removeWallpaperAt(index) }
-                                            .padding(horizontal = 5.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-    
-                } else {
-                    items(
-                        unifiedItems,
-                        key = { item ->
-                            when (item) {
-                                is MainUnifiedWallpaperItem.Wallpaper -> "wallpaper_${item.model.uuid ?: item.index}"
-                                is MainUnifiedWallpaperItem.Raster -> "raster_${item.group.id}"
-                                is MainUnifiedWallpaperItem.Depth -> "depth_${item.model.id}"
-                            }
-                        }
-                    ) { item ->
+                items(
+                    unifiedItems,
+                    key = { item ->
                         when (item) {
-                            is MainUnifiedWallpaperItem.Wallpaper -> {
-                                MainUnifiedWallpaperCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    model = item.model,
-                                    isSelected = false,
-                                    onClick = { fullScreenPreviewModel = item.model }
-                                )
-                            }
-                            is MainUnifiedWallpaperItem.Raster -> {
-                                MainUnifiedRasterCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    group = item.group,
-                                    onClick = { rasterDetailGroup = item.group }
-                                )
-                            }
-                            is MainUnifiedWallpaperItem.Depth -> {
-                                MainUnifiedDepthCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    model = item.model,
-                                    onClick = { depthPreviewModel = item.model }
-                                )
-                            }
+                            is MainUnifiedWallpaperItem.Wallpaper -> "wallpaper_${item.model.uuid ?: item.index}"
+                            is MainUnifiedWallpaperItem.Raster -> "raster_${item.group.id}"
+                            is MainUnifiedWallpaperItem.Depth -> "depth_${item.model.id}"
                         }
                     }
-                }            }
+                ) { item ->
+                    when (item) {
+                        is MainUnifiedWallpaperItem.Wallpaper -> {
+                            val selected = selectedPositions.contains(item.index)
+                            MainUnifiedWallpaperCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                model = item.model,
+                                isSelected = selected,
+                                onClick = {
+                                    if (selectionMode) {
+                                        if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
+                                    } else {
+                                        fullScreenPreviewModel = item.model
+                                    }
+                                },
+                                onLongClick = {
+                                    if (!selectionMode) enterSelectionMode()
+                                    if (!selectedPositions.contains(item.index)) selectedPositions.add(item.index)
+                                }
+                            )
+                        }
+                        is MainUnifiedWallpaperItem.Raster -> {
+                            MainUnifiedRasterCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                group = item.group,
+                                onClick = { if (!selectionMode) rasterDetailGroup = item.group }
+                            )
+                        }
+                        is MainUnifiedWallpaperItem.Depth -> {
+                            MainUnifiedDepthCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                model = item.model,
+                                onClick = { if (!selectionMode) depthPreviewModel = item.model }
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         ProgressiveBlurContent(
@@ -1256,19 +1179,6 @@ fun MainRouteScreen(
             backdrop = liquidBackdrop
         )
 
-        MainWallpaperFilterBar(
-            selectedFilter = mainFilter,
-            onFilterSelected = { mainFilter = it },
-            contentColor = contentColor,
-            accentColor = accentColor,
-            containerColor = containerColor,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .padding(top = statusBarTopPaddingDp + 76.dp)
-                .zIndex(3f)
-        )
 
         if (!selectionMode && unifiedItems.isEmpty()) {
             androidx.compose.material.Text(
@@ -1321,21 +1231,38 @@ fun MainRouteScreen(
                 ) {
                     when (state) {
                         DialogState.Type -> {
-                            MainAddDialog(
-                                title = context.getString(R.string.main_select_wallpaper_type_tip),
-                                cancelText = context.getString(R.string.common_cancel),
-                                contentColor = contentColor,
-                                accentColor = accentColor,
-                                containerColor = containerColor,
-                                onPickImageWallpaper = { showWallpaperTypeDialog = false; imageLaunch.launch(arrayOf("image/*")) },
-                                onPickVideoWallpaper = { showWallpaperTypeDialog = false; videoLaunch.launch(arrayOf("video/*")) },
-                                onPickFolderWallpaper = { showWallpaperTypeDialog = false; directoryLaunch.launch(null) },
-                                onPickRasterImages = { showWallpaperTypeDialog = false; rasterStaticLaunch.launch(arrayOf("image/*")) },
-                                onPickRasterVideo = { showWallpaperTypeDialog = false; rasterDynamicLaunch.launch(arrayOf("video/*")) },
-                                onPickDepthSog = { showWallpaperTypeDialog = false; depthSogLaunch.launch(arrayOf("*/*")) },
-                                onOpenOnlineSog = { showWallpaperTypeDialog = false; showDepthOnlinePage = true },
-                                onDismiss = { showWallpaperTypeDialog = false }
-                            )
+                            Column(
+                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                BasicText(context.getString(R.string.main_select_wallpaper_type_tip), style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
+                                Spacer(Modifier.height(8.dp))
+                                val items = listOf(
+                                    "图片壁纸" to { showWallpaperTypeDialog = false; imageLaunch.launch(arrayOf("image/*")) },
+                                    "视频壁纸" to { showWallpaperTypeDialog = false; videoLaunch.launch(arrayOf("video/*")) },
+                                    "文件夹壁纸" to { showWallpaperTypeDialog = false; directoryLaunch.launch(null) },
+                                    "光栅图片组" to { showWallpaperTypeDialog = false; rasterStaticLaunch.launch(arrayOf("image/*")) },
+                                    "光栅视频" to { showWallpaperTypeDialog = false; rasterDynamicLaunch.launch(arrayOf("video/*")) },
+                                    "本地 SOG 景深" to { showWallpaperTypeDialog = false; depthSogLaunch.launch(arrayOf("*/*")) },
+                                    "在线生成 SOG" to { showWallpaperTypeDialog = false; showDepthOnlinePage = true },
+                                    context.getString(R.string.common_cancel) to { showWallpaperTypeDialog = false }
+                                )
+                                items.forEach { (label, onClick) ->
+                                    Row(
+                                        Modifier
+                                            .clip(Capsule())
+                                            .background(if(label == context.getString(R.string.common_cancel)) containerColor.copy(0.2f) else accentColor)
+                                            .clickable { onClick() }
+                                            .height(48.dp)
+                                            .fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        BasicText(label, style = TextStyle(if(label == context.getString(R.string.common_cancel)) contentColor else Color.White, 16.sp))
+                                    }
+                                }
+                            }
                         }
                         DialogState.Permission -> {
                             Column(
@@ -1738,10 +1665,10 @@ fun MainRouteScreen(
                     backdrop = liquidBackdrop,
                     staticEditorGroupId = rasterStaticEditorGroupId,
                     onStaticEditorDismiss = { rasterStaticEditorGroupId = null },
-                    onStaticEditorReplaceAll = { _: RasterGroupModel -> context.showToast("请在光栅专页编辑图集") },
-                    onStaticEditorAppend = { _: RasterGroupModel -> context.showToast("请在光栅专页追加图片") },
-                    onStaticEditorReplaceSingle = { _: RasterGroupModel, _: Int -> context.showToast("请在光栅专页替换单张图片") },
-                    onStaticEditorMove = { editorGroup: RasterGroupModel, fromIndex: Int, toIndex: Int ->
+                    onStaticEditorReplaceAll = { context.showToast("请在光栅专页编辑图集") },
+                    onStaticEditorAppend = { context.showToast("请在光栅专页追加图片") },
+                    onStaticEditorReplaceSingle = { _, _ -> context.showToast("请在光栅专页替换单张图片") },
+                    onStaticEditorMove = { editorGroup, fromIndex, toIndex ->
                         if (fromIndex == toIndex) return@RasterDetailScreen
                         updateRasterGroupById(editorGroup.id) { current ->
                             val imageUris = current.imageUris.toMutableList()
@@ -1752,30 +1679,30 @@ fun MainRouteScreen(
                         }
                     },
                     onStaticEditorCommitReorder = { persistAndRefreshRasterGroup() },
-                    onStaticEditorDeleteSingle = { _: RasterGroupModel, _: Int -> context.showToast("请在光栅专页删除图片") },
+                    onStaticEditorDeleteSingle = { _, _ -> context.showToast("请在光栅专页删除图片") },
                     videoEditorGroupId = rasterVideoEditorGroupId,
                     onVideoEditorDismiss = { rasterVideoEditorGroupId = null },
-                    onVideoEditorReplaceVideo = { _: RasterGroupModel -> context.showToast("请在光栅专页替换视频") },
-                    onSensorWidthChanged = { editorGroup: RasterGroupModel, value: Float -> updateRasterGroupById(editorGroup.id) { it.copy(sensorWidth = value) } },
-                    onSensorWidthChangeFinished = { _: RasterGroupModel, _: Float -> persistAndRefreshRasterGroup() },
-                    onEffectTypeChanged = { editorGroup: RasterGroupModel, value: Int -> updateRasterGroupById(editorGroup.id) { it.copy(effectType = value) }; persistAndRefreshRasterGroup(editorGroup.id) },
-                    onTransitionBandChanged = { editorGroup: RasterGroupModel, value: Float -> updateRasterGroupById(editorGroup.id) { it.copy(transitionBand = value) } },
-                    onTransitionBandChangeFinished = { _: RasterGroupModel, _: Float -> persistAndRefreshRasterGroup() },
-                    onEdgeSoftnessChanged = { editorGroup: RasterGroupModel, value: Float -> updateRasterGroupById(editorGroup.id) { it.copy(edgeSoftness = value) } },
-                    onEdgeSoftnessChangeFinished = { _: RasterGroupModel, _: Float -> persistAndRefreshRasterGroup() },
-                    onStripedWavelengthChanged = { editorGroup: RasterGroupModel, value: Float -> updateRasterGroupById(editorGroup.id) { it.copy(stripedWavelength = value) } },
-                    onStripedWavelengthChangeFinished = { _: RasterGroupModel, _: Float -> persistAndRefreshRasterGroup() },
-                    onStripedAmplitudeChanged = { editorGroup: RasterGroupModel, value: Float -> updateRasterGroupById(editorGroup.id) { it.copy(stripedAmplitude = value) } },
-                    onStripedAmplitudeChangeFinished = { _: RasterGroupModel, _: Float -> persistAndRefreshRasterGroup() },
-                    onNarrowWavelengthChanged = { editorGroup: RasterGroupModel, value: Float -> updateRasterGroupById(editorGroup.id) { it.copy(narrowWavelength = value) } },
-                    onNarrowWavelengthChangeFinished = { _: RasterGroupModel, _: Float -> persistAndRefreshRasterGroup() },
-                    onNarrowAmplitudeChanged = { editorGroup: RasterGroupModel, value: Float -> updateRasterGroupById(editorGroup.id) { it.copy(narrowAmplitude = value) } },
-                    onNarrowAmplitudeChangeFinished = { _: RasterGroupModel, _: Float -> persistAndRefreshRasterGroup() },
-                    onGlassAnimEnabledChanged = { editorGroup: RasterGroupModel, value: Boolean -> updateRasterGroupById(editorGroup.id) { it.copy(glassAnimEnabled = value) }; persistAndRefreshRasterGroup(editorGroup.id) },
-                    onGlassBandWidthChanged = { editorGroup: RasterGroupModel, value: Float -> updateRasterGroupById(editorGroup.id) { it.copy(glassBandWidth = value) } },
-                    onGlassBandWidthChangeFinished = { _: RasterGroupModel, _: Float -> persistAndRefreshRasterGroup() },
-                    onDeadZoneEnabledChanged = { editorGroup: RasterGroupModel, value: Boolean -> updateRasterGroupById(editorGroup.id) { it.copy(deadZoneEnabled = value) }; persistAndRefreshRasterGroup(editorGroup.id) },
-                    onClockColorModeChanged = { editorGroup: RasterGroupModel, value: Int -> updateRasterGroupById(editorGroup.id) { it.copy(clockColorMode = value) }; persistAndRefreshRasterGroup(editorGroup.id) },
+                    onVideoEditorReplaceVideo = { context.showToast("请在光栅专页替换视频") },
+                    onSensorWidthChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(sensorWidth = value) } },
+                    onSensorWidthChangeFinished = { _, _ -> persistAndRefreshRasterGroup() },
+                    onEffectTypeChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(effectType = value) }; persistAndRefreshRasterGroup(editorGroup.id) },
+                    onTransitionBandChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(transitionBand = value) } },
+                    onTransitionBandChangeFinished = { _, _ -> persistAndRefreshRasterGroup() },
+                    onEdgeSoftnessChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(edgeSoftness = value) } },
+                    onEdgeSoftnessChangeFinished = { _, _ -> persistAndRefreshRasterGroup() },
+                    onStripedWavelengthChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(stripedWavelength = value) } },
+                    onStripedWavelengthChangeFinished = { _, _ -> persistAndRefreshRasterGroup() },
+                    onStripedAmplitudeChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(stripedAmplitude = value) } },
+                    onStripedAmplitudeChangeFinished = { _, _ -> persistAndRefreshRasterGroup() },
+                    onNarrowWavelengthChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(narrowWavelength = value) } },
+                    onNarrowWavelengthChangeFinished = { _, _ -> persistAndRefreshRasterGroup() },
+                    onNarrowAmplitudeChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(narrowAmplitude = value) } },
+                    onNarrowAmplitudeChangeFinished = { _, _ -> persistAndRefreshRasterGroup() },
+                    onGlassAnimEnabledChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(glassAnimEnabled = value) }; persistAndRefreshRasterGroup(editorGroup.id) },
+                    onGlassBandWidthChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(glassBandWidth = value) } },
+                    onGlassBandWidthChangeFinished = { _, _ -> persistAndRefreshRasterGroup() },
+                    onDeadZoneEnabledChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(deadZoneEnabled = value) }; persistAndRefreshRasterGroup(editorGroup.id) },
+                    onClockColorModeChanged = { editorGroup, value -> updateRasterGroupById(editorGroup.id) { it.copy(clockColorMode = value) }; persistAndRefreshRasterGroup(editorGroup.id) },
                     groups = rasterGroups,
                     onDismiss = {
                         rasterDetailGroup = null
@@ -1836,7 +1763,7 @@ fun MainRouteScreen(
                         applyDepthWallpaper(committed)
                         depthPreviewModel = null
                     },
-                    onModelChange = { updated: DepthWallpaperModel -> updateDepthPreview(updated) },
+                    onModelChange = { updated -> updateDepthPreview(updated) },
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -1977,3 +1904,268 @@ fun MainRouteScreen(
         )
     }
 }
+
+
+@Composable
+private fun MainWallpaperFilterBar(
+    selectedFilter: MainWallpaperFilter,
+    onFilterSelected: (MainWallpaperFilter) -> Unit,
+    contentColor: Color,
+    accentColor: Color,
+    containerColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MainWallpaperFilter.values().forEach { filter ->
+            val selected = selectedFilter == filter
+            Box(
+                modifier = Modifier
+                    .clip(Capsule())
+                    .background(if (selected) accentColor.copy(alpha = 0.9f) else containerColor)
+                    .clickable { onFilterSelected(filter) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                BasicText(
+                    text = filter.label,
+                    style = TextStyle(
+                        color = if (selected) Color.White else contentColor,
+                        fontSize = 14.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MainUnifiedWallpaperCard(
+    modifier: Modifier = Modifier,
+    model: TianYinWallpaperModel,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = modifier
+            .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.Black)
+            .pointerInput(model, isSelected) {
+                detectTapGestures(
+                    onLongPress = { onLongClick() },
+                    onTap = { onClick() }
+                )
+            }
+    ) {
+        WallpaperCardImage(
+            modifier = Modifier.fillMaxSize(),
+            model = model
+        )
+        Text(
+            text = if (model.type == 0) "图片" else "视频",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(3.dp)
+                .background(Color(0x66000000), RoundedCornerShape(16.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+        if (isSelected) {
+            Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
+        }
+    }
+}
+
+@Composable
+private fun MainUnifiedRasterCard(
+    modifier: Modifier = Modifier,
+    group: RasterGroupModel,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val request = remember(group.id, group.type, group.videoUri, group.imageUris.firstOrNull()) {
+        if (group.type == RasterGroupModel.TYPE_STATIC) {
+            val firstImageUri = group.imageUris.firstOrNull()
+            firstImageUri?.let {
+                ThumbnailUtils.Request(
+                    uuid = group.id,
+                    type = WALLPAPER_TYPE_STATIC,
+                    imgUri = it,
+                    videoUri = null,
+                    imgPath = null
+                )
+            }
+        } else {
+            group.videoUri?.let {
+                ThumbnailUtils.Request(
+                    uuid = group.id,
+                    type = WALLPAPER_TYPE_DYNAMIC,
+                    imgUri = null,
+                    videoUri = it,
+                    imgPath = null
+                )
+            }
+        }
+    }
+    val bitmap by produceState<Bitmap?>(initialValue = request?.let { ThumbnailUtils.getFromCache(it) }, request) {
+        value = request?.let { ThumbnailUtils.loadThumbnail(context, it) }
+    }
+    Box(
+        modifier = modifier
+            .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF18181A))
+            .clickable(onClick = onClick)
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Text(
+            text = if (group.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(3.dp)
+                .background(Color(0x66000000), RoundedCornerShape(16.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun MainUnifiedDepthCard(
+    modifier: Modifier = Modifier,
+    model: DepthWallpaperModel,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val bitmap by produceState<Bitmap?>(initialValue = null, model.id, model.gaussianUri) {
+        value = withContext(Dispatchers.IO) {
+            val file = DepthPrefs.sogThumbnailFile(context, model.id)
+            if (file.exists()) BitmapFactory.decodeFile(file.absolutePath) else null
+        }
+    }
+    Box(
+        modifier = modifier
+            .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF18181A))
+            .clickable(onClick = onClick)
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            BasicText(
+                text = model.displayName.ifBlank { "Gaussian SOG" },
+                modifier = Modifier.align(Alignment.Center).padding(8.dp),
+                style = TextStyle(Color.White.copy(alpha = 0.78f), 12.sp, fontWeight = FontWeight.Medium)
+            )
+        }
+        Text(
+            text = "景深",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(3.dp)
+                .background(Color(0x66000000), RoundedCornerShape(16.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWallpaperModel) {
+    val context = LocalContext.current
+    val request = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.Request(
+        uuid = model.uuid.orEmpty(),
+        type = model.type,
+        imgUri = model.imgUri,
+        videoUri = model.videoUri,
+        imgPath = model.imgPath
+    )
+    val bitmapState = produceState<Bitmap?>(
+        initialValue = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.getFromCache(request),
+        request
+    ) {
+        val loaded = withContext(Dispatchers.IO) {
+            com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.loadThumbnail(context, request)
+        }
+        value = loaded
+    }
+    bitmapState.value?.let { bitmap ->
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier,
+            contentScale = ContentScale.Crop
+        )
+    }
+}
+
+private fun queryMainRouteDisplayName(context: Context, uri: Uri): String? {
+    return runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) cursor.getString(index) else null
+            } else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment
+}
+
+private fun copyMainRouteOnlineThumbnailToDepthCache(
+    context: Context,
+    recordThumbnailUri: String?,
+    modelId: String
+) {
+    if (recordThumbnailUri.isNullOrBlank() || modelId.isBlank()) return
+    runCatching {
+        val target = DepthPrefs.sogThumbnailFile(context, modelId)
+        target.parentFile?.mkdirs()
+
+        val sourceFile = File(recordThumbnailUri)
+        if (sourceFile.exists() && sourceFile.length() > 0L) {
+            if (target.exists()) target.delete()
+            sourceFile.copyTo(target, overwrite = true)
+            return@runCatching
+        }
+
+        context.contentResolver.openInputStream(Uri.parse(recordThumbnailUri))?.use { input ->
+            val bitmap = BitmapFactory.decodeStream(input) ?: return@use
+            target.outputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 86, output)
+            }
+            bitmap.recycle()
+        }
+    }
+}
+

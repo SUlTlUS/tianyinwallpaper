@@ -213,11 +213,13 @@ fun MainTopBar(
     onAdd: () -> Unit,
     onApply: () -> Unit,
     onMoreClick: () -> Unit,
+    onFilterClick: () -> Unit = {},
     onPreview: () -> Unit,
     showAddButton: Boolean = true,
     showPreviewButton: Boolean = true,
     showApplyButton: Boolean = true,
     showMoreButton: Boolean = true,
+    showFilterButton: Boolean = true,
     keepSlotWhenHidden: Boolean = true
 ) {
     Row(
@@ -240,7 +242,7 @@ fun MainTopBar(
             isDark = isDark,
             enableLiquidGlass = enableLiquidGlass,
             backdrop = backdrop,
-            keepSlotWhenHidden = false
+            keepSlotWhenHidden = keepSlotWhenHidden
         )
 
         Spacer(modifier = Modifier.weight(1f))
@@ -271,6 +273,18 @@ fun MainTopBar(
             iconRes = R.drawable.complete,
             iconContentDescription = "完成",
             iconSize = 20.dp
+        )
+
+        TopCircleLiquidButton(
+            visible = showFilterButton,
+            onClick = onFilterClick,
+            text = "筛",
+            textColor = textColor,
+            surfaceColor = adaptiveSurfaceColor,
+            isDark = isDark,
+            enableLiquidGlass = enableLiquidGlass,
+            backdrop = backdrop,
+            keepSlotWhenHidden = keepSlotWhenHidden
         )
 
         TopCircleLiquidButton(

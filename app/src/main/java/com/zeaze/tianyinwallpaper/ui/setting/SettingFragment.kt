@@ -152,7 +152,7 @@ fun SettingRouteScreen(
     var showAutoPointsDialog by remember { mutableStateOf(false) }
     var showTimePickerDialog by remember { mutableStateOf(false) }
     var autoPointsInput by remember { mutableStateOf(autoSwitchPoints) }
-
+    
     // 更新对话框状态
     var updateDialogState by remember { mutableStateOf(UpdateDialogState()) }
     var shouldCheckUpdate by remember { mutableStateOf(false) }
@@ -457,75 +457,75 @@ fun SettingRouteScreen(
                             .padding(bottom = 12.dp)
                     )
 
-                    val autoModeDetailSpacer by animateDpAsState(
-                        targetValue = 4.dp,
-                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                        label = "AutoModeDetailSpacer"
-                    )
-                    Spacer(Modifier.height(autoModeDetailSpacer))
+                val autoModeDetailSpacer by animateDpAsState(
+                    targetValue = 4.dp,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "AutoModeDetailSpacer"
+                )
+                Spacer(Modifier.height(autoModeDetailSpacer))
 
-                    Column(Modifier.fillMaxWidth()) {
-                        AnimatedVisibility(
-                            visible = autoSwitchMode == AUTO_SWITCH_MODE_NONE,
-                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
-                            exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                    shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
-                        ) {
-                            Column {
+                Column(Modifier.fillMaxWidth()) {
+                    AnimatedVisibility(
+                        visible = autoSwitchMode == AUTO_SWITCH_MODE_NONE,
+                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                    ) {
+                        Column {
 
-                                SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor) {
-                                    tempMinTime = minTime
-                                    showMinTimeDialog = true
-                                }
-                                SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, groupBackgroundColor, isLightTheme) {
-                                    pageChange = it
-                                    editor.putBoolean("pageChange", it).apply()
-                                    if (it && wallpaperScroll) {
-                                        wallpaperScroll = false
-                                        editor.putBoolean("wallpaperScroll", false).apply()
-                                    }
-                                }
+                            SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor) {
+                                tempMinTime = minTime
+                                showMinTimeDialog = true
                             }
-                        }
-
-                        AnimatedVisibility(
-                            visible = autoSwitchMode == 1,
-                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
-                            exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                    shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
-                        ) {
-                            val intervalText = remember(autoSwitchInterval) {
-                                val d = autoSwitchInterval / (24 * 3600)
-                                val h = (autoSwitchInterval % (24 * 3600)) / 3600
-                                val m = (autoSwitchInterval % 3600) / 60
-                                val s = autoSwitchInterval % 60
-                                buildString {
-                                    if (d > 0) append("${d}天")
-                                    if (h > 0) append("${h}时")
-                                    if (m > 0 || (d == 0L && h == 0L)) append("${m}分")
-                                    if (s > 0) append("${s}秒")
+                            SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, groupBackgroundColor, isLightTheme) {
+                                pageChange = it
+                                editor.putBoolean("pageChange", it).apply()
+                                if (it && wallpaperScroll) {
+                                    wallpaperScroll = false
+                                    editor.putBoolean("wallpaperScroll", false).apply()
                                 }
-                            }
-                            SettingTextItem("自动切换间隔：$intervalText", contentColor) {
-                                showAutoIntervalDialog = true
-                            }
-                        }
-
-                        AnimatedVisibility(
-                            visible = autoSwitchMode == 2,
-                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
-                            exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                                    shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
-                        ) {
-                            SettingTextItem("自动切换时间点：$autoSwitchPoints", contentColor) {
-                                autoPointsInput = autoSwitchPoints
-                                showAutoPointsDialog = true
                             }
                         }
                     }
+
+                    AnimatedVisibility(
+                        visible = autoSwitchMode == 1,
+                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                    ) {
+                        val intervalText = remember(autoSwitchInterval) {
+                            val d = autoSwitchInterval / (24 * 3600)
+                            val h = (autoSwitchInterval % (24 * 3600)) / 3600
+                            val m = (autoSwitchInterval % 3600) / 60
+                            val s = autoSwitchInterval % 60
+                            buildString {
+                                if (d > 0) append("${d}天")
+                                if (h > 0) append("${h}时")
+                                if (m > 0 || (d == 0L && h == 0L)) append("${m}分")
+                                if (s > 0) append("${s}秒")
+                            }
+                        }
+                        SettingTextItem("自动切换间隔：$intervalText", contentColor) {
+                            showAutoIntervalDialog = true
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = autoSwitchMode == 2,
+                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                    ) {
+                        SettingTextItem("自动切换时间点：$autoSwitchPoints", contentColor) {
+                            autoPointsInput = autoSwitchPoints
+                            showAutoPointsDialog = true
+                        }
+                    }
+                }
                     SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, groupBackgroundColor, isLightTheme) {
                         wallpaperScroll = it
                         editor.putBoolean("wallpaperScroll", it).apply()
@@ -560,14 +560,14 @@ fun SettingRouteScreen(
                         showAppInfoPage = true
                     }
                 }
-
+                
                 // Keep the Check Update button separate and styled as before
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clip(Capsule())
                         .background(accentColor)
-                        .clickable {
+                        .clickable { 
                             shouldCheckUpdate = true
                             updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
                         }
@@ -654,7 +654,7 @@ fun SettingRouteScreen(
                         override fun onProgress(progress: Int) {
                             updateDialogState = updateDialogState.copy(downloadProgress = progress)
                         }
-
+                        
                         override fun onSuccess(file: java.io.File) {
                             updateDialogState = updateDialogState.copy(isDownloading = false)
                             // 验证 MD5
@@ -668,7 +668,7 @@ fun SettingRouteScreen(
                                 Toast.makeText(context, "文件校验失败，请重新下载", Toast.LENGTH_SHORT).show()
                             }
                         }
-
+                        
                         override fun onError(message: String) {
                             updateDialogState = updateDialogState.copy(
                                 isDownloading = false,
@@ -1295,7 +1295,7 @@ fun AppInfoRouteScreen(
                     style = TextStyle(color = contentColor.copy(0.8f), fontSize = 15.sp, lineHeight = 22.sp)
                 )
             }
-
+            
             Spacer(modifier = Modifier.height(24.dp))
 
             // Links Block
@@ -1318,9 +1318,9 @@ fun AppInfoRouteScreen(
                     Text(text = "开源地址", style = TextStyle(color = contentColor, fontSize = 16.sp))
                     LinkText("GitHub", "https://github.com/SUlTlUS/tianyinwallpaper.git")
                 }
-
+                
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).padding(horizontal = 24.dp).background(contentColor.copy(0.1f)))
-
+                
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1332,7 +1332,7 @@ fun AppInfoRouteScreen(
                     LinkText("Releases", "https://github.com/SUlTlUS/tianyinwallpaper/releases")
                 }
             }
-
+            
             Spacer(modifier = Modifier.height(48.dp))
         }
     }
@@ -1351,9 +1351,9 @@ private fun SettingCheckItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
+            .clickable { 
                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                onCheckedChange(!checked)
+                onCheckedChange(!checked) 
             }
             .padding(horizontal = 24.dp, vertical = 20.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1468,18 +1468,18 @@ private fun getVersionName(context: Context): String {
 
 private fun getAboutText(): String {
     return (
-            "天音壁纸是一个用来设置壁纸的软件>_<\n" +
-                    "分为常规壁纸页和光栅壁纸页\n" +
-                    "常规壁纸页可以设置视频图片壁纸\n" +
-                    "点击“+”，可以增加当前壁纸组的壁纸\n" +
-                    "点击“√”，会把当前壁纸组设置为手机壁纸\n" +
-                    "点击“…”，显示更多选项，可以保存当前壁纸组\n" +
-                    "设置页可以设置壁纸切换方式等\n" +
-                    "点击壁纸缩略图，可以选择删除壁纸或者设置壁纸显示的条件，长按可以调整顺序\n" +
-                    "当满足条件时，会优先显示满足条件的壁纸，借此，可以设置早安壁纸，下班壁纸\n" +
-                    "HyperOS3不支持壁纸随屏幕滚动\n" + "\n" +
-                    "原作者:十二今天也很可爱 @prpr12"
-            )
+        "天音壁纸是一个用来设置壁纸的软件>_<\n" +
+                "分为常规壁纸页和光栅壁纸页\n" +
+                "常规壁纸页可以设置视频图片壁纸\n" +
+            "点击“+”，可以增加当前壁纸组的壁纸\n" +
+            "点击“√”，会把当前壁纸组设置为手机壁纸\n" +
+            "点击“…”，显示更多选项，可以保存当前壁纸组\n" +
+            "设置页可以设置壁纸切换方式等\n" +
+            "点击壁纸缩略图，可以选择删除壁纸或者设置壁纸显示的条件，长按可以调整顺序\n" +
+            "当满足条件时，会优先显示满足条件的壁纸，借此，可以设置早安壁纸，下班壁纸\n" +
+            "HyperOS3不支持壁纸随屏幕滚动\n" + "\n" +
+            "原作者:十二今天也很可爱 @prpr12"
+    )
 }
 
 private const val DEFAULT_AUTO_SWITCH_INTERVAL_SECONDS = 3600L
