@@ -92,10 +92,8 @@ import com.zeaze.tianyinwallpaper.base.BaseActivity
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.about.AboutRouteScreen
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
-import com.zeaze.tianyinwallpaper.ui.depth.DepthRouteScreen
 import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
-import com.zeaze.tianyinwallpaper.ui.raster.RasterRouteScreen
 import com.zeaze.tianyinwallpaper.ui.test.CorrugatedTestRouteScreen
 import com.zeaze.tianyinwallpaper.ui.test.PlyModelTestRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
@@ -126,10 +124,10 @@ import com.zeaze.tianyinwallpaper.update.UpdateDialog
 import com.zeaze.tianyinwallpaper.update.UpdateDialogState
 
 class MainActivity : BaseActivity() {
-    private val tabItems: List<Pair<String, Int>> = listOf(
-        ROUTE_MAIN to R.string.main_tab_wallpaper,
-        ROUTE_RASTER to R.string.main_tab_raster,
-        ROUTE_DEPTH to R.string.main_tab_depth
+    private val tabItems: List<Pair<String, String>> = listOf(
+        ROUTE_MAIN to "壁纸",
+        ROUTE_ABOUT to "壁纸组",
+        ROUTE_SETTING to "设置"
     )
     private var showBottomBar by mutableStateOf(true)
     private var showSettingPage by mutableStateOf(false)
@@ -433,7 +431,11 @@ class MainActivity : BaseActivity() {
                             pagerState = pagerState,
                             useDarkTheme = useDarkTheme,
                             onOpenSettingPage = { openSettingPage() },
-                            onBottomBarVisibleChange = { setBottomBarVisible(it) }
+                            onBottomBarVisibleChange = { setBottomBarVisible(it) },
+                            onThemeModeChange = { mode -> themeMode = mode },
+                            onOpenAppInfo = { openAppInfoPage() },
+                            onOpenCorrugatedTest = { openCorrugatedTestPage() },
+                            onOpenPlyModelTest = { openPlyModelTestPage() }
                         )
                     }
                     composable(
@@ -627,7 +629,7 @@ class MainActivity : BaseActivity() {
                                 }
                             }
                         )
-                    } else if (showBottomBar) {
+                    } else if (showBottomBar && isWallpaperPage) {
                         // 正常模式顶部栏
                         MainTopBar(
                             statusBarTopPaddingDp = statusBarTopPaddingDp,
@@ -775,7 +777,7 @@ class MainActivity : BaseActivity() {
                                 .weight(1f)
                                 .height(bottomGroupHeight)
                         ) {
-                            tabItems.forEachIndexed { index, (route, titleRes) ->
+                            tabItems.forEachIndexed { index, (_, title) ->
                                 LiquidBottomTab({
                                     scope.launch {
                                         pagerState.animateScrollToPage(index)
@@ -784,7 +786,7 @@ class MainActivity : BaseActivity() {
                                     val selected = selectedIndex == index
                                     val selectedColor = BOTTOM_BAR_SELECTED_COLOR
                                     Text(
-                                        text = getString(titleRes),
+                                        text = title,
                                         color = if (selected) selectedColor else MaterialTheme.colors.onSurface,
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                     )
@@ -958,8 +960,14 @@ class MainActivity : BaseActivity() {
         pagerState: androidx.compose.foundation.pager.PagerState,
         useDarkTheme: Boolean,
         onOpenSettingPage: () -> Unit,
-        onBottomBarVisibleChange: (Boolean) -> Unit
+        onBottomBarVisibleChange: (Boolean) -> Unit,
+        onThemeModeChange: (Int) -> Unit,
+        onOpenAppInfo: () -> Unit,
+        onOpenCorrugatedTest: () -> Unit,
+        onOpenPlyModelTest: () -> Unit
     ) {
+        val pagerScope = rememberCoroutineScope()
+
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
@@ -973,14 +981,17 @@ class MainActivity : BaseActivity() {
                     onBottomBarVisibleChange = onBottomBarVisibleChange
                 )
 
-                ROUTE_RASTER -> RasterRouteScreen(
+                ROUTE_ABOUT -> AboutRouteScreen(
                     useDarkTheme = useDarkTheme,
-                    onBottomBarVisibleChange = onBottomBarVisibleChange
+                    onBack = { pagerScope.launch { pagerState.animateScrollToPage(0) } }
                 )
 
-                ROUTE_DEPTH -> DepthRouteScreen(
+                ROUTE_SETTING -> SettingRouteScreen(
                     useDarkTheme = useDarkTheme,
-                    onBottomBarVisibleChange = onBottomBarVisibleChange
+                    onThemeModeChange = onThemeModeChange,
+                    onOpenAppInfo = onOpenAppInfo,
+                    onOpenCorrugatedTest = onOpenCorrugatedTest,
+                    onOpenPlyModelTest = onOpenPlyModelTest
                 )
             }
         }
