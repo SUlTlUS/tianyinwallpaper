@@ -249,6 +249,8 @@ fun MainRouteScreen(
 
     val wallpapers = remember { mutableStateListOf<TianYinWallpaperModel>() }
     val selectedPositions = remember { mutableStateListOf<Int>() }
+    val selectedRasterGroupIds = remember { mutableStateListOf<String>() }
+    val selectedDepthWallpaperIds = remember { mutableStateListOf<String>() }
     val rasterGroups = remember { mutableStateListOf<RasterGroupModel>() }
     val depthWallpapers = remember { mutableStateListOf<DepthWallpaperModel>() }
 
@@ -812,11 +814,15 @@ fun MainRouteScreen(
         }
         selectionMode = true
         selectedPositions.clear()
+        selectedRasterGroupIds.clear()
+        selectedDepthWallpaperIds.clear()
     }
 
     fun exitSelectionMode() {
         selectionMode = false
         selectedPositions.clear()
+        selectedRasterGroupIds.clear()
+        selectedDepthWallpaperIds.clear()
     }
 
     fun dismissCurrentDialog() {
@@ -870,8 +876,17 @@ fun MainRouteScreen(
     }
 
     // 发送选择模式状态
+    fun selectedItemCount(): Int {
+        return selectedPositions.size + selectedRasterGroupIds.size + selectedDepthWallpaperIds.size
+    }
+
+    fun totalSelectableItemCount(): Int {
+        return wallpapers.size + rasterGroups.size + depthWallpapers.size
+    }
+
     fun publishSelectionState() {
-        val isAllSelected = selectedPositions.size == wallpapers.size && wallpapers.isNotEmpty()
+        val totalCount = totalSelectableItemCount()
+        val isAllSelected = selectedItemCount() == totalCount && totalCount > 0
         RxBus.postWithCode(RxConstants.RX_SELECTION_MODE_CHANGED, SelectionBarState(selectionMode, isAllSelected))
     }
 
@@ -925,7 +940,15 @@ fun MainRouteScreen(
     }
 
     // 发布选择模式状态
-    LaunchedEffect(selectionMode, selectedPositions.size, wallpapers.size) {
+    LaunchedEffect(
+        selectionMode,
+        selectedPositions.size,
+        selectedRasterGroupIds.size,
+        selectedDepthWallpaperIds.size,
+        wallpapers.size,
+        rasterGroups.size,
+        depthWallpapers.size
+    ) {
         publishSelectionState()
     }
     
@@ -977,7 +1000,7 @@ fun MainRouteScreen(
         val selectionDeleteDisposable = RxBus.getDefault()
             .toObservableWithCode(RxConstants.RX_SELECTION_DELETE, Unit::class.java)
             .subscribe {
-                if (selectedPositions.isEmpty()) {
+                if (selectedItemCount() == 0) {
                     context.showToast(context.getString(R.string.no_selected_tip))
                 } else {
                     showDeleteSelectedDialog = true
@@ -987,12 +1010,15 @@ fun MainRouteScreen(
         val selectionToggleAllDisposable = RxBus.getDefault()
             .toObservableWithCode(RxConstants.RX_SELECTION_TOGGLE_ALL, Unit::class.java)
             .subscribe {
-                val isAllSelected = selectedPositions.size == wallpapers.size && wallpapers.isNotEmpty()
-                if (isAllSelected) {
-                    selectedPositions.clear()
-                } else {
-                    selectedPositions.clear()
+                val totalCount = totalSelectableItemCount()
+                val isAllSelected = selectedItemCount() == totalCount && totalCount > 0
+                selectedPositions.clear()
+                selectedRasterGroupIds.clear()
+                selectedDepthWallpaperIds.clear()
+                if (!isAllSelected) {
                     wallpapers.indices.forEach { selectedPositions.add(it) }
+                    rasterGroups.forEach { selectedRasterGroupIds.add(it.id) }
+                    depthWallpapers.forEach { selectedDepthWallpaperIds.add(it.id) }
                 }
             }
 
@@ -1040,22 +1066,14 @@ fun MainRouteScreen(
     val gridState = rememberLazyGridState()
 
 
-    val unifiedItems = remember(
-        wallpapers.size,
-        rasterGroups.size,
-        depthWallpapers.size,
-        kindFilters
-    ) {
-        buildMainUnifiedWallpaperItems(
-            wallpapers = wallpapers,
-            rasterGroups = rasterGroups,
-            depthWallpapers = depthWallpapers,
-            kindFilters = kindFilters
-        )
-    }
+    val unifiedItems = buildMainUnifiedWallpaperItems(
+        wallpapers = wallpapers,
+        rasterGroups = rasterGroups,
+        depthWallpapers = depthWallpapers,
+        kindFilters = kindFilters
+    )
 
-    // 辅助函数：更新排序后的选中索引
-    fun updateSelectedIndices(from: Int, to: Int) {
+    fun updateSelectedWallpaperIndices(from: Int, to: Int) {
         val currentSelected = selectedPositions.toList()
         selectedPositions.clear()
         currentSelected.forEach { index ->
@@ -1068,27 +1086,75 @@ fun MainRouteScreen(
         }
     }
 
-    // 拖动保存状态
-    var pendingReorderSave by remember { mutableStateOf(false) }
+    fun moveRasterGroup(fromId: String, toId: String): Boolean {
+        val fromIndex = rasterGroups.indexOfFirst { it.id == fromId }
+        val toIndex = rasterGroups.indexOfFirst { it.id == toId }
+        if (fromIndex < 0 || toIndex < 0 || fromIndex == toIndex) return false
+        val moved = rasterGroups.removeAt(fromIndex)
+        rasterGroups.add(toIndex, moved)
+        return true
+    }
+
+    fun moveDepthWallpaper(fromId: String, toId: String): Boolean {
+        val fromIndex = depthWallpapers.indexOfFirst { it.id == fromId }
+        val toIndex = depthWallpapers.indexOfFirst { it.id == toId }
+        if (fromIndex < 0 || toIndex < 0 || fromIndex == toIndex) return false
+        val moved = depthWallpapers.removeAt(fromIndex)
+        depthWallpapers.add(toIndex, moved)
+        return true
+    }
+
+    // 拖动保存状态：统一页里三类数据分别持久化。
+    var pendingWallpaperReorderSave by remember { mutableStateOf(false) }
+    var pendingRasterReorderSave by remember { mutableStateOf(false) }
+    var pendingDepthReorderSave by remember { mutableStateOf(false) }
 
     val reorderableState = rememberReorderableLazyGridState(
         lazyGridState = gridState,
         onMove = { from, to ->
-            updateSelectedIndices(from.index, to.index)
-            val item = wallpapers.removeAt(from.index)
-            wallpapers.add(to.index, item)
-            pendingReorderSave = true
+            if (from.index == to.index) return@rememberReorderableLazyGridState
+            val fromItem = unifiedItems.getOrNull(from.index) ?: return@rememberReorderableLazyGridState
+            val toItem = unifiedItems.getOrNull(to.index) ?: return@rememberReorderableLazyGridState
+            when {
+                fromItem is MainUnifiedWallpaperItem.Wallpaper && toItem is MainUnifiedWallpaperItem.Wallpaper -> {
+                    val fromWallpaperIndex = fromItem.index
+                    val toWallpaperIndex = toItem.index
+                    if (fromWallpaperIndex in wallpapers.indices && toWallpaperIndex in wallpapers.indices && fromWallpaperIndex != toWallpaperIndex) {
+                        updateSelectedWallpaperIndices(fromWallpaperIndex, toWallpaperIndex)
+                        val moved = wallpapers.removeAt(fromWallpaperIndex)
+                        wallpapers.add(toWallpaperIndex, moved)
+                        pendingWallpaperReorderSave = true
+                    }
+                }
+                fromItem is MainUnifiedWallpaperItem.Raster && toItem is MainUnifiedWallpaperItem.Raster -> {
+                    if (moveRasterGroup(fromItem.group.id, toItem.group.id)) {
+                        pendingRasterReorderSave = true
+                    }
+                }
+                fromItem is MainUnifiedWallpaperItem.Depth && toItem is MainUnifiedWallpaperItem.Depth -> {
+                    if (moveDepthWallpaper(fromItem.model.id, toItem.model.id)) {
+                        pendingDepthReorderSave = true
+                    }
+                }
+            }
         }
     )
 
-    // 拖动结束后保存
-    LaunchedEffect(pendingReorderSave) {
-        if (pendingReorderSave) {
-            kotlinx.coroutines.delay(300) // 等待拖动稳定
-            if (pendingReorderSave) {
+    // 拖动结束后保存。跨类型拖动不改变顺序；同类型拖动分别保存到对应缓存。
+    LaunchedEffect(pendingWallpaperReorderSave, pendingRasterReorderSave, pendingDepthReorderSave) {
+        if (pendingWallpaperReorderSave || pendingRasterReorderSave || pendingDepthReorderSave) {
+            kotlinx.coroutines.delay(300)
+            if (pendingWallpaperReorderSave) {
                 saveCache()
-
-                pendingReorderSave = false
+                pendingWallpaperReorderSave = false
+            }
+            if (pendingRasterReorderSave) {
+                persistRasterGroups()
+                pendingRasterReorderSave = false
+            }
+            if (pendingDepthReorderSave) {
+                persistDepthWallpapers()
+                pendingDepthReorderSave = false
             }
         }
     }
@@ -1132,39 +1198,181 @@ fun MainRouteScreen(
                         }
                     }
                 ) { item ->
-                    when (item) {
-                        is MainUnifiedWallpaperItem.Wallpaper -> {
-                            val selected = selectedPositions.contains(item.index)
-                            MainUnifiedWallpaperCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                model = item.model,
-                                isSelected = selected,
-                                onClick = {
-                                    if (selectionMode) {
-                                        if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
-                                    } else {
-                                        fullScreenPreviewModel = item.model
+                    val itemKey = when (item) {
+                        is MainUnifiedWallpaperItem.Wallpaper -> "wallpaper_${item.model.uuid ?: item.index}"
+                        is MainUnifiedWallpaperItem.Raster -> "raster_${item.group.id}"
+                        is MainUnifiedWallpaperItem.Depth -> "depth_${item.model.id}"
+                    }
+                    ReorderableItem(reorderableState, key = itemKey) { isDragging ->
+                        val dragModifier = Modifier
+                            .fillMaxWidth()
+                            .zIndex(if (isDragging) 1f else 0f)
+                            .graphicsLayer {
+                                scaleX = if (isDragging) 1.05f else 1f
+                                scaleY = if (isDragging) 1.05f else 1f
+                                shadowElevation = if (isDragging) 8.dp.toPx() else 0f
+                                shape = RoundedCornerShape(16.dp)
+                                clip = true
+                            }
+                            .longPressDraggableHandle()
+
+                        when (item) {
+                            is MainUnifiedWallpaperItem.Wallpaper -> {
+                                val selected = selectedPositions.contains(item.index)
+                                val itemModifier = dragModifier.pointerInput(itemKey, selectionMode, selected) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val touchSlop = viewConfiguration.touchSlop
+                                        var movedBeyondSlop = false
+                                        var releasedBeforeLongPress = false
+                                        val finishedBeforeLongPress = withTimeoutOrNull(HOLD_SELECT_TIMEOUT_MS) {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id } ?: continue
+                                                if (!change.pressed) {
+                                                    releasedBeforeLongPress = true
+                                                    return@withTimeoutOrNull true
+                                                }
+                                                if ((change.position - down.position).getDistance() > touchSlop) {
+                                                    movedBeyondSlop = true
+                                                    return@withTimeoutOrNull true
+                                                }
+                                            }
+                                        } != null
+
+                                        when {
+                                            releasedBeforeLongPress && !movedBeyondSlop -> {
+                                                if (selectionMode) {
+                                                    if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
+                                                } else {
+                                                    fullScreenPreviewModel = item.model
+                                                }
+                                            }
+                                            !finishedBeforeLongPress && !selectionMode -> {
+                                                enterSelectionMode()
+                                                if (!selectedPositions.contains(item.index)) selectedPositions.add(item.index)
+                                            }
+                                        }
                                     }
-                                },
-                                onLongClick = {
-                                    if (!selectionMode) enterSelectionMode()
-                                    if (!selectedPositions.contains(item.index)) selectedPositions.add(item.index)
                                 }
-                            )
-                        }
-                        is MainUnifiedWallpaperItem.Raster -> {
-                            MainUnifiedRasterCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                group = item.group,
-                                onClick = { if (!selectionMode) rasterDetailGroup = item.group }
-                            )
-                        }
-                        is MainUnifiedWallpaperItem.Depth -> {
-                            MainUnifiedDepthCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                model = item.model,
-                                onClick = { if (!selectionMode) depthPreviewModel = item.model }
-                            )
+                                MainUnifiedWallpaperCard(
+                                    modifier = itemModifier,
+                                    model = item.model,
+                                    isSelected = selected,
+                                    onClick = {
+                                        if (selectionMode) {
+                                            if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
+                                        } else {
+                                            fullScreenPreviewModel = item.model
+                                        }
+                                    },
+                                    onLongClick = {}
+                                )
+                            }
+                            is MainUnifiedWallpaperItem.Raster -> {
+                                val selected = selectedRasterGroupIds.contains(item.group.id)
+                                val itemModifier = dragModifier.pointerInput(itemKey, selectionMode, selected) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val touchSlop = viewConfiguration.touchSlop
+                                        var movedBeyondSlop = false
+                                        var releasedBeforeLongPress = false
+                                        val finishedBeforeLongPress = withTimeoutOrNull(HOLD_SELECT_TIMEOUT_MS) {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id } ?: continue
+                                                if (!change.pressed) {
+                                                    releasedBeforeLongPress = true
+                                                    return@withTimeoutOrNull true
+                                                }
+                                                if ((change.position - down.position).getDistance() > touchSlop) {
+                                                    movedBeyondSlop = true
+                                                    return@withTimeoutOrNull true
+                                                }
+                                            }
+                                        } != null
+
+                                        when {
+                                            releasedBeforeLongPress && !movedBeyondSlop -> {
+                                                if (selectionMode) {
+                                                    if (selected) selectedRasterGroupIds.remove(item.group.id) else selectedRasterGroupIds.add(item.group.id)
+                                                } else {
+                                                    rasterDetailGroup = item.group
+                                                }
+                                            }
+                                            !finishedBeforeLongPress && !selectionMode -> {
+                                                enterSelectionMode()
+                                                if (!selectedRasterGroupIds.contains(item.group.id)) selectedRasterGroupIds.add(item.group.id)
+                                            }
+                                        }
+                                    }
+                                }
+                                MainUnifiedRasterCard(
+                                    modifier = itemModifier,
+                                    group = item.group,
+                                    isSelected = selected,
+                                    onClick = {
+                                        if (selectionMode) {
+                                            if (selected) selectedRasterGroupIds.remove(item.group.id) else selectedRasterGroupIds.add(item.group.id)
+                                        } else {
+                                            rasterDetailGroup = item.group
+                                        }
+                                    },
+                                    onLongClick = {}
+                                )
+                            }
+                            is MainUnifiedWallpaperItem.Depth -> {
+                                val selected = selectedDepthWallpaperIds.contains(item.model.id)
+                                val itemModifier = dragModifier.pointerInput(itemKey, selectionMode, selected) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val touchSlop = viewConfiguration.touchSlop
+                                        var movedBeyondSlop = false
+                                        var releasedBeforeLongPress = false
+                                        val finishedBeforeLongPress = withTimeoutOrNull(HOLD_SELECT_TIMEOUT_MS) {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.firstOrNull { it.id == down.id } ?: continue
+                                                if (!change.pressed) {
+                                                    releasedBeforeLongPress = true
+                                                    return@withTimeoutOrNull true
+                                                }
+                                                if ((change.position - down.position).getDistance() > touchSlop) {
+                                                    movedBeyondSlop = true
+                                                    return@withTimeoutOrNull true
+                                                }
+                                            }
+                                        } != null
+
+                                        when {
+                                            releasedBeforeLongPress && !movedBeyondSlop -> {
+                                                if (selectionMode) {
+                                                    if (selected) selectedDepthWallpaperIds.remove(item.model.id) else selectedDepthWallpaperIds.add(item.model.id)
+                                                } else {
+                                                    depthPreviewModel = item.model
+                                                }
+                                            }
+                                            !finishedBeforeLongPress && !selectionMode -> {
+                                                enterSelectionMode()
+                                                if (!selectedDepthWallpaperIds.contains(item.model.id)) selectedDepthWallpaperIds.add(item.model.id)
+                                            }
+                                        }
+                                    }
+                                }
+                                MainUnifiedDepthCard(
+                                    modifier = itemModifier,
+                                    model = item.model,
+                                    isSelected = selected,
+                                    onClick = {
+                                        if (selectionMode) {
+                                            if (selected) selectedDepthWallpaperIds.remove(item.model.id) else selectedDepthWallpaperIds.add(item.model.id)
+                                        } else {
+                                            depthPreviewModel = item.model
+                                        }
+                                    },
+                                    onLongClick = {}
+                                )
+                            }
                         }
                     }
                 }
@@ -1329,12 +1537,31 @@ fun MainRouteScreen(
                                             .clip(Capsule())
                                             .background(Color(0xFFFF4D4F).copy(alpha = 0.75f))
                                             .clickable {
+                                                val rasterIds = selectedRasterGroupIds.toSet()
+                                                val depthIds = selectedDepthWallpaperIds.toSet()
+
+                                                if (rasterIds.isNotEmpty()) {
+                                                    rasterGroups.removeAll { it.id in rasterIds }
+                                                    RasterPrefs.saveGroups(pref, rasterGroups)
+                                                    if (rasterDetailGroup?.id?.let { it in rasterIds } == true) {
+                                                        rasterDetailGroup = null
+                                                        rasterStaticEditorGroupId = null
+                                                        rasterVideoEditorGroupId = null
+                                                    }
+                                                }
+
+                                                if (depthIds.isNotEmpty()) {
+                                                    depthIds.forEach { DepthPrefs.deleteSogDir(context, it) }
+                                                    depthWallpapers.removeAll { it.id in depthIds }
+                                                    DepthPrefs.saveWallpapers(pref, depthWallpapers)
+                                                    if (depthPreviewModel?.id?.let { it in depthIds } == true) depthPreviewModel = null
+                                                }
+
                                                 val indexes = selectedPositions.toMutableList()
                                                 Collections.sort(indexes, Collections.reverseOrder())
                                                 for (index in indexes) {
                                                     removeWallpaperAt(index)
                                                 }
-                                                selectedPositions.clear()
                                                 exitSelectionMode()
                                                 showDeleteSelectedDialog = false
                                             }
@@ -1633,7 +1860,7 @@ fun MainRouteScreen(
                     },
                 useDarkTheme = useDarkTheme,
                 onBack = { closeDepthOnlinePage() },
-                onImportSog = { sogUri, recordThumbnailUri ->
+                onImportSog = { sogUri: Uri, recordThumbnailUri: String? ->
                     addDepthSogWallpaper(sogUri, recordThumbnailUri)
                     closeDepthOnlinePage()
                 }
@@ -1957,12 +2184,6 @@ private fun MainUnifiedWallpaperCard(
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black)
-            .pointerInput(model, isSelected) {
-                detectTapGestures(
-                    onLongPress = { onLongClick() },
-                    onTap = { onClick() }
-                )
-            }
     ) {
         WallpaperCardImage(
             modifier = Modifier.fillMaxSize(),
@@ -1989,7 +2210,9 @@ private fun MainUnifiedWallpaperCard(
 private fun MainUnifiedRasterCard(
     modifier: Modifier = Modifier,
     group: RasterGroupModel,
-    onClick: () -> Unit
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     val context = LocalContext.current
     val request = remember(group.id, group.type, group.videoUri, group.imageUris.firstOrNull()) {
@@ -2024,7 +2247,6 @@ private fun MainUnifiedRasterCard(
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF18181A))
-            .clickable(onClick = onClick)
     ) {
         if (bitmap != null) {
             Image(
@@ -2045,6 +2267,20 @@ private fun MainUnifiedRasterCard(
                 .background(Color(0x66000000), RoundedCornerShape(16.dp))
                 .padding(horizontal = 6.dp, vertical = 2.dp)
         )
+        if (isSelected) {
+            Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
+            Text(
+                text = "✓",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .background(Color(0x990088FF), CircleShape)
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            )
+        }
     }
 }
 
@@ -2052,7 +2288,9 @@ private fun MainUnifiedRasterCard(
 private fun MainUnifiedDepthCard(
     modifier: Modifier = Modifier,
     model: DepthWallpaperModel,
-    onClick: () -> Unit
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     val context = LocalContext.current
     val bitmap by produceState<Bitmap?>(initialValue = null, model.id, model.gaussianUri) {
@@ -2066,7 +2304,6 @@ private fun MainUnifiedDepthCard(
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF18181A))
-            .clickable(onClick = onClick)
     ) {
         if (bitmap != null) {
             Image(
@@ -2093,6 +2330,20 @@ private fun MainUnifiedDepthCard(
                 .background(Color(0x66000000), RoundedCornerShape(16.dp))
                 .padding(horizontal = 6.dp, vertical = 2.dp)
         )
+        if (isSelected) {
+            Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
+            Text(
+                text = "✓",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .background(Color(0x990088FF), CircleShape)
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            )
+        }
     }
 }
 

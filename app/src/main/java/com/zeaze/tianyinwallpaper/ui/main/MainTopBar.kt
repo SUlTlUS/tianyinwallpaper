@@ -278,13 +278,16 @@ fun MainTopBar(
         TopCircleLiquidButton(
             visible = showFilterButton,
             onClick = onFilterClick,
-            text = "筛",
+            text = "",
             textColor = textColor,
             surfaceColor = adaptiveSurfaceColor,
             isDark = isDark,
             enableLiquidGlass = enableLiquidGlass,
             backdrop = backdrop,
-            keepSlotWhenHidden = keepSlotWhenHidden
+            keepSlotWhenHidden = keepSlotWhenHidden,
+            iconRes = R.drawable.fliter,
+            iconContentDescription = "筛选",
+            iconSize = 20.dp
         )
 
         TopCircleLiquidButton(
