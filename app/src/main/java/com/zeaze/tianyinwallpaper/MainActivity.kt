@@ -13,9 +13,13 @@ import android.view.View
 import android.view.WindowManager
 import android.view.WindowInsetsController
 import android.widget.Toast
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,12 +29,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -93,9 +100,11 @@ import com.zeaze.tianyinwallpaper.ui.test.CorrugatedTestRouteScreen
 import com.zeaze.tianyinwallpaper.ui.test.PlyModelTestRouteScreen
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTab
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabs
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.utils.LiquidMorphPhysics
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberLiquidMorphController
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
@@ -123,6 +132,8 @@ class MainActivity : BaseActivity() {
         ROUTE_DEPTH to R.string.main_tab_depth
     )
     private var showBottomBar by mutableStateOf(true)
+    private var showSettingPage by mutableStateOf(false)
+    private var showAboutPage by mutableStateOf(false)
     private var pendingRoute by mutableStateOf<String?>(null)
 
     companion object {
@@ -146,14 +157,14 @@ class MainActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        
+
         // 机型判断：如果是手机则锁定为竖屏
         val displayMetrics = resources.displayMetrics
         val widthDp = displayMetrics.widthPixels / displayMetrics.density
         if (widthDp < 600) {
             requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
-        
+
         setContent {
             MainActivityScreen()
         }
@@ -192,14 +203,14 @@ class MainActivity : BaseActivity() {
                 val controller = view.windowInsetsController
                 val appearance = if (!useDarkTheme) {
                     WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
                 } else {
                     0
                 }
                 controller?.setSystemBarsAppearance(
                     appearance,
                     WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
                 )
             } else {
                 @Suppress("DEPRECATION")
@@ -234,17 +245,170 @@ class MainActivity : BaseActivity() {
                 }
                 pendingRoute = null
             }
-            
+
             // 更新对话框状态
             var updateDialogState by remember { mutableStateOf(UpdateDialogState()) }
             var hasCheckedUpdate by remember { mutableStateOf(false) }
-            
+
             val liquidBackdrop = if (enableLiquidGlass) {
                 rememberLayerBackdrop {
                     drawRect(themeBackgroundColor)
                     drawContent()
                 }
             } else null
+
+            // 设置页本身不再走 NavHost 的 tween pop 动画。
+            // 这里直接在 MainActivity 根层里承载它：底下的主页一直存在，返回手势才能真正跟手，
+            // 也不会露出 NavHost 的纯白背景。
+            val settingPageWidthPx = remember(this@MainActivity) {
+                resources.displayMetrics.widthPixels.toFloat().coerceAtLeast(1f)
+            }
+            val settingPageOffset = remember { Animatable(settingPageWidthPx) }
+            var renderSettingPage by remember { mutableStateOf(false) }
+            var settingBackDragOffsetPx by remember { mutableStateOf(0f) }
+            var settingBackGestureActive by remember { mutableStateOf(false) }
+
+            fun closeSettingPage() {
+                if (!renderSettingPage && !showSettingPage) return
+                scope.launch {
+                    val startOffset = (settingPageOffset.value + settingBackDragOffsetPx)
+                        .coerceIn(0f, settingPageWidthPx)
+                    settingBackDragOffsetPx = 0f
+                    settingBackGestureActive = false
+                    settingPageOffset.snapTo(startOffset)
+                    showSettingPage = false
+                }
+            }
+
+            LaunchedEffect(showSettingPage, settingPageWidthPx) {
+                if (showSettingPage) {
+                    renderSettingPage = true
+                    settingBackDragOffsetPx = 0f
+                    settingBackGestureActive = false
+                    settingPageOffset.snapTo(settingPageWidthPx)
+                    settingPageOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                } else if (renderSettingPage) {
+                    settingBackDragOffsetPx = 0f
+                    settingBackGestureActive = false
+                    settingPageOffset.animateTo(
+                        targetValue = settingPageWidthPx,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                    renderSettingPage = false
+                    settingPageOffset.snapTo(settingPageWidthPx)
+                }
+            }
+
+            PredictiveBackHandler(enabled = showSettingPage && currentRoute == ROUTE_MAIN) { progress ->
+                try {
+                    progress.collect { backEvent ->
+                        settingBackGestureActive = true
+                        settingBackDragOffsetPx =
+                            (settingPageWidthPx * backEvent.progress).coerceIn(0f, settingPageWidthPx)
+                    }
+                    val startOffset = (settingPageOffset.value + settingBackDragOffsetPx)
+                        .coerceIn(0f, settingPageWidthPx)
+                    settingBackDragOffsetPx = 0f
+                    settingBackGestureActive = false
+                    settingPageOffset.snapTo(startOffset)
+                    showSettingPage = false
+                } catch (_: CancellationException) {
+                    settingBackGestureActive = false
+                    settingBackDragOffsetPx = 0f
+                    settingPageOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                }
+            }
+
+            // 壁纸组页也改成根层内联页面：底下主页一直存在，预测性返回才不会露白。
+            val aboutPageWidthPx = remember(this@MainActivity) {
+                resources.displayMetrics.widthPixels.toFloat().coerceAtLeast(1f)
+            }
+            val aboutPageOffset = remember { Animatable(aboutPageWidthPx) }
+            var renderAboutPage by remember { mutableStateOf(false) }
+            var aboutBackDragOffsetPx by remember { mutableStateOf(0f) }
+            var aboutBackGestureActive by remember { mutableStateOf(false) }
+
+            fun closeAboutPage() {
+                if (!renderAboutPage && !showAboutPage) return
+                scope.launch {
+                    val startOffset = (aboutPageOffset.value + aboutBackDragOffsetPx)
+                        .coerceIn(0f, aboutPageWidthPx)
+                    aboutBackDragOffsetPx = 0f
+                    aboutBackGestureActive = false
+                    aboutPageOffset.snapTo(startOffset)
+                    showAboutPage = false
+                }
+            }
+
+            LaunchedEffect(showAboutPage, aboutPageWidthPx) {
+                if (showAboutPage) {
+                    renderAboutPage = true
+                    aboutBackDragOffsetPx = 0f
+                    aboutBackGestureActive = false
+                    aboutPageOffset.snapTo(aboutPageWidthPx)
+                    aboutPageOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                } else if (renderAboutPage) {
+                    aboutBackDragOffsetPx = 0f
+                    aboutBackGestureActive = false
+                    aboutPageOffset.animateTo(
+                        targetValue = aboutPageWidthPx,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                    renderAboutPage = false
+                    aboutPageOffset.snapTo(aboutPageWidthPx)
+                }
+            }
+
+            PredictiveBackHandler(enabled = showAboutPage && currentRoute == ROUTE_MAIN && !showSettingPage) { progress ->
+                try {
+                    progress.collect { backEvent ->
+                        aboutBackGestureActive = true
+                        aboutBackDragOffsetPx =
+                            (aboutPageWidthPx * backEvent.progress).coerceIn(0f, aboutPageWidthPx)
+                    }
+                    val startOffset = (aboutPageOffset.value + aboutBackDragOffsetPx)
+                        .coerceIn(0f, aboutPageWidthPx)
+                    aboutBackDragOffsetPx = 0f
+                    aboutBackGestureActive = false
+                    aboutPageOffset.snapTo(startOffset)
+                    showAboutPage = false
+                } catch (_: CancellationException) {
+                    aboutBackGestureActive = false
+                    aboutBackDragOffsetPx = 0f
+                    aboutPageOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                }
+            }
+
 
             Box(
                 modifier = Modifier
@@ -379,7 +543,9 @@ class MainActivity : BaseActivity() {
                 val isWallpaperPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_MAIN
                 val isRasterPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_RASTER
                 val isDepthPage = currentRoute == ROUTE_MAIN && currentPageRoute == ROUTE_DEPTH
-                val shouldShowTopBar = currentRoute == ROUTE_MAIN
+                val shouldShowTopBar = currentRoute == ROUTE_MAIN &&
+                        !showSettingPage && !renderSettingPage &&
+                        !showAboutPage && !renderAboutPage
                 var showMoreMenu by remember { mutableStateOf(false) }
 
                 // 选择模式状态
@@ -409,8 +575,8 @@ class MainActivity : BaseActivity() {
                 }
 
                 val isInSelectionMode = (isWallpaperPage && wallpaperSelectionState.selectionMode) ||
-                                        (isRasterPage && rasterSelectionState.selectionMode) ||
-                                        (isDepthPage && depthSelectionState.selectionMode)
+                        (isRasterPage && rasterSelectionState.selectionMode) ||
+                        (isDepthPage && depthSelectionState.selectionMode)
 
                 if (shouldShowTopBar) {
                     val density = LocalDensity.current
@@ -490,7 +656,7 @@ class MainActivity : BaseActivity() {
                                     else -> RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit)
                                 }
                             },
-                            showAddButton = isWallpaperPage || isRasterPage || isDepthPage,
+                            showAddButton = false,
                             showPreviewButton = isWallpaperPage,
                             showApplyButton = isWallpaperPage,
                             showMoreButton = true,
@@ -564,46 +730,159 @@ class MainActivity : BaseActivity() {
                     }
                 }
 
-                 if (showBottomBar && currentRoute == ROUTE_MAIN) {
+                if (showBottomBar && currentRoute == ROUTE_MAIN &&
+                    !showSettingPage && !renderSettingPage &&
+                    !showAboutPage && !renderAboutPage
+                ) {
                     val selectedIndex = pagerState.currentPage
                     val density = LocalDensity.current
                     val bottomBarBottomPadding =
                         with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 10.dp
+                    val showBottomAddButton = isWallpaperPage || isRasterPage || isDepthPage
+                    val bottomGroupHorizontalPadding = 18.dp
+                    val bottomGroupGap = 8.dp
+                    val bottomGroupHeight = 64.dp
+                    val bottomActionSize = 64.dp
+                    val addButtonSurfaceColor =
+                        if (useDarkTheme) Color.Black.copy(alpha = 0.34f) else Color.White.copy(alpha = 0.34f)
+                    val addButtonTextColor = if (useDarkTheme) Color.White else Color.Black
+                    val addButtonClick = {
+                        when {
+                            isDepthPage -> RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_DEPTH, Unit)
+                            isRasterPage -> RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_RASTER, Unit)
+                            else -> RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit)
+                        }
+                    }
 
-                    LiquidBottomTabs(
-                        selectedTabIndex = { selectedIndex },
-                        onTabSelected = { index ->
-                            scope.launch { pagerState.animateScrollToPage(index) }
-                        },
-                        backdrop = if (enableLiquidGlass) liquidBackdrop else null,
-                        tabsCount = tabItems.size,
-                        isLightTheme = !useDarkTheme,
+                    Row(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .padding(horizontal = 36.dp)
-                            .padding(bottom = bottomBarBottomPadding)
+                            .fillMaxWidth()
+                            .padding(horizontal = bottomGroupHorizontalPadding)
+                            .padding(bottom = bottomBarBottomPadding),
+                        horizontalArrangement = Arrangement.spacedBy(bottomGroupGap),
+                        verticalAlignment = Alignment.Bottom
                     ) {
-                        tabItems.forEachIndexed { index, (route, titleRes) ->
-                            LiquidBottomTab({
-                                scope.launch {
-                                    pagerState.animateScrollToPage(
-                                        index
+                        LiquidBottomTabs(
+                            selectedTabIndex = { selectedIndex },
+                            onTabSelected = { index ->
+                                scope.launch { pagerState.animateScrollToPage(index) }
+                            },
+                            backdrop = if (enableLiquidGlass) liquidBackdrop else null,
+                            tabsCount = tabItems.size,
+                            isLightTheme = !useDarkTheme,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(bottomGroupHeight)
+                        ) {
+                            tabItems.forEachIndexed { index, (route, titleRes) ->
+                                LiquidBottomTab({
+                                    scope.launch {
+                                        pagerState.animateScrollToPage(index)
+                                    }
+                                }) {
+                                    val selected = selectedIndex == index
+                                    val selectedColor = BOTTOM_BAR_SELECTED_COLOR
+                                    Text(
+                                        text = getString(titleRes),
+                                        color = if (selected) selectedColor else MaterialTheme.colors.onSurface,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                     )
                                 }
-                            }) {
-                                val selected = selectedIndex == index
-                                val selectedColor = BOTTOM_BAR_SELECTED_COLOR
-                                Text(
-                                    text = getString(titleRes),
-                                    color = if (selected) selectedColor else MaterialTheme.colors.onSurface,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                                )
+                            }
+                        }
+
+                        if (showBottomAddButton) {
+                            if (enableLiquidGlass && liquidBackdrop != null) {
+                                LiquidButton(
+                                    onClick = addButtonClick,
+                                    backdrop = liquidBackdrop,
+                                    surfaceColor = addButtonSurfaceColor,
+                                    modifier = Modifier.size(bottomActionSize),
+                                    buttonHeight = bottomActionSize,
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    BasicText(
+                                        text = "+",
+                                        style = TextStyle(
+                                            color = addButtonTextColor,
+                                            fontSize = 32.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(bottomActionSize)
+                                        .clip(CircleShape)
+                                        .background(addButtonSurfaceColor)
+                                        .clickable(onClick = addButtonClick),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    BasicText(
+                                        text = "+",
+                                        style = TextStyle(
+                                            color = addButtonTextColor,
+                                            fontSize = 32.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    )
+                                }
                             }
                         }
                     }
                 }
+
+                if (renderAboutPage || showAboutPage) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(8f)
+                            .graphicsLayer {
+                                translationX = aboutPageOffset.value + aboutBackDragOffsetPx
+                                alpha = 1f
+                            }
+                    ) {
+                        AboutRouteScreen(
+                            useDarkTheme = useDarkTheme,
+                            onBack = { closeAboutPage() }
+                        )
+                    }
+                }
+
+                if (renderSettingPage || showSettingPage) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(10f)
+                            .graphicsLayer {
+                                translationX = settingPageOffset.value + settingBackDragOffsetPx
+                                alpha = 1f
+                            }
+                    ) {
+                        SettingRouteScreen(
+                            useDarkTheme = useDarkTheme,
+                            onThemeModeChange = { mode ->
+                                themeMode = mode
+                            },
+                            onOpenAppInfo = {
+                                closeSettingPage()
+                                openAppInfoPage()
+                            },
+                            onOpenCorrugatedTest = {
+                                closeSettingPage()
+                                openCorrugatedTestPage()
+                            },
+                            onOpenPlyModelTest = {
+                                closeSettingPage()
+                                openPlyModelTestPage()
+                            }
+                        )
+                    }
+                }
             }
-            
+
             // 更新对话框
             UpdateDialog(
                 state = updateDialogState,
@@ -623,7 +902,7 @@ class MainActivity : BaseActivity() {
                             override fun onProgress(progress: Int) {
                                 updateDialogState = updateDialogState.copy(downloadProgress = progress)
                             }
-                            
+
                             override fun onSuccess(file: File) {
                                 updateDialogState = updateDialogState.copy(isDownloading = false)
                                 // 验证 MD5
@@ -634,7 +913,7 @@ class MainActivity : BaseActivity() {
                                     Toast.makeText(this@MainActivity, "文件校验失败，请重新下载", Toast.LENGTH_SHORT).show()
                                 }
                             }
-                            
+
                             override fun onError(message: String) {
                                 updateDialogState = updateDialogState.copy(
                                     isDownloading = false,
@@ -647,7 +926,7 @@ class MainActivity : BaseActivity() {
                 },
                 isLightTheme = !useDarkTheme
             )
-            
+
             // 启动时自动检查更新（只检查一次）
             LaunchedEffect(Unit) {
                 if (!hasCheckedUpdate) {
@@ -718,11 +997,11 @@ class MainActivity : BaseActivity() {
     }
 
     fun openAboutPage() {
-        pendingRoute = ROUTE_ABOUT
+        showAboutPage = true
     }
 
     fun openSettingPage() {
-        pendingRoute = ROUTE_SETTING
+        showSettingPage = true
     }
 
     fun openAppInfoPage() {

@@ -1,11 +1,13 @@
 package com.zeaze.tianyinwallpaper.ui.setting
 
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.text.TextUtils
 import android.widget.Toast
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
@@ -16,12 +18,14 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +33,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,8 +57,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -61,6 +68,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
@@ -144,11 +152,63 @@ fun SettingRouteScreen(
     var showAutoPointsDialog by remember { mutableStateOf(false) }
     var showTimePickerDialog by remember { mutableStateOf(false) }
     var autoPointsInput by remember { mutableStateOf(autoSwitchPoints) }
-    
+
     // 更新对话框状态
     var updateDialogState by remember { mutableStateOf(UpdateDialogState()) }
     var shouldCheckUpdate by remember { mutableStateOf(false) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    // “关于”二级页：和景深在线生成页一致，打开从右侧推入，返回从左到右滑出；返回时不改变透明度。
+    val density = LocalDensity.current
+    var showAppInfoPage by remember { mutableStateOf(false) }
+    var renderAppInfoPage by remember { mutableStateOf(false) }
+    val appInfoPageWidthPx = remember(context) {
+        context.resources.displayMetrics.widthPixels.toFloat().coerceAtLeast(1f)
+    }
+    val appInfoPageOffset = remember { Animatable(appInfoPageWidthPx) }
+    var appInfoBackDragOffsetPx by remember { mutableStateOf(0f) }
+    var appInfoBackGestureActive by remember { mutableStateOf(false) }
+    val appInfoBackEdgePx = with(density) { 40.dp.toPx() }
+
+    fun closeAppInfoPage() {
+        if (!renderAppInfoPage && !showAppInfoPage) return
+        scope.launch {
+            val startOffset = (appInfoPageOffset.value + appInfoBackDragOffsetPx)
+                .coerceIn(0f, appInfoPageWidthPx)
+            appInfoBackDragOffsetPx = 0f
+            appInfoBackGestureActive = false
+            appInfoPageOffset.snapTo(startOffset)
+            showAppInfoPage = false
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(showAppInfoPage, appInfoPageWidthPx) {
+        if (showAppInfoPage) {
+            renderAppInfoPage = true
+            appInfoBackDragOffsetPx = 0f
+            appInfoBackGestureActive = false
+            appInfoPageOffset.snapTo(appInfoPageWidthPx)
+            appInfoPageOffset.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        } else if (renderAppInfoPage) {
+            appInfoBackDragOffsetPx = 0f
+            appInfoBackGestureActive = false
+            appInfoPageOffset.animateTo(
+                targetValue = appInfoPageWidthPx,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+            renderAppInfoPage = false
+            appInfoPageOffset.snapTo(appInfoPageWidthPx)
+        }
+    }
 
     var pickingHour by remember { mutableStateOf(12) }
     var pickingMinute by remember { mutableStateOf(0) }
@@ -161,10 +221,36 @@ fun SettingRouteScreen(
         else -> null
     }
 
+    PredictiveBackHandler(enabled = showAppInfoPage && currentDialogState == null && !updateDialogState.isVisible) { progress ->
+        try {
+            progress.collect { backEvent ->
+                appInfoBackGestureActive = true
+                appInfoBackDragOffsetPx = (appInfoPageWidthPx * backEvent.progress)
+                    .coerceIn(0f, appInfoPageWidthPx)
+            }
+            val startOffset = (appInfoPageOffset.value + appInfoBackDragOffsetPx)
+                .coerceIn(0f, appInfoPageWidthPx)
+            appInfoBackDragOffsetPx = 0f
+            appInfoBackGestureActive = false
+            appInfoPageOffset.snapTo(startOffset)
+            showAppInfoPage = false
+        } catch (_: CancellationException) {
+            appInfoBackGestureActive = false
+            appInfoBackDragOffsetPx = 0f
+            appInfoPageOffset.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+
     val isLightTheme = !useDarkTheme
-    val backgroundColor =
-        if (isLightTheme) Color(0xFFF2F2F6)
-        else Color(0xFF121212)
+    // 浅色：页面底色白，分组卡片浅灰；深色：提高分组/底色层级对比。
+    val backgroundColor = if (isLightTheme) Color.White else Color(0xFF0A0A0C)
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val themeModeOptions = remember {
         listOf(
@@ -185,9 +271,17 @@ fun SettingRouteScreen(
         )
     }
     val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
-    val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
-    val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF121212).copy(0.56f)
-    val groupBackgroundColor = if (isLightTheme) Color.White else Color(0xFF1E1E1E)
+    val containerColor = if (isLightTheme) {
+        Color(0xFFF2F3F7).copy(alpha = 0.78f)
+    } else {
+        Color(0xFF2A2A2E).copy(alpha = 0.62f)
+    }
+    val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF000000).copy(0.56f)
+    val groupBackgroundColor = if (isLightTheme) {
+        Color(0xFFF2F3F7)
+    } else {
+        Color(0xFF1C1C20).copy(alpha = 0.94f)
+    }
 
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
@@ -363,75 +457,75 @@ fun SettingRouteScreen(
                             .padding(bottom = 12.dp)
                     )
 
-                val autoModeDetailSpacer by animateDpAsState(
-                    targetValue = 4.dp,
-                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                    label = "AutoModeDetailSpacer"
-                )
-                Spacer(Modifier.height(autoModeDetailSpacer))
+                    val autoModeDetailSpacer by animateDpAsState(
+                        targetValue = 4.dp,
+                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        label = "AutoModeDetailSpacer"
+                    )
+                    Spacer(Modifier.height(autoModeDetailSpacer))
 
-                Column(Modifier.fillMaxWidth()) {
-                    AnimatedVisibility(
-                        visible = autoSwitchMode == AUTO_SWITCH_MODE_NONE,
-                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
-                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
-                    ) {
-                        Column {
+                    Column(Modifier.fillMaxWidth()) {
+                        AnimatedVisibility(
+                            visible = autoSwitchMode == AUTO_SWITCH_MODE_NONE,
+                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                            exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                    shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                        ) {
+                            Column {
 
-                            SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor) {
-                                tempMinTime = minTime
-                                showMinTimeDialog = true
-                            }
-                            SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, groupBackgroundColor, isLightTheme) {
-                                pageChange = it
-                                editor.putBoolean("pageChange", it).apply()
-                                if (it && wallpaperScroll) {
-                                    wallpaperScroll = false
-                                    editor.putBoolean("wallpaperScroll", false).apply()
+                                SettingTextItem("壁纸最小切换时间: ${minTime}秒", contentColor) {
+                                    tempMinTime = minTime
+                                    showMinTimeDialog = true
+                                }
+                                SettingCheckItem("滑动桌面切换壁纸", pageChange, contentColor, groupBackgroundColor, isLightTheme) {
+                                    pageChange = it
+                                    editor.putBoolean("pageChange", it).apply()
+                                    if (it && wallpaperScroll) {
+                                        wallpaperScroll = false
+                                        editor.putBoolean("wallpaperScroll", false).apply()
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    AnimatedVisibility(
-                        visible = autoSwitchMode == 1,
-                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
-                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
-                    ) {
-                        val intervalText = remember(autoSwitchInterval) {
-                            val d = autoSwitchInterval / (24 * 3600)
-                            val h = (autoSwitchInterval % (24 * 3600)) / 3600
-                            val m = (autoSwitchInterval % 3600) / 60
-                            val s = autoSwitchInterval % 60
-                            buildString {
-                                if (d > 0) append("${d}天")
-                                if (h > 0) append("${h}时")
-                                if (m > 0 || (d == 0L && h == 0L)) append("${m}分")
-                                if (s > 0) append("${s}秒")
+                        AnimatedVisibility(
+                            visible = autoSwitchMode == 1,
+                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                            exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                    shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                        ) {
+                            val intervalText = remember(autoSwitchInterval) {
+                                val d = autoSwitchInterval / (24 * 3600)
+                                val h = (autoSwitchInterval % (24 * 3600)) / 3600
+                                val m = (autoSwitchInterval % 3600) / 60
+                                val s = autoSwitchInterval % 60
+                                buildString {
+                                    if (d > 0) append("${d}天")
+                                    if (h > 0) append("${h}时")
+                                    if (m > 0 || (d == 0L && h == 0L)) append("${m}分")
+                                    if (s > 0) append("${s}秒")
+                                }
+                            }
+                            SettingTextItem("自动切换间隔：$intervalText", contentColor) {
+                                showAutoIntervalDialog = true
                             }
                         }
-                        SettingTextItem("自动切换间隔：$intervalText", contentColor) {
-                            showAutoIntervalDialog = true
-                        }
-                    }
 
-                    AnimatedVisibility(
-                        visible = autoSwitchMode == 2,
-                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
-                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
-                    ) {
-                        SettingTextItem("自动切换时间点：$autoSwitchPoints", contentColor) {
-                            autoPointsInput = autoSwitchPoints
-                            showAutoPointsDialog = true
+                        AnimatedVisibility(
+                            visible = autoSwitchMode == 2,
+                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                    expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                            exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                                    shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                        ) {
+                            SettingTextItem("自动切换时间点：$autoSwitchPoints", contentColor) {
+                                autoPointsInput = autoSwitchPoints
+                                showAutoPointsDialog = true
+                            }
                         }
                     }
-                }
                     SettingCheckItem("壁纸跟随屏幕滚动", wallpaperScroll, contentColor, groupBackgroundColor, isLightTheme) {
                         wallpaperScroll = it
                         editor.putBoolean("wallpaperScroll", it).apply()
@@ -463,17 +557,17 @@ fun SettingRouteScreen(
                         }
                     }
                     SettingTextItem("关于", contentColor) {
-                        onOpenAppInfo()
+                        showAppInfoPage = true
                     }
                 }
-                
+
                 // Keep the Check Update button separate and styled as before
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clip(Capsule())
                         .background(accentColor)
-                        .clickable { 
+                        .clickable {
                             shouldCheckUpdate = true
                             updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
                         }
@@ -484,6 +578,60 @@ fun SettingRouteScreen(
                     BasicText("检查更新", style = TextStyle(Color.White, 16.sp, fontWeight = FontWeight.Bold))
                 }
             }
+        }
+
+        if (renderAppInfoPage || showAppInfoPage) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(4f)
+                    .graphicsLayer {
+                        translationX = appInfoPageOffset.value + appInfoBackDragOffsetPx
+                        alpha = 1f
+                    }
+            ) {
+                AppInfoRouteScreen(
+                    useDarkTheme = useDarkTheme,
+                    onBack = { closeAppInfoPage() }
+                )
+            }
+
+            // 左边缘拖拽返回：作为非系统预测性返回时的补充，返回时只移动、不变淡。
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(40.dp)
+                    .align(Alignment.CenterStart)
+                    .zIndex(6f)
+                    .pointerInput(showAppInfoPage, appInfoPageWidthPx) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                appInfoBackGestureActive = showAppInfoPage && offset.x <= appInfoBackEdgePx
+                            },
+                            onDragCancel = {
+                                appInfoBackGestureActive = false
+                                appInfoBackDragOffsetPx = 0f
+                            },
+                            onDragEnd = {
+                                if (appInfoBackGestureActive && appInfoBackDragOffsetPx > appInfoPageWidthPx * 0.28f) {
+                                    closeAppInfoPage()
+                                } else {
+                                    appInfoBackDragOffsetPx = 0f
+                                }
+                                appInfoBackGestureActive = false
+                            },
+                            onDrag = { change, dragAmount ->
+                                if (appInfoBackGestureActive) {
+                                    val nextOffset = (appInfoBackDragOffsetPx + dragAmount.x)
+                                        .coerceIn(0f, appInfoPageWidthPx)
+                                    if (nextOffset != appInfoBackDragOffsetPx) {
+                                        appInfoBackDragOffsetPx = nextOffset
+                                    }
+                                }
+                            }
+                        )
+                    }
+            )
         }
 
         // 更新对话框
@@ -506,7 +654,7 @@ fun SettingRouteScreen(
                         override fun onProgress(progress: Int) {
                             updateDialogState = updateDialogState.copy(downloadProgress = progress)
                         }
-                        
+
                         override fun onSuccess(file: java.io.File) {
                             updateDialogState = updateDialogState.copy(isDownloading = false)
                             // 验证 MD5
@@ -520,7 +668,7 @@ fun SettingRouteScreen(
                                 Toast.makeText(context, "文件校验失败，请重新下载", Toast.LENGTH_SHORT).show()
                             }
                         }
-                        
+
                         override fun onError(message: String) {
                             updateDialogState = updateDialogState.copy(
                                 isDownloading = false,
@@ -983,7 +1131,8 @@ fun SettingRouteScreen(
 
 @Composable
 fun AppInfoRouteScreen(
-    useDarkTheme: Boolean
+    useDarkTheme: Boolean,
+    onBack: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -994,11 +1143,18 @@ fun AppInfoRouteScreen(
     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
     val isLightTheme = !useDarkTheme
-    val backgroundColor =
-        if (isLightTheme) Color(0xFFF2F2F6)
-        else Color(0xFF121212)
+    val backgroundColor = if (isLightTheme) Color.White else Color(0xFF0A0A0C)
     val contentColor = if (isLightTheme) Color.Black else Color.White
-    val containerColor = if (isLightTheme) Color.White else Color(0xFF1E1E1E)
+    val containerColor = if (isLightTheme) {
+        Color(0xFFF2F3F7).copy(alpha = 0.78f)
+    } else {
+        Color(0xFF2A2A2E).copy(alpha = 0.62f)
+    }
+    val groupBackgroundColor = if (isLightTheme) {
+        Color(0xFFF2F3F7)
+    } else {
+        Color(0xFF1C1C20).copy(alpha = 0.94f)
+    }
 
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
@@ -1031,8 +1187,33 @@ fun AppInfoRouteScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (onBack != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onBack() }
+                        .padding(horizontal = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "‹ 返回设置",
+                        style = TextStyle(
+                            color = contentColor,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            } else {
+                Spacer(modifier = Modifier.height(48.dp))
+            }
+
             // App Icon
-            Spacer(modifier = Modifier.height(48.dp))
             val appIconBitmap = remember(context) {
                 val drawable = context.packageManager.getApplicationIcon(context.applicationInfo)
                 val bitmap = android.graphics.Bitmap.createBitmap(
@@ -1101,7 +1282,7 @@ fun AppInfoRouteScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(containerColor)
+                    .background(groupBackgroundColor)
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -1114,7 +1295,7 @@ fun AppInfoRouteScreen(
                     style = TextStyle(color = contentColor.copy(0.8f), fontSize = 15.sp, lineHeight = 22.sp)
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(24.dp))
 
             // Links Block
@@ -1123,7 +1304,7 @@ fun AppInfoRouteScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp)
                     .clip(RoundedCornerShape(28.dp))
-                    .background(containerColor)
+                    .background(groupBackgroundColor)
                     .padding(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
@@ -1137,9 +1318,9 @@ fun AppInfoRouteScreen(
                     Text(text = "开源地址", style = TextStyle(color = contentColor, fontSize = 16.sp))
                     LinkText("GitHub", "https://github.com/SUlTlUS/tianyinwallpaper.git")
                 }
-                
+
                 Box(modifier = Modifier.fillMaxWidth().height(0.5.dp).padding(horizontal = 24.dp).background(contentColor.copy(0.1f)))
-                
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1151,7 +1332,7 @@ fun AppInfoRouteScreen(
                     LinkText("Releases", "https://github.com/SUlTlUS/tianyinwallpaper/releases")
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(48.dp))
         }
     }
@@ -1170,9 +1351,9 @@ private fun SettingCheckItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { 
+            .clickable {
                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                onCheckedChange(!checked) 
+                onCheckedChange(!checked)
             }
             .padding(horizontal = 24.dp, vertical = 20.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1287,18 +1468,18 @@ private fun getVersionName(context: Context): String {
 
 private fun getAboutText(): String {
     return (
-        "天音壁纸是一个用来设置壁纸的软件>_<\n" +
-                "分为常规壁纸页和光栅壁纸页\n" +
-                "常规壁纸页可以设置视频图片壁纸\n" +
-            "点击“+”，可以增加当前壁纸组的壁纸\n" +
-            "点击“√”，会把当前壁纸组设置为手机壁纸\n" +
-            "点击“…”，显示更多选项，可以保存当前壁纸组\n" +
-            "设置页可以设置壁纸切换方式等\n" +
-            "点击壁纸缩略图，可以选择删除壁纸或者设置壁纸显示的条件，长按可以调整顺序\n" +
-            "当满足条件时，会优先显示满足条件的壁纸，借此，可以设置早安壁纸，下班壁纸\n" +
-            "HyperOS3不支持壁纸随屏幕滚动\n" + "\n" +
-            "原作者:十二今天也很可爱 @prpr12"
-    )
+            "天音壁纸是一个用来设置壁纸的软件>_<\n" +
+                    "分为常规壁纸页和光栅壁纸页\n" +
+                    "常规壁纸页可以设置视频图片壁纸\n" +
+                    "点击“+”，可以增加当前壁纸组的壁纸\n" +
+                    "点击“√”，会把当前壁纸组设置为手机壁纸\n" +
+                    "点击“…”，显示更多选项，可以保存当前壁纸组\n" +
+                    "设置页可以设置壁纸切换方式等\n" +
+                    "点击壁纸缩略图，可以选择删除壁纸或者设置壁纸显示的条件，长按可以调整顺序\n" +
+                    "当满足条件时，会优先显示满足条件的壁纸，借此，可以设置早安壁纸，下班壁纸\n" +
+                    "HyperOS3不支持壁纸随屏幕滚动\n" + "\n" +
+                    "原作者:十二今天也很可爱 @prpr12"
+            )
 }
 
 private const val DEFAULT_AUTO_SWITCH_INTERVAL_SECONDS = 3600L

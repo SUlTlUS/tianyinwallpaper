@@ -880,7 +880,7 @@ fun RasterRouteScreen(
                                 BasicText("选择光栅类型", style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
                                 Spacer(Modifier.height(4.dp))
                                 BasicText(
-                                    "图集光栅：每个组合支持多张图片\n动态光栅：每个组合只能选择1个视频",
+                                    "图集光栅：选择多张图片\n动态光栅：选择单个视频",
                                     style = TextStyle(contentColor.copy(alpha = 0.7f), 14.sp)
                                 )
                                 Spacer(Modifier.height(8.dp))

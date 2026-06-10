@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.widget.Toast
 import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
+import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -40,6 +42,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
@@ -60,6 +63,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
@@ -266,7 +270,7 @@ fun AboutRouteScreen(
                     .padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(
-                    top = statusBarTopPaddingDp + 76.dp,
+                    top = statusBarTopPaddingDp + 70.dp,
                     bottom = if (selectionMode) 90.dp else 110.dp
                 )
             ) {
@@ -410,7 +414,7 @@ fun AboutRouteScreen(
                 modifier = Modifier
                     .zIndex(3f)
                     .fillMaxWidth()
-                    .padding(top = statusBarTopPaddingDp + 10.dp, start = 12.dp, end = 12.dp),
+                    .padding(top = statusBarTopPaddingDp + 8.dp, start = 12.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -418,70 +422,82 @@ fun AboutRouteScreen(
                 val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
                 val textColor = if (isDark) Color.White else Color.Black
 
-                AboutTopActionButton(
-                    text = "返回",
-                    onClick = onBack,
-                    enableLiquidGlass = enableLiquidGlass,
-                    liquidBackdrop = liquidBackdrop,
-                    surfaceColor = adaptiveSurfaceColor,
-                    isDark = isDark,
-                    textColor = textColor
-                )
+                if (enableLiquidGlass && liquidBackdrop != null) {
+                    LiquidButton(
+                        onClick = onBack,
+                        backdrop = liquidBackdrop,
+                        surfaceColor = adaptiveSurfaceColor,
+                        modifier = Modifier.size(44.dp),
+                        buttonHeight = 44.dp,
+                        contentPadding = PaddingValues(0.dp),
+                        iconRes = R.drawable.back,
+                        iconContentDescription = "返回",
+                        iconSize = 16.dp,
+                        iconTint = textColor,
+                        iconOffsetX = (-1).dp
+                    )
+                } else {
+                    Surface(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clickable { onBack() },
+                        shape = CircleShape,
+                        color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                        border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.back),
+                                contentDescription = "返回",
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .offset(x = (-1).dp),
+                                tint = textColor
+                            )
+                        }
+                    }
+                }
 
-                AboutTopActionButton(
-                    text = "多选",
-                    onClick = { enterSelectionMode() },
-                    enableLiquidGlass = enableLiquidGlass,
-                    liquidBackdrop = liquidBackdrop,
-                    surfaceColor = adaptiveSurfaceColor,
-                    isDark = isDark,
-                    textColor = textColor
-                )
+                if (enableLiquidGlass && liquidBackdrop != null) {
+                    LiquidButton(
+                        onClick = { enterSelectionMode() },
+                        backdrop = liquidBackdrop,
+                        surfaceColor = adaptiveSurfaceColor,
+                        modifier = Modifier.height(44.dp),
+                        buttonHeight = 44.dp,
+                        contentPadding = PaddingValues(horizontal = 16.dp)
+                    ) {
+                        BasicText(
+                            text = "多选",
+                            style = TextStyle(textColor, 16.sp)
+                        )
+                    }
+                } else {
+                    Surface(
+                        modifier = Modifier
+                            .height(44.dp)
+                            .clickable { enterSelectionMode() },
+                        shape = Capsule(),
+                        color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                        border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        ) {
+                            Text(text = "多选", color = textColor, fontSize = 16.sp)
+                        }
+                    }
+                }
             }
         }
     }
 
     LaunchedEffect(selectionMode) {
         onSelectionModeChange(selectionMode)
-    }
-}
-
-@Composable
-private fun AboutTopActionButton(
-    text: String,
-    onClick: () -> Unit,
-    enableLiquidGlass: Boolean,
-    liquidBackdrop: LayerBackdrop?,
-    surfaceColor: Color,
-    isDark: Boolean,
-    textColor: Color
-) {
-    if (enableLiquidGlass && liquidBackdrop != null) {
-        LiquidButton(
-            onClick = onClick,
-            backdrop = liquidBackdrop,
-            surfaceColor = surfaceColor,
-            modifier = Modifier.height(48.dp)
-        ) {
-            BasicText(
-                text = text,
-                modifier = Modifier.padding(horizontal = 16.dp),
-                style = TextStyle(textColor, 15.sp)
-            )
-        }
-    } else {
-        Surface(
-            modifier = Modifier
-                .height(48.dp)
-                .clickable { onClick() },
-            shape = Capsule(),
-            color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-            border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
-        ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                Text(text = text, color = textColor, fontSize = 15.sp)
-            }
-        }
     }
 }
 

@@ -8,6 +8,24 @@ Current goal: continue the depth wallpaper Gaussian native rewrite while keeping
 
 ## Current Status - 2026-06-07
 
+### SOG Directory Storage (2026-06-07)
+
+SOG files are now copied to the app's internal files directory on import, with each SOG and its thumbnail stored together under `filesDir/sog/<modelId>/`:
+
+- `DepthPrefs.sogDir(context, modelId)` → `filesDir/sog/<modelId>/`
+- `DepthPrefs.sogSceneFile(context, modelId)` → `filesDir/sog/<modelId>/scene.sog`
+- `DepthPrefs.sogThumbnailFile(context, modelId)` → `filesDir/sog/<modelId>/thumbnail.jpg`
+- `DepthPrefs.copySogToAppDir(context, uri, modelId)` copies a content URI into the SOG dir, returns a `file://` URI
+- `DepthPrefs.deleteSogDir(context, modelId)` removes the entire per-model directory
+
+`addWallpaper()` in `DepthRouteScreen.kt` now calls `copySogToAppDir()` for both new wallpapers and replacement (preview) wallpapers. The stored `gaussianUri` is the local file URI, not the original content URI.
+
+Thumbnail cache now uses `sogThumbnailFile()` — thumbnails live alongside their SOG in the same directory. `removeWallpaper()` and `removeSelectedWallpapers()` call `deleteSogDir()` to clean up the directory.
+
+Unused imports and constants removed: `MessageDigest`, `GAUSSIAN_THUMBNAIL_CACHE_VERSION`.
+
+### Vulkan / GLES Status
+
 Vulkan refactor status: **not complete**.
 
 What is done:

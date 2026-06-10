@@ -14,12 +14,13 @@ import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -44,6 +46,11 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -53,6 +60,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -92,8 +102,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.kyant.shapes.Capsule
@@ -116,26 +124,38 @@ import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSamp
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.service.DepthWallpaperService
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedContent
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimationMode
 import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
+import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import com.zeaze.tianyinwallpaper.utils.GradioMcpSogGenerator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.collect
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyGridState
 import java.io.File
-import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
 
 private enum class DepthAddKind {
     Gaussian,
     OnlineGaussian
+}
+
+private sealed class DepthDialogState {
+    object Add : DepthDialogState()
+    object Permission : DepthDialogState()
 }
 
 private const val DEPTH_BLUR_DISABLED = 0f
@@ -181,9 +201,147 @@ fun DepthRouteScreen(
     var pendingReplaceId by remember { mutableStateOf<String?>(null) }
     var previewModel by remember { mutableStateOf<DepthWallpaperModel?>(null) }
     var showPermissionDialog by remember { mutableStateOf(false) }
-    var showOnlineGenerateDialog by remember { mutableStateOf(false) }
-    var onlineImageUrl by remember { mutableStateOf("") }
-    var onlineGenerationBusy by remember { mutableStateOf(false) }
+    var showOnlineGeneratePage by remember { mutableStateOf(false) }
+    var renderOnlineGeneratePage by remember { mutableStateOf(false) }
+    var onlineHistory by remember { mutableStateOf<List<GradioMcpSogGenerator.SogGenerationRecord>>(emptyList()) }
+    var showTokenInput by remember { mutableStateOf(false) }
+    var apiTokenText by remember { mutableStateOf(
+        GradioMcpSogGenerator.getModelScopeToken(context.applicationContext) ?: ""
+    ) }
+    // 正在恢复/轮询/下载中的记录 ID 集合
+    val pollingRecordIds = remember { mutableStateListOf<String>() }
+
+    // 在线生成二级页：打开用页面推入动画；返回时支持左边缘手势跟手向右退出，贴近预测性返回手势。
+    val onlinePageWidthPx = remember(context) {
+        context.resources.displayMetrics.widthPixels.toFloat().coerceAtLeast(1f)
+    }
+    val onlinePageOffset = remember { Animatable(onlinePageWidthPx) }
+    var onlineBackDragOffsetPx by remember { mutableStateOf(0f) }
+    var onlineBackGestureActive by remember { mutableStateOf(false) }
+    val onlineBackEdgePx = with(density) { 40.dp.toPx() }
+
+    fun closeOnlineGeneratePage() {
+        if (!renderOnlineGeneratePage && !showOnlineGeneratePage) return
+        coroutineScope.launch {
+            val startOffset = (onlinePageOffset.value + onlineBackDragOffsetPx).coerceIn(0f, onlinePageWidthPx)
+            onlineBackDragOffsetPx = 0f
+            onlineBackGestureActive = false
+            onlinePageOffset.snapTo(startOffset)
+            showOnlineGeneratePage = false
+        }
+    }
+
+    LaunchedEffect(showOnlineGeneratePage, onlinePageWidthPx) {
+        if (showOnlineGeneratePage) {
+            renderOnlineGeneratePage = true
+            onlineBackDragOffsetPx = 0f
+            onlineBackGestureActive = false
+            onlinePageOffset.snapTo(onlinePageWidthPx)
+            onlinePageOffset.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        } else if (renderOnlineGeneratePage) {
+            onlineBackDragOffsetPx = 0f
+            onlineBackGestureActive = false
+            onlinePageOffset.animateTo(
+                targetValue = onlinePageWidthPx,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+            renderOnlineGeneratePage = false
+            onlinePageOffset.snapTo(onlinePageWidthPx)
+        }
+    }
+
+    val currentDialogState = when {
+        showAddDialog -> DepthDialogState.Add
+        showPermissionDialog -> DepthDialogState.Permission
+        else -> null
+    }
+
+    fun dismissCurrentDialog() {
+        showAddDialog = false
+        showPermissionDialog = false
+    }
+
+    fun startRecordResume(recordId: String) {
+        if (recordId in pollingRecordIds) return
+        pollingRecordIds.add(recordId)
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                GradioMcpSogGenerator.pollAndUpdateRecord(context.applicationContext, recordId)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    pollingRecordIds.remove(recordId)
+                    onlineHistory = GradioMcpSogGenerator.getHistory(context.applicationContext)
+                }
+            }
+        }
+    }
+
+    // 打开对话框时刷新历史记录，并恢复未完成/未下载任务
+    LaunchedEffect(showOnlineGeneratePage) {
+        if (showOnlineGeneratePage) {
+            onlineHistory = withContext(Dispatchers.IO) {
+                GradioMcpSogGenerator.getHistory(context.applicationContext)
+            }
+            // 查找未完成/已生成但未下载的记录，启动恢复。
+            // 这里不能只判断 eventId；关闭 App 后主要靠 taskId/sogServerUrl 恢复。
+            val resumableRecords = onlineHistory.filter { record ->
+                !record.sogDownloaded &&
+                        (record.status == "generating" ||
+                                record.status == "pending" ||
+                                record.status == "downloading" ||
+                                (record.status == "completed" && !record.sogDownloaded)) &&
+                        (!record.taskId.isNullOrBlank() ||
+                                !record.eventId.isNullOrBlank() ||
+                                !record.sogServerUrl.isNullOrBlank())
+            }
+            for (record in resumableRecords) {
+                startRecordResume(record.id)
+            }
+        }
+    }
+
+    val onlineImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            // 立即创建 pending 记录，让用户看到即时反馈
+            val fileName = queryDisplayName(context, uri)
+            val recordId = GradioMcpSogGenerator.createPendingRecord(context.applicationContext, uri, fileName)
+            // 立即刷新 UI
+            onlineHistory = GradioMcpSogGenerator.getHistory(context.applicationContext)
+
+            // 后台：唤醒 + 上传 + 提交（pending → generating）
+            coroutineScope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        GradioMcpSogGenerator.submitTaskForRecord(context.applicationContext, recordId, uri)
+                    }
+                    // 提交成功，刷新 UI（状态变为 generating）
+                    onlineHistory = withContext(Dispatchers.IO) {
+                        GradioMcpSogGenerator.getHistory(context.applicationContext)
+                    }
+                    // 启动恢复流程（generating/downloading → completed/failed）
+                    startRecordResume(recordId)
+                }.onFailure {
+                    // 提交失败，更新记录为 failed
+                    withContext(Dispatchers.IO) {
+                        GradioMcpSogGenerator.updateRecord(context.applicationContext, recordId) { rec ->
+                            rec.copy(status = "failed", errorMessage = it.message?.take(100))
+                        }
+                        onlineHistory = GradioMcpSogGenerator.getHistory(context.applicationContext)
+                    }
+                    Toast.makeText(context, it.message ?: "提交任务失败", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 
     fun DepthWallpaperModel.normalizedDepthParams(): DepthWallpaperModel {
         return copy(
@@ -264,19 +422,21 @@ fun DepthRouteScreen(
         }
     }
 
-    fun addWallpaper(uri: Uri, kind: DepthAddKind) {
+    fun addWallpaper(uri: Uri, kind: DepthAddKind, recordThumbnailUri: String? = null) {
         takeReadPermission(uri)
         val displayName = queryDisplayName(context, uri).orEmpty()
         val replaceId = pendingReplaceId
         if (replaceId != null) {
             val index = wallpapers.indexOfFirst { it.id == replaceId }
             if (index >= 0) {
+                val localUri = DepthPrefs.copySogToAppDir(context, uri, replaceId)
                 val old = previewModel?.takeIf { it.id == replaceId } ?: wallpapers[index]
                 val next = old.copy(
-                    gaussianUri = uri.toString(),
+                    gaussianUri = localUri?.toString() ?: uri.toString(),
                     displayName = displayName.ifBlank { uri.lastPathSegment.orEmpty() },
                     blurStrength = DEPTH_BLUR_DISABLED
                 ).normalizedDepthParams()
+                copyOnlineRecordThumbnailToGaussianCache(context, recordThumbnailUri, next.id)
                 selectedId = next.id
                 previewModel = next
                 pendingReplaceId = null
@@ -284,9 +444,11 @@ fun DepthRouteScreen(
             }
             pendingReplaceId = null
         }
+        val modelId = UUID.randomUUID().toString()
+        val localUri = DepthPrefs.copySogToAppDir(context, uri, modelId)
         val model = DepthWallpaperModel(
-            id = UUID.randomUUID().toString(),
-            gaussianUri = uri.toString(),
+            id = modelId,
+            gaussianUri = localUri?.toString() ?: uri.toString(),
             displayName = displayName.ifBlank { uri.lastPathSegment.orEmpty() },
             createdAt = System.currentTimeMillis(),
             sensorSensitivity = 9f,
@@ -299,6 +461,7 @@ fun DepthRouteScreen(
             gaussianMaxSplats = GAUSSIAN_FAST_SPLAT_BUDGET,
             blurStrength = DEPTH_BLUR_DISABLED
         ).normalizedDepthParams()
+        copyOnlineRecordThumbnailToGaussianCache(context, recordThumbnailUri, model.id)
         wallpapers.add(0, model)
         selectedId = model.id
         previewModel = model
@@ -375,50 +538,10 @@ fun DepthRouteScreen(
         pendingAddKind = kind
         showAddDialog = false
         if (kind == DepthAddKind.OnlineGaussian) {
-            showOnlineGenerateDialog = true
+            showOnlineGeneratePage = true
             return
         }
         filePicker.launch(arrayOf("*/*"))
-    }
-
-    fun generateOnlineGaussian() {
-        val imageUrl = onlineImageUrl.trim()
-        if (imageUrl.isBlank() || onlineGenerationBusy) return
-        onlineGenerationBusy = true
-        coroutineScope.launch {
-            Toast.makeText(context, "Generating SOG", Toast.LENGTH_SHORT).show()
-            val uri = withContext(Dispatchers.IO) {
-                runCatching {
-                    GradioMcpSogGenerator.generateFromImageUrl(
-                        context = context.applicationContext,
-                        imageUrl = imageUrl,
-                        focalLength35mm = 0f
-                    )
-                }
-            }
-            uri.onSuccess { generatedUri ->
-                val result = withContext(Dispatchers.IO) {
-                    GaussianSceneLoader.loadSceneDetailed(
-                        context = context.applicationContext,
-                        uriString = generatedUri.toString()
-                    )
-                }
-                if (result.scene != null) {
-                    showOnlineGenerateDialog = false
-                    onlineImageUrl = ""
-                    addWallpaper(generatedUri, DepthAddKind.Gaussian)
-                } else {
-                    Toast.makeText(
-                        context,
-                        result.error?.takeIf { it.isNotBlank() } ?: "Generated SOG load failed",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }.onFailure {
-                Toast.makeText(context, it.message ?: "Online SOG generation failed", Toast.LENGTH_LONG).show()
-            }
-            onlineGenerationBusy = false
-        }
     }
 
     fun replacePreview(kind: DepthAddKind) {
@@ -431,6 +554,7 @@ fun DepthRouteScreen(
     fun removeWallpaper(model: DepthWallpaperModel) {
         wallpapers.removeAll { it.id == model.id }
         removeGaussianThumbnailCache(context, model)
+        DepthPrefs.deleteSogDir(context, model.id)
         selectedIds.remove(model.id)
         if (activeId == model.id) {
             persistActiveWallpaperId(null)
@@ -450,7 +574,10 @@ fun DepthRouteScreen(
             return
         }
         val ids = selectedIds.toSet()
-        wallpapers.filter { it.id in ids }.forEach { removeGaussianThumbnailCache(context, it) }
+        wallpapers.filter { it.id in ids }.forEach {
+            removeGaussianThumbnailCache(context, it)
+            DepthPrefs.deleteSogDir(context, it.id)
+        }
         wallpapers.removeAll { it.id in ids }
         if (activeId != null && ids.contains(activeId)) {
             persistActiveWallpaperId(null)
@@ -506,8 +633,8 @@ fun DepthRouteScreen(
         loadWallpapers()
     }
 
-    LaunchedEffect(previewModel, selectionMode) {
-        onBottomBarVisibleChange(previewModel == null && !selectionMode)
+    LaunchedEffect(previewModel, selectionMode, showOnlineGeneratePage, renderOnlineGeneratePage) {
+        onBottomBarVisibleChange(previewModel == null && !selectionMode && !showOnlineGeneratePage && !renderOnlineGeneratePage)
         publishSelectionState()
     }
 
@@ -565,6 +692,34 @@ fun DepthRouteScreen(
         persistPreviewDraftAndClose()
     }
 
+    PredictiveBackHandler(enabled = showOnlineGeneratePage && previewModel == null && currentDialogState == null) { progress ->
+        try {
+            progress.collect { backEvent ->
+                onlineBackGestureActive = true
+                onlineBackDragOffsetPx = (onlinePageWidthPx * backEvent.progress).coerceIn(0f, onlinePageWidthPx)
+            }
+            val startOffset = (onlinePageOffset.value + onlineBackDragOffsetPx).coerceIn(0f, onlinePageWidthPx)
+            onlineBackDragOffsetPx = 0f
+            onlineBackGestureActive = false
+            onlinePageOffset.snapTo(startOffset)
+            showOnlineGeneratePage = false
+        } catch (_: CancellationException) {
+            onlineBackGestureActive = false
+            onlineBackDragOffsetPx = 0f
+            onlinePageOffset.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+    BackHandler(enabled = currentDialogState != null && previewModel == null) {
+        dismissCurrentDialog()
+    }
+
     val gridState = rememberLazyGridState()
     val reorderableState = rememberReorderableLazyGridState(
         lazyGridState = gridState,
@@ -576,129 +731,269 @@ fun DepthRouteScreen(
         }
     )
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colors.background).let { m ->
-        if (enableLiquidGlass && liquidBackdrop != null) m.layerBackdrop(liquidBackdrop) else m
-    }) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            state = gridState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 12.dp,
-                end = 12.dp,
-                top = statusBarTopPaddingDp + 76.dp,
-                bottom = if (selectionMode) 90.dp else 110.dp
-            ),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+    fun downloadOnlineRecord(record: GradioMcpSogGenerator.SogGenerationRecord) {
+        if (record.id !in pollingRecordIds) pollingRecordIds.add(record.id)
+        coroutineScope.launch {
+            runCatching {
+                val updated = withContext(Dispatchers.IO) {
+                    GradioMcpSogGenerator.downloadRecordSog(context.applicationContext, record.id)
+                }
+                onlineHistory = withContext(Dispatchers.IO) {
+                    GradioMcpSogGenerator.getHistory(context.applicationContext)
+                }
+                if (updated.sogDownloaded && updated.sogLocalPath != null) {
+                    addWallpaper(
+                        Uri.fromFile(File(updated.sogLocalPath)),
+                        DepthAddKind.Gaussian,
+                        recordThumbnailUri = updated.inputImageLocalUri
+                    )
+                }
+            }.onFailure {
+                Toast.makeText(context, it.message ?: "下载失败", Toast.LENGTH_LONG).show()
+            }
+            pollingRecordIds.remove(record.id)
+            onlineHistory = withContext(Dispatchers.IO) {
+                GradioMcpSogGenerator.getHistory(context.applicationContext)
+            }
+        }
+    }
+
+    fun addOnlineRecordToWallpaper(record: GradioMcpSogGenerator.SogGenerationRecord) {
+        if (record.sogLocalPath != null) {
+            addWallpaper(
+                Uri.fromFile(File(record.sogLocalPath)),
+                DepthAddKind.Gaussian,
+                recordThumbnailUri = record.inputImageLocalUri
+            )
+        }
+    }
+
+    fun retryOnlineRecord(record: GradioMcpSogGenerator.SogGenerationRecord) {
+        if (record.id !in pollingRecordIds) pollingRecordIds.add(record.id)
+        coroutineScope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    GradioMcpSogGenerator.retryTask(context.applicationContext, record.id)
+                    GradioMcpSogGenerator.pollAndUpdateRecord(context.applicationContext, record.id)
+                }
+                onlineHistory = withContext(Dispatchers.IO) {
+                    GradioMcpSogGenerator.getHistory(context.applicationContext)
+                }
+            }.onFailure {
+                Toast.makeText(context, it.message ?: "重试失败", Toast.LENGTH_LONG).show()
+            }
+            pollingRecordIds.remove(record.id)
+            onlineHistory = withContext(Dispatchers.IO) {
+                GradioMcpSogGenerator.getHistory(context.applicationContext)
+            }
+        }
+    }
+
+    fun deleteOnlineRecord(record: GradioMcpSogGenerator.SogGenerationRecord) {
+        coroutineScope.launch {
+            withContext(Dispatchers.IO) {
+                GradioMcpSogGenerator.deleteRecord(context.applicationContext, record.id)
+            }
+            onlineHistory = withContext(Dispatchers.IO) {
+                GradioMcpSogGenerator.getHistory(context.applicationContext)
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        // 捕获层只负责给 drawBackdrop 提供“后景纹理”。
+        // 注意：layerBackdrop 必须挂在一个纯捕获容器上，背景也要作为子节点绘制；
+        // 不要写成 background(...).layerBackdrop(...)，否则在部分设备上会变成先铺一层半透明/白底再采样，
+        // 模糊会发灰、分块，甚至和弹窗采样关系错乱。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .let { m ->
+                    if (enableLiquidGlass && liquidBackdrop != null) {
+                        m.layerBackdrop(liquidBackdrop)
+                    } else {
+                        m
+                    }
+                }
         ) {
-            itemsIndexed(wallpapers, key = { _, model -> model.id }) { _, model ->
-                val selected = selectedIds.contains(model.id)
-                ReorderableItem(reorderableState, key = model.id) { isDragging ->
-                    DepthWallpaperCard(
-                        modifier = Modifier
-                            .longPressDraggableHandle()
-                            .pointerInput(model.id, selectionMode) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                    val stayedStillForTimeout = withTimeoutOrNull(HOLD_SELECT_TIMEOUT_MS) {
-                                        while (true) {
-                                            val event = awaitPointerEvent()
-                                            val change = event.changes.firstOrNull { it.id == down.id }
-                                                ?: return@withTimeoutOrNull false
-                                            if (!change.pressed) return@withTimeoutOrNull false
-                                            if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
-                                                return@withTimeoutOrNull false
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colors.background))
+
+            Box(Modifier.fillMaxSize()) {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    state = gridState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 12.dp,
+                        end = 12.dp,
+                        top = statusBarTopPaddingDp + 76.dp,
+                        bottom = if (selectionMode) 90.dp else 110.dp
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    itemsIndexed(wallpapers, key = { _, model -> model.id }) { _, model ->
+                        val selected = selectedIds.contains(model.id)
+                        ReorderableItem(reorderableState, key = model.id) { isDragging ->
+                            DepthWallpaperCard(
+                                modifier = Modifier
+                                    .longPressDraggableHandle()
+                                    .pointerInput(model.id, selectionMode) {
+                                        awaitEachGesture {
+                                            val down = awaitFirstDown(requireUnconsumed = false)
+                                            val stayedStillForTimeout = withTimeoutOrNull(HOLD_SELECT_TIMEOUT_MS) {
+                                                while (true) {
+                                                    val event = awaitPointerEvent()
+                                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                                        ?: return@withTimeoutOrNull false
+                                                    if (!change.pressed) return@withTimeoutOrNull false
+                                                    if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                                        return@withTimeoutOrNull false
+                                                    }
+                                                }
+                                            } == null
+
+                                            if (stayedStillForTimeout && !selectionMode) {
+                                                enterSelectionMode(model.id)
                                             }
                                         }
-                                    } == null
-
-                                    if (stayedStillForTimeout && !selectionMode) {
-                                        enterSelectionMode(model.id)
+                                    },
+                                model = model,
+                                selected = selected,
+                                isDragging = isDragging,
+                                showRemoveButton = selectionMode,
+                                cardBackground = cardBackground,
+                                onClick = {
+                                    if (selectionMode) {
+                                        if (selected) selectedIds.remove(model.id) else selectedIds.add(model.id)
+                                        publishSelectionState()
+                                    } else {
+                                        selectedId = model.id
+                                        previewModel = model.normalizedDepthParams()
                                     }
-                                }
-                            },
-                        model = model,
-                        selected = selected,
-                        isDragging = isDragging,
-                        showRemoveButton = selectionMode,
-                        cardBackground = cardBackground,
-                        onClick = {
-                            if (selectionMode) {
-                                if (selected) selectedIds.remove(model.id) else selectedIds.add(model.id)
-                                publishSelectionState()
-                            } else {
-                                selectedId = model.id
-                                previewModel = model.normalizedDepthParams()
-                            }
-                        },
-                        onDelete = { removeWallpaper(model) }
+                                },
+                                onDelete = { removeWallpaper(model) }
+                            )
+                        }
+                    }
+                }
+
+                if (wallpapers.isEmpty()) {
+                    Text(
+                        text = "Tap + to add a Gaussian wallpaper",
+                        color = contentColor.copy(alpha = 0.7f),
+                        modifier = Modifier.align(Alignment.Center)
                     )
                 }
             }
         }
 
-        if (wallpapers.isEmpty()) {
-            Text(
-                text = "Tap + to add a Gaussian wallpaper",
-                color = contentColor.copy(alpha = 0.7f),
-                modifier = Modifier.align(Alignment.Center)
-            )
-        }
-
-        if (showAddDialog) {
-            DepthAddDialog(
+        if (renderOnlineGeneratePage) {
+            DepthOnlineGeneratePage(
+                history = onlineHistory,
+                pollingRecordIds = pollingRecordIds.toList(),
+                statusBarTopPaddingDp = statusBarTopPaddingDp,
                 accentColor = accentColor,
                 contentColor = contentColor,
                 containerColor = containerColor,
-                liquidBackdrop = liquidBackdrop,
-                onDismiss = { showAddDialog = false },
-                onPick = { launchAdd(it) }
+                showTokenInput = showTokenInput,
+                apiTokenText = apiTokenText,
+                onPickLocalImage = { onlineImagePicker.launch("image/*") },
+                onTokenTextChange = { apiTokenText = it },
+                onTokenSave = {
+                    GradioMcpSogGenerator.setModelScopeToken(context.applicationContext, apiTokenText.trim())
+                    GradioMcpSogGenerator.resetMcpState()
+                    showTokenInput = false
+                },
+                onToggleTokenInput = { showTokenInput = !showTokenInput },
+                onDownload = { downloadOnlineRecord(it) },
+                onAddToWallpaper = { addOnlineRecordToWallpaper(it) },
+                onRetry = { retryOnlineRecord(it) },
+                onDeleteRecord = { deleteOnlineRecord(it) },
+                onBack = { closeOnlineGeneratePage() },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(2f)
+                    .graphicsLayer {
+                        translationX = onlinePageOffset.value + onlineBackDragOffsetPx
+                        alpha = 1f
+                    }
+            )
+
+            // 只在左边缘接管手势，避免影响二级页内部 LazyColumn 的正常上下滚动。
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(40.dp)
+                    .align(Alignment.CenterStart)
+                    .zIndex(4f)
+                    .pointerInput(showOnlineGeneratePage, onlinePageWidthPx) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                onlineBackGestureActive = showOnlineGeneratePage && offset.x <= onlineBackEdgePx
+                            },
+                            onDragCancel = {
+                                onlineBackGestureActive = false
+                                onlineBackDragOffsetPx = 0f
+                            },
+                            onDragEnd = {
+                                if (onlineBackGestureActive && onlineBackDragOffsetPx > onlinePageWidthPx * 0.28f) {
+                                    closeOnlineGeneratePage()
+                                } else {
+                                    onlineBackDragOffsetPx = 0f
+                                }
+                                onlineBackGestureActive = false
+                            },
+                            onDrag = { change, dragAmount ->
+                                if (onlineBackGestureActive) {
+                                    val nextOffset = (onlineBackDragOffsetPx + dragAmount.x).coerceIn(0f, onlinePageWidthPx)
+                                    if (nextOffset != onlineBackDragOffsetPx) {
+                                        change.consume()
+                                        onlineBackDragOffsetPx = nextOffset
+                                    }
+                                }
+                            }
+                        )
+                    }
             )
         }
 
-        if (showOnlineGenerateDialog) {
-            DepthOnlineGenerateDialog(
-                imageUrl = onlineImageUrl,
-                busy = onlineGenerationBusy,
-                accentColor = accentColor,
-                contentColor = contentColor,
-                containerColor = containerColor,
-                onImageUrlChange = { onlineImageUrl = it },
-                onGenerate = { generateOnlineGaussian() },
-                onDismiss = {
-                    if (!onlineGenerationBusy) showOnlineGenerateDialog = false
-                }
-            )
-        }
-
-        if (showPermissionDialog) {
-            Dialog(onDismissRequest = { showPermissionDialog = false }) {
-                Column(
+        LiquidWindowAnimatedContent(
+            targetState = currentDialogState,
+            contentAlignment = Alignment.Center,
+            label = "DepthDialogOverlay",
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(3f)
+        ) { state ->
+            if (state != null) {
+                Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(MaterialTheme.colors.surface)
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures { dismissCurrentDialog() } },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Wallpaper permission was not granted", color = contentColor, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Use the system wallpaper screen to apply the depth wallpaper.",
-                        color = contentColor.copy(alpha = 0.7f),
-                        fontSize = 14.sp
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .clip(Capsule())
-                            .background(accentColor)
-                            .clickable { showPermissionDialog = false },
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("OK", color = Color.White)
+                    when (state) {
+                        DepthDialogState.Add -> {
+                            DepthAddDialog(
+                                accentColor = accentColor,
+                                contentColor = contentColor,
+                                containerColor = containerColor,
+                                liquidBackdrop = liquidBackdrop,
+                                onDismiss = { showAddDialog = false },
+                                onPick = { launchAdd(it) }
+                            )
+                        }
+
+                        DepthDialogState.Permission -> {
+                            DepthPermissionDialog(
+                                accentColor = accentColor,
+                                contentColor = contentColor,
+                                containerColor = containerColor,
+                                liquidBackdrop = liquidBackdrop,
+                                onDismiss = { showPermissionDialog = false }
+                            )
+                        }
                     }
                 }
             }
@@ -1071,112 +1366,112 @@ private fun DepthParamPanel(
                 .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-        DepthParamSlider(
-            label = "灵敏度",
-            value = model.sensorSensitivity,
-            valueText = String.format("%.1f", model.sensorSensitivity),
-            range = 1f..9f,
-            onValueChange = { onModelChange(model.copy(sensorSensitivity = it)) },
-            backdrop = backdrop,
-            isLightTheme = isLightTheme,
-            contentColor = contentColor,
-            visibilityThreshold = 0.1f,
-            onInteractionChange = { isSliderInteracting = it }
-        )
-        DepthParamSlider(
-            label = "视差强度",
-            value = model.parallaxStrength,
-            valueText = String.format("%.3f", model.parallaxStrength),
-            range = 0.001f..0.075f,
-            onValueChange = { onModelChange(model.copy(parallaxStrength = it)) },
-            backdrop = backdrop,
-            isLightTheme = isLightTheme,
-            contentColor = contentColor,
-            visibilityThreshold = 0.001f,
-            onInteractionChange = { isSliderInteracting = it }
-        )
-        if (model.isGaussian()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                DepthPreviewModePill(
-                    text = "Native",
-                    selected = !model.useWebGaussianRenderer(),
-                    onClick = { onModelChange(model.copy(gaussianRenderMode = "native")) },
-                    modifier = Modifier.weight(1f)
+            DepthParamSlider(
+                label = "灵敏度",
+                value = model.sensorSensitivity,
+                valueText = String.format("%.1f", model.sensorSensitivity),
+                range = 1f..9f,
+                onValueChange = { onModelChange(model.copy(sensorSensitivity = it)) },
+                backdrop = backdrop,
+                isLightTheme = isLightTheme,
+                contentColor = contentColor,
+                visibilityThreshold = 0.1f,
+                onInteractionChange = { isSliderInteracting = it }
+            )
+            DepthParamSlider(
+                label = "视差强度",
+                value = model.parallaxStrength,
+                valueText = String.format("%.3f", model.parallaxStrength),
+                range = 0.001f..0.075f,
+                onValueChange = { onModelChange(model.copy(parallaxStrength = it)) },
+                backdrop = backdrop,
+                isLightTheme = isLightTheme,
+                contentColor = contentColor,
+                visibilityThreshold = 0.001f,
+                onInteractionChange = { isSliderInteracting = it }
+            )
+            if (model.isGaussian()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DepthPreviewModePill(
+                        text = "Native",
+                        selected = !model.useWebGaussianRenderer(),
+                        onClick = { onModelChange(model.copy(gaussianRenderMode = "native")) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    DepthPreviewModePill(
+                        text = "WebView",
+                        selected = model.useWebGaussianRenderer(),
+                        onClick = { onModelChange(model.copy(gaussianRenderMode = "web")) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                DepthParamSlider(
+                    label = "清晰度",
+                    value = model.gaussianMaxSplats.toFloat(),
+                    valueText = formatSplatBudget(model.gaussianMaxSplats),
+                    range = GAUSSIAN_MIN_SPLAT_BUDGET.toFloat()..GAUSSIAN_FULL_SPLAT_BUDGET.toFloat(),
+                    onValueChange = {
+                        val budget = it.toInt()
+                            .roundToNearest(GAUSSIAN_SPLAT_BUDGET_STEP)
+                            .coerceIn(GAUSSIAN_MIN_SPLAT_BUDGET, GAUSSIAN_FULL_SPLAT_BUDGET)
+                        onModelChange(model.copy(gaussianMaxSplats = budget))
+                    },
+                    backdrop = backdrop,
+                    isLightTheme = isLightTheme,
+                    contentColor = contentColor,
+                    visibilityThreshold = GAUSSIAN_SPLAT_BUDGET_STEP.toFloat(),
+                    onInteractionChange = { isSliderInteracting = it }
                 )
-                DepthPreviewModePill(
-                    text = "WebView",
-                    selected = model.useWebGaussianRenderer(),
-                    onClick = { onModelChange(model.copy(gaussianRenderMode = "web")) },
-                    modifier = Modifier.weight(1f)
+                DepthParamSlider(
+                    label = "距离",
+                    value = model.cameraZoom,
+                    valueText = String.format("%.2f", model.cameraZoom),
+                    range = 0.6f..10f,
+                    onValueChange = { onModelChange(model.copy(cameraZoom = it)) },
+                    backdrop = backdrop,
+                    isLightTheme = isLightTheme,
+                    contentColor = contentColor,
+                    visibilityThreshold = 0.01f,
+                    onInteractionChange = { isSliderInteracting = it }
+                )
+                DepthParamSlider(
+                    label = "注视深度",
+                    value = model.focusDepth,
+                    valueText = String.format("%.2f", model.focusDepth),
+                    range = -1f..1f,
+                    onValueChange = { onModelChange(model.copy(focusDepth = it)) },
+                    backdrop = backdrop,
+                    isLightTheme = isLightTheme,
+                    contentColor = contentColor,
+                    visibilityThreshold = 0.01f,
+                    onInteractionChange = { isSliderInteracting = it }
+                )
+                Text(
+                    text = "重置注视点",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0x332A83FF))
+                        .clickable {
+                            onModelChange(
+                                model.copy(
+                                    centerOffsetX = 0f,
+                                    centerOffsetY = 0f,
+                                    focusDepth = 0.25f
+                                )
+                            )
+                        }
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
                 )
             }
-            DepthParamSlider(
-                label = "清晰度",
-                value = model.gaussianMaxSplats.toFloat(),
-                valueText = formatSplatBudget(model.gaussianMaxSplats),
-                range = GAUSSIAN_MIN_SPLAT_BUDGET.toFloat()..GAUSSIAN_FULL_SPLAT_BUDGET.toFloat(),
-                onValueChange = {
-                    val budget = it.toInt()
-                        .roundToNearest(GAUSSIAN_SPLAT_BUDGET_STEP)
-                        .coerceIn(GAUSSIAN_MIN_SPLAT_BUDGET, GAUSSIAN_FULL_SPLAT_BUDGET)
-                    onModelChange(model.copy(gaussianMaxSplats = budget))
-                },
-                backdrop = backdrop,
-                isLightTheme = isLightTheme,
-                contentColor = contentColor,
-                visibilityThreshold = GAUSSIAN_SPLAT_BUDGET_STEP.toFloat(),
-                onInteractionChange = { isSliderInteracting = it }
-            )
-            DepthParamSlider(
-                label = "距离",
-                value = model.cameraZoom,
-                valueText = String.format("%.2f", model.cameraZoom),
-                range = 0.6f..10f,
-                onValueChange = { onModelChange(model.copy(cameraZoom = it)) },
-                backdrop = backdrop,
-                isLightTheme = isLightTheme,
-                contentColor = contentColor,
-                visibilityThreshold = 0.01f,
-                onInteractionChange = { isSliderInteracting = it }
-            )
-            DepthParamSlider(
-                label = "注视深度",
-                value = model.focusDepth,
-                valueText = String.format("%.2f", model.focusDepth),
-                range = -1f..1f,
-                onValueChange = { onModelChange(model.copy(focusDepth = it)) },
-                backdrop = backdrop,
-                isLightTheme = isLightTheme,
-                contentColor = contentColor,
-                visibilityThreshold = 0.01f,
-                onInteractionChange = { isSliderInteracting = it }
-            )
-            Text(
-                text = "重置注视点",
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0x332A83FF))
-                    .clickable {
-                        onModelChange(
-                            model.copy(
-                                centerOffsetX = 0f,
-                                centerOffsetY = 0f,
-                                focusDepth = 0.25f
-                            )
-                        )
-                    }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
-            )
         }
     }
-}
 }
 
 
@@ -1385,7 +1680,11 @@ private fun DepthWallpaperThumbnail(
         Image(
             bitmap = bitmap!!.asImageBitmap(),
             contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(cardBackground),
+            // 壁纸卡片比例由 DepthWallpaperCard 的屏幕比例决定；显示时填满容器。
+            // 缩略图文件本身仍保留完整画面，具体裁切只发生在当前场景的显示层。
             contentScale = ContentScale.Crop
         )
     } else {
@@ -1434,104 +1733,522 @@ private fun DepthAddDialog(
     val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
     val isLight = MaterialTheme.colors.isLight
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    Column(
+        Modifier
+            .padding(50.dp)
+            .wrapContentHeight()
+            .drawBackdrop(
+                backdrop = dialogBackdrop,
+                shape = { RoundedRectangle(48f.dp) },
+                effects = {
+                    colorControls(
+                        brightness = if (isLight) 0.2f else 0f,
+                        saturation = 1.5f
+                    )
+                    blur(if (isLight) 16f.dp.toPx() else 8f.dp.toPx())
+                    lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
+                },
+                highlight = { Highlight.Plain },
+                onDrawSurface = { drawRect(containerColor) }
+            )
+            .pointerInput(Unit) { detectTapGestures { } }
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) { detectTapGestures { onDismiss() } },
-            contentAlignment = Alignment.Center
+        Column(
+            Modifier
+                .padding(16.dp, 20.dp, 16.dp, 20.dp)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                Modifier
-                    .padding(50.dp)
-                    .wrapContentHeight()
-                    .drawBackdrop(
-                        backdrop = dialogBackdrop,
-                        shape = { RoundedRectangle(48f.dp) },
-                        effects = {
-                            colorControls(
-                                brightness = if (isLight) 0.2f else 0f,
-                                saturation = 1.5f
-                            )
-                            blur(if (isLight) 16f.dp.toPx() else 8f.dp.toPx())
-                            lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
-                        },
-                        highlight = { Highlight.Plain },
-                        onDrawSurface = { drawRect(containerColor) }
+            BasicText(
+                "添加景深壁纸",
+                style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold)
+            )
+            Spacer(Modifier.height(4.dp))
+            DialogButton("Gaussian SOG", accentColor, Color.White,
+                { onPick(DepthAddKind.Gaussian) }, modifier = Modifier.fillMaxWidth())
+            DialogButton("在线生成 SOG", accentColor.copy(alpha = 0.82f), Color.White,
+                { onPick(DepthAddKind.OnlineGaussian) }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(4.dp))
+            DialogButton("取消", containerColor.copy(0.2f), contentColor,
+                { onDismiss() }, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun DepthPermissionDialog(
+    accentColor: Color,
+    contentColor: Color,
+    containerColor: Color,
+    liquidBackdrop: Backdrop?,
+    onDismiss: () -> Unit
+) {
+    val dialogBackdrop = liquidBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
+    val isLight = MaterialTheme.colors.isLight
+
+    Column(
+        Modifier
+            .padding(50.dp)
+            .wrapContentHeight()
+            .drawBackdrop(
+                backdrop = dialogBackdrop,
+                shape = { RoundedRectangle(48f.dp) },
+                effects = {
+                    colorControls(
+                        brightness = if (isLight) 0.2f else 0f,
+                        saturation = 1.5f
                     )
-                    .pointerInput(Unit) { detectTapGestures { } }
+                    blur(if (isLight) 16f.dp.toPx() else 8f.dp.toPx())
+                    lens(24f.dp.toPx(), 48f.dp.toPx(), depthEffect = true)
+                },
+                highlight = { Highlight.Plain },
+                onDrawSurface = { drawRect(containerColor) }
+            )
+            .pointerInput(Unit) { detectTapGestures { } }
+    ) {
+        Column(
+            Modifier
+                .padding(16.dp, 20.dp, 16.dp, 20.dp)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("Wallpaper permission was not granted", color = contentColor, fontWeight = FontWeight.Bold)
+            Text(
+                "Use the system wallpaper screen to apply the depth wallpaper.",
+                color = contentColor.copy(alpha = 0.7f),
+                fontSize = 14.sp
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(Capsule())
+                    .background(accentColor)
+                    .clickable { onDismiss() },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    Modifier
-                        .padding(16.dp, 20.dp, 16.dp, 20.dp)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    BasicText(
-                        "添加景深壁纸",
-                        style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    DialogButton("Gaussian SOG", accentColor, Color.White) { onPick(DepthAddKind.Gaussian) }
-                    DialogButton("在线生成 SOG", accentColor.copy(alpha = 0.82f), Color.White) {
-                        onPick(DepthAddKind.OnlineGaussian)
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    DialogButton("取消", containerColor.copy(0.2f), contentColor) { onDismiss() }
-                }
+                Text("OK", color = Color.White)
             }
         }
     }
 }
 
 @Composable
-private fun DepthOnlineGenerateDialog(
-    imageUrl: String,
-    busy: Boolean,
+private fun DepthOnlineGeneratePage(
+    modifier: Modifier = Modifier,
+    history: List<GradioMcpSogGenerator.SogGenerationRecord>,
+    pollingRecordIds: List<String>,
+    statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     accentColor: Color,
     contentColor: Color,
     containerColor: Color,
-    onImageUrlChange: (String) -> Unit,
-    onGenerate: () -> Unit,
-    onDismiss: () -> Unit
+    showTokenInput: Boolean,
+    apiTokenText: String,
+    onPickLocalImage: () -> Unit,
+    onTokenTextChange: (String) -> Unit,
+    onTokenSave: () -> Unit,
+    onToggleTokenInput: () -> Unit,
+    onDownload: (GradioMcpSogGenerator.SogGenerationRecord) -> Unit,
+    onAddToWallpaper: (GradioMcpSogGenerator.SogGenerationRecord) -> Unit,
+    onRetry: (GradioMcpSogGenerator.SogGenerationRecord) -> Unit,
+    onDeleteRecord: (GradioMcpSogGenerator.SogGenerationRecord) -> Unit,
+    onBack: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colors.surface)
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("在线生成 SOG", color = contentColor, fontWeight = FontWeight.Bold)
-            BasicTextField(
-                value = imageUrl,
-                onValueChange = onImageUrlChange,
-                enabled = !busy,
-                textStyle = TextStyle(color = contentColor, fontSize = 14.sp),
+    val isLight = MaterialTheme.colors.isLight
+    val pageBackgroundColor = if (isLight) {
+        Color.White
+    } else {
+        Color(0xFF0A0A0C)
+    }
+    val groupBackgroundColor = if (isLight) {
+        Color(0xFFF2F3F7)
+    } else {
+        Color(0xFF1C1C20).copy(alpha = 0.94f)
+    }
+    val subtleGroupBackground = if (isLight) {
+        Color(0xFFE8EBF2)
+    } else {
+        Color(0xFF25252A).copy(alpha = 0.88f)
+    }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(pageBackgroundColor)
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(
+            top = statusBarTopPaddingDp + 16.dp,
+            bottom = 28.dp
+        ),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "‹ 返回景深壁纸",
+                    color = accentColor,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clip(Capsule())
+                        .clickable(onClick = onBack)
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                )
+                Text(
+                    text = "在线生成 SOG",
+                    style = TextStyle(
+                        color = contentColor,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = "上传图片生成 Gaussian SOG；中断、失败或下载断开后可从当前阶段继续。",
+                    color = contentColor.copy(alpha = 0.55f),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+
+        item {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(containerColor.copy(alpha = 0.22f))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                decorationBox = { innerTextField ->
-                    if (imageUrl.isBlank()) {
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(groupBackgroundColor)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "生成",
+                    color = contentColor,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                )
+                DialogButton(
+                    "选择图片生成 SOG",
+                    accentColor,
+                    Color.White,
+                    onPickLocalImage,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "图片会先压缩缩略图到缓存，SOG 生成完成后可直接导入景深壁纸。",
+                    color = contentColor.copy(alpha = 0.46f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(groupBackgroundColor),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .clickable(onClick = onToggleTokenInput)
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "https://.../image.png",
-                            color = contentColor.copy(alpha = 0.42f),
-                            fontSize = 14.sp
+                            text = "ModelScope SDK Token",
+                            color = contentColor,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = if (apiTokenText.isNotBlank()) "已配置，点击可修改" else "未配置，点击粘贴 ms-… token",
+                            color = if (apiTokenText.isNotBlank()) accentColor else contentColor.copy(alpha = 0.48f),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 3.dp)
                         )
                     }
-                    innerTextField()
+                    Text(
+                        text = if (showTokenInput) "▲" else "▼",
+                        color = contentColor.copy(alpha = 0.45f),
+                        fontSize = 12.sp
+                    )
                 }
-            )
-            DialogButton(if (busy) "生成中" else "生成并添加", accentColor, Color.White, onGenerate)
-            DialogButton("取消", containerColor.copy(0.2f), contentColor, onDismiss)
+
+                AnimatedVisibility(
+                    visible = showTokenInput,
+                    enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
+                    exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
+                            shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        BasicTextField(
+                            value = apiTokenText,
+                            onValueChange = onTokenTextChange,
+                            textStyle = TextStyle(color = contentColor, fontSize = 13.sp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(subtleGroupBackground)
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            decorationBox = { innerTextField ->
+                                if (apiTokenText.isBlank()) {
+                                    Text(
+                                        "粘贴 ModelScope SDK Token (ms-…)",
+                                        color = contentColor.copy(alpha = 0.35f),
+                                        fontSize = 13.sp
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Box(modifier = Modifier.width(126.dp)) {
+                                DialogButton(
+                                    "保存 Token",
+                                    accentColor.copy(alpha = 0.9f),
+                                    Color.White,
+                                    onTokenSave,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "生成记录",
+                    color = contentColor,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "${history.size} 条",
+                    color = contentColor.copy(alpha = 0.45f),
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        if (history.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(220.dp)
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(subtleGroupBackground),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("暂无生成记录", color = contentColor.copy(alpha = 0.35f), fontSize = 14.sp)
+                }
+            }
+        } else {
+            items(history, key = { it.id }) { record ->
+                val isPolling = record.id in pollingRecordIds
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(groupBackgroundColor)
+                        .clickable(enabled = !isPolling) {
+                            when {
+                                record.status == "completed" && record.sogDownloaded -> onAddToWallpaper(record)
+                                record.status == "completed" && !record.sogDownloaded -> onDownload(record)
+                                record.status == "failed" -> onRetry(record)
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RecordThumbnail(
+                        localUri = record.inputImageLocalUri,
+                        modifier = Modifier
+                            .width(56.dp)
+                            .height(56.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                    )
+
+                    Spacer(Modifier.width(12.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            record.inputImageName ?: record.inputImageUrl?.substringAfterLast('/') ?: "图片",
+                            color = contentColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1
+                        )
+                        Text(
+                            when (record.status) {
+                                "pending" -> "${formatAbsoluteTime(record.createdAt)}  等待中…"
+                                "generating" -> "${formatAbsoluteTime(record.createdAt)}  生成中…"
+                                "completed" -> if (record.sogDownloaded) "${formatAbsoluteTime(record.createdAt)}  已下载，可导入" else "${formatAbsoluteTime(record.createdAt)}  已完成，待下载"
+                                "downloading" -> "${formatAbsoluteTime(record.createdAt)}  下载中…"
+                                "failed" -> "${formatAbsoluteTime(record.createdAt)}  失败: ${record.errorMessage?.take(30) ?: "未知"}"
+                                else -> "${formatAbsoluteTime(record.createdAt)}  ${record.status}"
+                            },
+                            color = when (record.status) {
+                                "pending", "generating", "downloading" -> accentColor
+                                "failed" -> Color(0xFFFF4444)
+                                "completed" -> if (record.sogDownloaded) Color(0xFF4CAF50) else accentColor
+                                else -> contentColor.copy(alpha = 0.5f)
+                            },
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
+                    when {
+                        isPolling -> CircularProgressIndicator(
+                            modifier = Modifier.width(18.dp).height(18.dp),
+                            strokeWidth = 1.8.dp,
+                            color = accentColor
+                        )
+                        record.status == "completed" && record.sogDownloaded -> Text(
+                            "导入",
+                            color = Color(0xFF4CAF50),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(Capsule())
+                                .clickable(enabled = !isPolling) { onAddToWallpaper(record) }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                        record.status == "completed" && !record.sogDownloaded -> Text(
+                            "下载",
+                            color = accentColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(Capsule())
+                                .clickable(enabled = !isPolling) { onDownload(record) }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                        record.status == "downloading" -> Text("下载中", color = accentColor, fontSize = 13.sp)
+                        record.status == "failed" -> Text(
+                            "重试",
+                            color = Color(0xFFFF8800),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(Capsule())
+                                .clickable(enabled = !isPolling) { onRetry(record) }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(6.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .width(32.dp)
+                            .height(32.dp)
+                            .clip(CircleShape)
+                            .background(contentColor.copy(alpha = 0.08f))
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() }
+                            ) { onDeleteRecord(record) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("×", color = contentColor.copy(alpha = 0.55f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val recordTimeFormat = SimpleDateFormat("MM/dd HH:mm", Locale.getDefault())
+
+private fun formatAbsoluteTime(timestamp: Long): String {
+    return recordTimeFormat.format(Date(timestamp))
+}
+
+@Composable
+private fun RecordThumbnail(
+    localUri: String?,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val bitmap by produceState<Bitmap?>(initialValue = null, localUri) {
+        if (localUri.isNullOrBlank()) {
+            value = null
+            return@produceState
+        }
+        value = withContext(Dispatchers.IO) {
+            // 优先尝试文件路径（saveThumbnail 保存的内部存储文件）
+            val file = File(localUri)
+            if (file.exists()) {
+                try {
+                    // 采样加载，避免大图 OOM
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(file.absolutePath, options)
+                    val sampleSize = maxOf(1, minOf(options.outWidth, options.outHeight) / 100)
+                    val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                    BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
+                } catch (_: Exception) { null }
+            } else {
+                // 兼容旧的 content:// URI（可能已失效）
+                try {
+                    val uri = Uri.parse(localUri)
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        BitmapFactory.decodeStream(input)
+                    }
+                } catch (_: Exception) { null }
+            }
+        }
+    }
+
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap!!.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier.background(Color.Black.copy(alpha = 0.18f)),
+            // 记录缩略图的显示比例由调用处 modifier 决定；显示时填满当前场景容器。
+            // 缩略图文件本身不裁剪，避免影响其他场景复用。
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Box(
+            modifier = modifier.background(Color(0xFF333333)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("🖼", fontSize = 16.sp, color = Color.White.copy(alpha = 0.4f))
         }
     }
 }
@@ -1541,15 +2258,15 @@ private fun DialogButton(
     text: String,
     bgColor: Color,
     textColor: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .clip(Capsule())
             .background(bgColor)
             .clickable(onClick = onClick)
-            .height(48.dp)
-            .fillMaxWidth(),
+            .height(48.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1589,10 +2306,9 @@ private fun queryDisplayName(context: Context, uri: Uri): String? {
     }.getOrNull() ?: uri.lastPathSegment
 }
 
-private const val THUMBNAIL_WIDTH = 216
-private const val THUMBNAIL_HEIGHT = 384
-private const val THUMBNAIL_MAX_SPLATS = 40_000
-private const val GAUSSIAN_THUMBNAIL_CACHE_VERSION = 2
+private const val THUMBNAIL_WIDTH = 540
+private const val THUMBNAIL_HEIGHT = 960
+private const val THUMBNAIL_MAX_SPLATS = 500_000
 
 private data class ProjectedSplat(
     val u: Float, val v: Float,
@@ -1615,28 +2331,23 @@ private fun generateGaussianThumbnail(
             viewportAspect = width.toFloat() / height.coerceAtLeast(1).toFloat()
         ).scene ?: return null
 
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-
-        val bgR = (scene.backgroundR * 255).toInt().coerceIn(0, 255)
-        val bgG = (scene.backgroundG * 255).toInt().coerceIn(0, 255)
-        val bgB = (scene.backgroundB * 255).toInt().coerceIn(0, 255)
-        canvas.drawColor(android.graphics.Color.rgb(bgR, bgG, bgB))
-
-        val count = scene.count
-        val step = (count / THUMBNAIL_MAX_SPLATS).coerceAtLeast(1)
+        val thumbW = width.toFloat()
+        val thumbH = height.toFloat()
         val imageW = scene.imageWidth.coerceAtLeast(1).toFloat()
         val imageH = scene.imageHeight.coerceAtLeast(1).toFloat()
         val focal = scene.focalLengthPx
-        val thumbW = width.toFloat()
-        val thumbH = height.toFloat()
 
-        // Uniform scale with letterbox/pillarbox, matching drawGaussianPoints approach
-        val uniformScale = minOf(thumbW / imageW, thumbH / imageH)
-        val offsetU = (thumbW - imageW * uniformScale) * 0.5f
-        val offsetV = (thumbH - imageH * uniformScale) * 0.5f
+        // Fill-crop: scale so the shorter axis fills, crop the longer
+        val fillScale = maxOf(thumbW / imageW, thumbH / imageH)
+        val offsetU = (thumbW - imageW * fillScale) * 0.5f
+        val offsetV = (thumbH - imageH * fillScale) * 0.5f
+        // Match GPU pointScale: fillScale * splatScale, same clamp range
+        val splatScale = (fillScale * 1.35f).coerceIn(0.35f, 30f)
 
-        val splats = ArrayList<ProjectedSplat>(count / step)
+        val count = scene.count
+        val step = (count / THUMBNAIL_MAX_SPLATS).coerceAtLeast(1)
+
+        val splats = ArrayList<ProjectedSplat>(THUMBNAIL_MAX_SPLATS)
         for (i in 0 until count step step) {
             val px = scene.positions[i * 3]
             val py = scene.positions[i * 3 + 1]
@@ -1652,9 +2363,12 @@ private fun generateGaussianThumbnail(
 
             val projX = px / pz
             val projY = py / pz
-            val u = ((projX * focal) + imageW * 0.5f) * uniformScale + offsetU
-            val v = ((projY * focal) + imageH * 0.5f) * uniformScale + offsetV
-            val rad = maxOf(sx, sy, sz, 0.0006f) * focal / pz * uniformScale * 2.6f
+            val u = ((projX * focal) + imageW * 0.5f) * fillScale + offsetU
+            val v = ((projY * focal) + imageH * 0.5f) * fillScale + offsetV
+            // Match GPU covariance projection: pointScale² * projected_cov, with blur floor
+            val rad = maxOf(sx, sy, sz, 0.0006f) * focal / pz * splatScale * 2.6f
+
+            if (u < -rad || u > thumbW + rad || v < -rad || v > thumbH + rad) continue
 
             splats += ProjectedSplat(
                 u, v, pz, rad,
@@ -1664,21 +2378,61 @@ private fun generateGaussianThumbnail(
 
         splats.sortByDescending { it.z }
 
-        val paint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
-        for (splat in splats) {
-            val alpha = (splat.a * 255).toInt().coerceIn(0, 255)
-            if (alpha < 2) continue
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val bgR = (scene.backgroundR * 255).toInt().coerceIn(0, 255)
+        val bgG = (scene.backgroundG * 255).toInt().coerceIn(0, 255)
+        val bgB = (scene.backgroundB * 255).toInt().coerceIn(0, 255)
+        canvas.drawColor(android.graphics.Color.rgb(bgR, bgG, bgB))
+
+        val paint = Paint().apply {
+            isAntiAlias = true
+            style = Paint.Style.FILL
+        }
+
+        for (s in splats) {
+            val alpha = (s.a * 255f).toInt().coerceIn(0, 255)
+            if (alpha < 3) continue
             paint.color = android.graphics.Color.argb(
                 alpha,
-                (splat.r * 255).toInt().coerceIn(0, 255),
-                (splat.g * 255).toInt().coerceIn(0, 255),
-                (splat.b * 255).toInt().coerceIn(0, 255)
+                (s.r * 255f).toInt().coerceIn(0, 255),
+                (s.g * 255f).toInt().coerceIn(0, 255),
+                (s.b * 255f).toInt().coerceIn(0, 255)
             )
-            canvas.drawCircle(splat.u, splat.v, splat.radius.coerceAtLeast(0.8f), paint)
+            canvas.drawCircle(s.u, s.v, s.radius.coerceAtLeast(0.8f), paint)
         }
 
         bitmap
     }.getOrNull()
+}
+
+private fun copyOnlineRecordThumbnailToGaussianCache(
+    context: Context,
+    recordThumbnailUri: String?,
+    modelId: String
+) {
+    if (recordThumbnailUri.isNullOrBlank() || modelId.isBlank()) return
+    runCatching {
+        val target = DepthPrefs.sogThumbnailFile(context, modelId)
+        target.parentFile?.mkdirs()
+
+        val sourceFile = File(recordThumbnailUri)
+        if (sourceFile.exists() && sourceFile.length() > 0L) {
+            if (target.exists()) target.delete()
+            sourceFile.copyTo(target, overwrite = true)
+            return@runCatching
+        }
+
+        // 兼容旧记录：如果还保存的是 content://，解码后压成目标缩略图。
+        val sourceUri = Uri.parse(recordThumbnailUri)
+        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+            val bitmap = BitmapFactory.decodeStream(input) ?: return@use
+            target.outputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 86, output)
+            }
+            bitmap.recycle()
+        }
+    }
 }
 
 private fun loadOrGenerateGaussianThumbnail(
@@ -1711,17 +2465,10 @@ private fun removeGaussianThumbnailCache(context: Context, model: DepthWallpaper
 
 private fun gaussianThumbnailCacheFile(context: Context, model: DepthWallpaperModel): File? {
     if (model.id.isBlank() || model.gaussianUri.isBlank()) return null
-    val root = context.getExternalFilesDir(null) ?: return null
-    val dir = File(root, "thumbnail_cache")
-    if (!dir.mkdirs() && !dir.exists()) return null
-    return File(dir, "${gaussianThumbnailCacheKey(model)}.jpg")
+    return DepthPrefs.sogThumbnailFile(context, model.id)
 }
 
 private fun gaussianThumbnailCacheKey(model: DepthWallpaperModel): String {
-    val digest = MessageDigest.getInstance("SHA-1")
-        .digest(model.gaussianUri.toByteArray())
-        .joinToString("") { "%02x".format(it) }
-        .take(16)
-    return "gaussian_${model.id}_${digest}_v$GAUSSIAN_THUMBNAIL_CACHE_VERSION"
+    return "gaussian_${model.id}_${model.gaussianUri.hashCode()}"
 }
 
