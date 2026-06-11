@@ -3,6 +3,7 @@ package com.zeaze.tianyinwallpaper.ui.main
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -24,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -34,6 +36,10 @@ import androidx.compose.ui.unit.sp
 import com.kyant.shapes.Capsule
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.effects.blur
+import com.zeaze.tianyinwallpaper.backdrop.effects.lens
+import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 
 /**
@@ -229,8 +235,7 @@ private fun TopSortFilterLiquidCapsule(
                 Box(
                     modifier = Modifier
                         .width(width / 2)
-                        .fillMaxHeight()
-                        .clickable(onClick = onSortClick),
+                        .fillMaxHeight(),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -243,8 +248,7 @@ private fun TopSortFilterLiquidCapsule(
                 Box(
                     modifier = Modifier
                         .width(width / 2)
-                        .fillMaxHeight()
-                        .clickable(onClick = onFilterClick),
+                        .fillMaxHeight(),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -258,16 +262,30 @@ private fun TopSortFilterLiquidCapsule(
         }
 
         if (enableLiquidGlass && backdrop != null) {
-            LiquidButton(
-                onClick = {},
-                backdrop = backdrop,
+            Box(
                 modifier = modifier
                     .width(width)
-                    .height(IosTopButtonHeight),
-                isInteractive = false,
-                surfaceColor = surfaceColor,
-                buttonHeight = IosTopButtonHeight,
-                contentPadding = PaddingValues(0.dp)
+                    .height(IosTopButtonHeight)
+                    .drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { Capsule() },
+                        effects = {
+                            vibrancy()
+                            blur(2.dp.toPx())
+                            lens(12.dp.toPx(), 24.dp.toPx())
+                        },
+                        onDrawSurface = { drawRect(surfaceColor) }
+                    )
+                    .pointerInput(onSortClick, onFilterClick) {
+                        detectTapGestures { offset ->
+                            if (offset.x < size.width / 2f) {
+                                onSortClick()
+                            } else {
+                                onFilterClick()
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 CapsuleContent()
             }
@@ -275,7 +293,16 @@ private fun TopSortFilterLiquidCapsule(
             Surface(
                 modifier = modifier
                     .width(width)
-                    .height(IosTopButtonHeight),
+                    .height(IosTopButtonHeight)
+                    .pointerInput(onSortClick, onFilterClick) {
+                        detectTapGestures { offset ->
+                            if (offset.x < size.width / 2f) {
+                                onSortClick()
+                            } else {
+                                onFilterClick()
+                            }
+                        }
+                    },
                 shape = Capsule(),
                 color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
                 border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
@@ -313,7 +340,7 @@ fun MainTopBar(
             .fillMaxWidth()
             .padding(top = statusBarTopPaddingDp + 8.dp, start = 12.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         val isDark = !isLightTheme
         val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
