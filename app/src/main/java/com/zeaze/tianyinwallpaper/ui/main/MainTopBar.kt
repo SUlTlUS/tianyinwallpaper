@@ -328,16 +328,19 @@ fun SelectionTopBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        TopCapsuleLiquidButton(
+        TopCircleLiquidButton(
             visible = true,
             onClick = onDelete,
-            text = context.getString(R.string.common_delete),
-            textColor = Color.White,
-            surfaceColor = Color(0xFFFF4D4F).copy(alpha = 0.8f),
+            text = "",
+            textColor = Color(0xFFFF3B30),
+            surfaceColor = adaptiveSurfaceColor,
             isDark = isDark,
             enableLiquidGlass = enableLiquidGlass,
             backdrop = backdrop,
-            isDestructive = true
+            keepSlotWhenHidden = false,
+            iconRes = R.drawable.delete,
+            iconContentDescription = context.getString(R.string.common_delete),
+            iconSize = 21.dp
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
