@@ -438,8 +438,8 @@ class MainActivity : BaseActivity() {
                     val bottomBarBottomPadding = bottomInsets.calculateBottomPadding() + 12.dp
                     val bottomGroupHorizontalPadding = 18.dp
                     val bottomGroupGap = 8.dp
-                    val bottomGroupHeight = 64.dp
-                    val bottomActionSize = 64.dp
+                    val bottomGroupHeight = 63.dp
+                    val bottomActionSize = 63.dp
                     val addButtonFallbackSurfaceColor = if (useDarkTheme) Color(0xAA2A2A2E) else Color(0xE6FFFFFF)
                     val addButtonTextColor = if (useDarkTheme) Color.White else Color(0xFF111318)
                     Row(
