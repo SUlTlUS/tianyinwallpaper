@@ -102,7 +102,9 @@ import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTab
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabs
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabsStyle
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButtonStyle
 import com.zeaze.tianyinwallpaper.catalog.utils.LiquidMorphPhysics
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberLiquidMorphController
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
@@ -625,7 +627,16 @@ class MainActivity : BaseActivity() {
                     val bottomGroupGap = 8.dp
                     val bottomGroupHeight = 64.dp
                     val bottomActionSize = 64.dp
-                    val addButtonFallbackSurfaceColor = if (useDarkTheme) Color(0xAA2A2A2E) else Color(0xE6FFFFFF)
+                    val bottomTabsStyle = LiquidBottomTabsStyle.default(isLightTheme = !useDarkTheme)
+                    val bottomAddButtonStyle = LiquidButtonStyle(
+                        height = bottomTabsStyle.trackHeight,
+                        horizontalPadding = 0.dp,
+                        blurRadius = bottomTabsStyle.trackBlurRadius,
+                        lensRadiusX = bottomTabsStyle.trackLensRadius,
+                        lensRadiusY = bottomTabsStyle.trackLensRadius,
+                        pressedExpansion = bottomTabsStyle.trackPressedExpansion
+                    )
+                    val addButtonFallbackSurfaceColor = bottomTabsStyle.fallbackContainerColor
                     val addButtonTextColor = if (useDarkTheme) Color.White else Color(0xFF111318)
                     Row(
                         modifier = Modifier
@@ -644,7 +655,8 @@ class MainActivity : BaseActivity() {
                             isLightTheme = !useDarkTheme,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(bottomGroupHeight)
+                                .height(bottomGroupHeight),
+                            style = bottomTabsStyle
                         ) {
                             bottomTabs.forEachIndexed { index, tab ->
                                 LiquidBottomTab({ selectRoot(index) }) {
@@ -679,7 +691,9 @@ class MainActivity : BaseActivity() {
                                 backdrop = rootBackdrop,
                                 modifier = Modifier.size(bottomActionSize),
                                 buttonHeight = bottomActionSize,
-                                contentPadding = PaddingValues(0.dp)
+                                contentPadding = PaddingValues(0.dp),
+                                surfaceColor = bottomTabsStyle.containerColor,
+                                style = bottomAddButtonStyle
                             ) {
                                 BasicText(
                                     text = "+",
