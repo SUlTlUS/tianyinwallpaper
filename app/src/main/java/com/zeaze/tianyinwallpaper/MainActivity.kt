@@ -442,20 +442,35 @@ class MainActivity : BaseActivity() {
                                     onBottomBarVisibleChange = { setBottomBarVisible(it) }
                                 )
                                 1 -> Box(Modifier.fillMaxSize()) {
-                                    AboutRouteScreen(
-                                        useDarkTheme = useDarkTheme,
-                                        kindFilters = selectedKindFilters,
-                                        sortMode = selectedSortMode,
-                                        sortDirection = selectedSortDirection,
-                                        onSelectionModeChange = { inSelection -> showBottomBar = !inSelection },
-                                        showBackButton = false
-                                    )
+                                    val groupPageBackdrop = if (enableLiquidGlass) {
+                                        rememberLayerBackdrop {
+                                            drawRect(themeBackgroundColor)
+                                            drawContent()
+                                        }
+                                    } else null
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .let { base ->
+                                                if (groupPageBackdrop != null) base.layerBackdrop(groupPageBackdrop) else base
+                                            }
+                                    ) {
+                                        AboutRouteScreen(
+                                            useDarkTheme = useDarkTheme,
+                                            kindFilters = selectedKindFilters,
+                                            sortMode = selectedSortMode,
+                                            sortDirection = selectedSortDirection,
+                                            onSelectionModeChange = { inSelection -> showBottomBar = !inSelection },
+                                            showBackButton = false
+                                        )
+                                    }
 
                                     if (showBottomBar) {
                                         MainTopBar(
                                             statusBarTopPaddingDp = statusBarTopPaddingDp,
                                             enableLiquidGlass = enableLiquidGlass,
-                                            backdrop = rootBackdrop,
+                                            backdrop = groupPageBackdrop,
                                             isLightTheme = !useDarkTheme,
                                             onAdd = {},
                                             onApply = {},
@@ -478,7 +493,7 @@ class MainActivity : BaseActivity() {
                                             currentPageRoute = "group",
                                             useDarkTheme = useDarkTheme,
                                             enableLiquidGlass = enableLiquidGlass,
-                                            liquidBackdrop = rootBackdrop,
+                                            liquidBackdrop = groupPageBackdrop,
                                             menuItems = listOf(
                                                 LiquidMoreMenuItem("选择") {
                                                     showMoreMenu = false
@@ -494,7 +509,7 @@ class MainActivity : BaseActivity() {
                                             currentPageRoute = "group_sort",
                                             useDarkTheme = useDarkTheme,
                                             enableLiquidGlass = enableLiquidGlass,
-                                            liquidBackdrop = rootBackdrop,
+                                            liquidBackdrop = groupPageBackdrop,
                                             menuWidth = 190.dp,
                                             triggerEndPadding = 112.dp,
                                             menuEndPadding = 112.dp,
@@ -515,7 +530,7 @@ class MainActivity : BaseActivity() {
                                             currentPageRoute = "group_filter",
                                             useDarkTheme = useDarkTheme,
                                             enableLiquidGlass = enableLiquidGlass,
-                                            liquidBackdrop = rootBackdrop,
+                                            liquidBackdrop = groupPageBackdrop,
                                             menuWidth = 176.dp,
                                             triggerEndPadding = 64.dp,
                                             menuEndPadding = 64.dp,

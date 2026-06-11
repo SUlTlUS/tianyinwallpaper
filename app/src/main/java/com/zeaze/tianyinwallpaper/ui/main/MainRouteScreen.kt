@@ -7,7 +7,10 @@ import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
@@ -70,7 +73,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -2299,73 +2301,39 @@ private fun MainWallpaperFilterBar(
 private fun MainThumbnailTypeIcon(
     @DrawableRes iconRes: Int,
     contentDescription: String,
-    backdrop: Backdrop?,
+    sourceBitmap: Bitmap?,
     bakeKey: Any?,
     modifier: Modifier = Modifier
 ) {
     val badgeShape = RoundedCornerShape(999.dp)
-    val bakedLayer = if (backdrop != null) rememberLayerBackdrop() else null
-    var bakedBitmap by remember(backdrop, iconRes, bakeKey) { mutableStateOf<ImageBitmap?>(null) }
+    val density = LocalDensity.current
+    val targetPx = remember(density) { with(density) { 28.dp.roundToPx().coerceAtLeast(1) } }
+    val bakedBitmap = remember(sourceBitmap, iconRes, bakeKey, targetPx) {
+        bakeThumbnailTypeIconBackground(sourceBitmap, targetPx)
+    }
     val glassModifier = modifier
         .padding(4.dp)
         .size(28.dp)
         .clip(badgeShape)
         .border(1.dp, Color.White.copy(alpha = 0.34f), badgeShape)
 
-    LaunchedEffect(backdrop, bakedLayer, iconRes, bakeKey) {
-        bakedBitmap = null
-        val layer = bakedLayer ?: return@LaunchedEffect
-        repeat(4) {
-            withFrameNanos { }
-            val image = runCatching { layer.graphicsLayer.toImageBitmap() }.getOrNull()
-            if (image != null && image.width > 0 && image.height > 0) {
-                bakedBitmap = image
-                return@LaunchedEffect
-            }
-        }
-    }
-
     Box(
         modifier = glassModifier,
         contentAlignment = Alignment.Center
     ) {
-        val bitmap = bakedBitmap
-        when {
-            bitmap != null -> {
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = null,
-                    contentScale = ContentScale.FillBounds,
-                    modifier = Modifier.matchParentSize()
-                )
-            }
-            backdrop != null && bakedLayer != null -> {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .drawBackdrop(
-                            backdrop = backdrop,
-                            shape = { Capsule() },
-                            effects = {
-                                vibrancy()
-                                blur(4f.dp.toPx())
-                                lens(8f.dp.toPx(), 12f.dp.toPx())
-                            },
-                            exportedBackdrop = bakedLayer,
-                            onDrawSurface = {
-                                drawRect(Color.White.copy(alpha = 0.22f))
-                                drawRect(Color.Black.copy(alpha = 0.08f))
-                            }
-                        )
-                )
-            }
-            else -> {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .background(Color.White.copy(alpha = 0.24f))
-                )
-            }
+        if (bakedBitmap != null) {
+            Image(
+                bitmap = bakedBitmap,
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = Modifier.matchParentSize()
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.White.copy(alpha = 0.24f))
+            )
         }
         Icon(
             painter = painterResource(iconRes),
@@ -2374,6 +2342,36 @@ private fun MainThumbnailTypeIcon(
             tint = Color.White
         )
     }
+}
+
+private fun bakeThumbnailTypeIconBackground(source: Bitmap?, targetPx: Int): ImageBitmap? {
+    if (source == null || source.isRecycled || source.width <= 0 || source.height <= 0 || targetPx <= 0) {
+        return null
+    }
+    return runCatching {
+        val cropSide = minOf(source.width, source.height).coerceAtLeast(1)
+        val srcLeft = (source.width - cropSide).coerceAtLeast(0)
+        val crop = Bitmap.createBitmap(source, srcLeft, 0, cropSide, cropSide)
+        val blurSeedSize = 8.coerceAtMost(targetPx).coerceAtLeast(1)
+        val blurSeed = Bitmap.createScaledBitmap(crop, blurSeedSize, blurSeedSize, true)
+        val frosted = Bitmap.createScaledBitmap(blurSeed, targetPx, targetPx, true)
+        if (crop !== source && crop !== blurSeed && crop !== frosted) crop.recycle()
+        if (blurSeed !== crop && blurSeed !== frosted) blurSeed.recycle()
+
+        val output = Bitmap.createBitmap(targetPx, targetPx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(frosted, 0f, 0f, paint)
+        if (frosted !== source && frosted !== crop && frosted !== output) frosted.recycle()
+
+        val rect = RectF(0f, 0f, targetPx.toFloat(), targetPx.toFloat())
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.argb(70, 255, 255, 255)
+        canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
+        paint.color = android.graphics.Color.argb(28, 0, 0, 0)
+        canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
+        output.asImageBitmap()
+    }.getOrNull()
 }
 
 @Composable
@@ -2386,7 +2384,7 @@ private fun MainUnifiedWallpaperCard(
     onLongClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val badgeSourceBackdrop = rememberLayerBackdrop()
+    val bitmap = rememberWallpaperCardBitmap(model)
     Box(
         modifier = modifier
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
@@ -2396,17 +2394,20 @@ private fun MainUnifiedWallpaperCard(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .let { if (enableLiquidGlass) it.layerBackdrop(badgeSourceBackdrop) else it }
         ) {
-            WallpaperCardImage(
-                modifier = Modifier.fillMaxSize(),
-                model = model
-            )
+            bitmap?.let {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
         MainThumbnailTypeIcon(
             iconRes = if (model.type == 0) R.drawable.picture else R.drawable.video,
             contentDescription = if (model.type == 0) "图片" else "视频",
-            backdrop = if (enableLiquidGlass) badgeSourceBackdrop else null,
+            sourceBitmap = if (enableLiquidGlass) bitmap else null,
             bakeKey = model.uuid ?: model.imgUri ?: model.videoUri ?: model.imgPath ?: model.type,
             modifier = Modifier.align(Alignment.TopEnd)
         )
@@ -2453,7 +2454,6 @@ private fun MainUnifiedRasterCard(
     val bitmap by produceState<Bitmap?>(initialValue = request?.let { ThumbnailUtils.getFromCache(it) }, request) {
         value = request?.let { ThumbnailUtils.loadThumbnail(context, it) }
     }
-    val badgeSourceBackdrop = rememberLayerBackdrop()
     Box(
         modifier = modifier
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
@@ -2464,7 +2464,6 @@ private fun MainUnifiedRasterCard(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xFF18181A))
-                .let { if (enableLiquidGlass) it.layerBackdrop(badgeSourceBackdrop) else it }
         ) {
             if (bitmap != null) {
                 Image(
@@ -2477,7 +2476,7 @@ private fun MainUnifiedRasterCard(
         }
         MainThumbnailTypeIcon(
             iconRes = if (group.type == RasterGroupModel.TYPE_STATIC) R.drawable.pictureraster else R.drawable.videoraster,
-            backdrop = if (enableLiquidGlass) badgeSourceBackdrop else null,
+            sourceBitmap = if (enableLiquidGlass) bitmap else null,
             bakeKey = group.id to bitmap,
             contentDescription = if (group.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
             modifier = Modifier.align(Alignment.TopEnd)
@@ -2515,7 +2514,6 @@ private fun MainUnifiedDepthCard(
             if (file.exists()) BitmapFactory.decodeFile(file.absolutePath) else null
         }
     }
-    val badgeSourceBackdrop = rememberLayerBackdrop()
     Box(
         modifier = modifier
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
@@ -2526,7 +2524,6 @@ private fun MainUnifiedDepthCard(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xFF18181A))
-                .let { if (enableLiquidGlass) it.layerBackdrop(badgeSourceBackdrop) else it }
         ) {
             if (bitmap != null) {
                 Image(
@@ -2545,7 +2542,7 @@ private fun MainUnifiedDepthCard(
         }
         MainThumbnailTypeIcon(
             iconRes = R.drawable.depth,
-            backdrop = if (enableLiquidGlass) badgeSourceBackdrop else null,
+            sourceBitmap = if (enableLiquidGlass) bitmap else null,
             bakeKey = model.id to bitmap,
             contentDescription = "景深",
             modifier = Modifier.align(Alignment.TopEnd)
@@ -2568,7 +2565,7 @@ private fun MainUnifiedDepthCard(
 }
 
 @Composable
-private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWallpaperModel) {
+private fun rememberWallpaperCardBitmap(model: TianYinWallpaperModel): Bitmap? {
     val context = LocalContext.current
     val request = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.Request(
         uuid = model.uuid.orEmpty(),
@@ -2586,14 +2583,7 @@ private fun WallpaperCardImage(modifier: Modifier = Modifier, model: TianYinWall
         }
         value = loaded
     }
-    bitmapState.value?.let { bitmap ->
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = null,
-            modifier = modifier,
-            contentScale = ContentScale.Crop
-        )
-    }
+    return bitmapState.value
 }
 
 private fun queryMainRouteDisplayName(context: Context, uri: Uri): String? {
