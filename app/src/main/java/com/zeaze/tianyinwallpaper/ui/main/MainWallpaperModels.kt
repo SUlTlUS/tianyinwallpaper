@@ -20,6 +20,19 @@ enum class MainWallpaperKindFilter(val label: String) {
     Depth("景深")
 }
 
+enum class MainWallpaperSortMode(val label: String) {
+    Custom("自定义"),
+    AddedDate("添加日期"),
+    Type("类型"),
+    Size("大小"),
+    RecentOpened("最近打开日期")
+}
+
+enum class MainWallpaperSortDirection(val label: String) {
+    Ascending("递增"),
+    Descending("递减")
+}
+
 sealed class MainUnifiedWallpaperItem {
     data class Wallpaper(val index: Int, val model: TianYinWallpaperModel) : MainUnifiedWallpaperItem()
     data class Raster(val group: RasterGroupModel) : MainUnifiedWallpaperItem()

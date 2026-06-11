@@ -1,0 +1,28 @@
+<!--
+  ~ Copyright (C) 2026 The Android Open Source Project
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="877dp"
+    android:height="705dp"
+    android:viewportWidth="877"
+    android:viewportHeight="705">
+  <group
+      android:scaleY="-1"
+      android:translateY="705">
+  <path
+      android:fillColor="#FF000000"
+      android:pathData="M199,694Q205,699 211,702Q217,705 225,705Q232,705 238,702Q244,699 250,694L439,501Q444,495 446.5,489Q449,483 449,476Q449,468 447,462Q445,456 440,451Q435,447 429.5,444.5Q424,442 416,442Q409,442 403.5,444.5Q398,447 393,452L315,533L255,603L258,516L258,34Q258,27 255.5,21Q253,15 249,10Q244,5 238,2.5Q232,0 225,0Q217,0 211,2.5Q205,5 200,10Q196,15 193.5,21Q191,27 191,34L191,516L195,603L134,533L56,452Q51,447 45.5,444.5Q40,442 33,442Q25,442 19,444.5Q13,447 9,451Q4,456 2,462Q0,468 0,476Q0,483 2.5,489Q5,495 10,500L199,694ZM678,11Q672,6 665.5,3Q659,0 652,0Q645,0 639,3Q633,6 627,11L438,205Q433,210 430.5,216.5Q428,223 428,230Q428,237 430,243Q432,249 437,254Q442,258 448,260.5Q454,263 461,263Q468,263 473.5,260.5Q479,258 484,253L562,173L622,103L619,189L619,671Q619,678 621,684Q623,690 628,695Q633,700 639,702.5Q645,705 653,705Q660,705 666,702.5Q672,700 677,695Q681,690 683.5,684Q686,678 686,671L686,189L683,103L743,173L821,253Q826,258 831.5,260.5Q837,263 844,263Q851,263 857,260.5Q863,258 868,254Q872,249 874.5,243Q877,237 877,230Q877,223 874.5,216.5Q872,210 867,205L678,11Z"/>
+  </group>
+</vector>

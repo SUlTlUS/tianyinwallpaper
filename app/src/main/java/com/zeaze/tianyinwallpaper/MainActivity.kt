@@ -111,6 +111,8 @@ import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.main.MainTopBar
 import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperKindFilter
+import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperSortDirection
+import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperSortMode
 import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
 import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import com.zeaze.tianyinwallpaper.ui.setting.SettingRouteScreen
@@ -169,6 +171,8 @@ class MainActivity : BaseActivity() {
         const val THEME_MODE_FOLLOW_SYSTEM = 0
         const val THEME_MODE_LIGHT = 1
         const val THEME_MODE_DARK = 2
+        private const val PREF_MAIN_WALLPAPER_SORT_MODE = "main_wallpaper_sort_mode"
+        private const val PREF_MAIN_WALLPAPER_SORT_DIRECTION = "main_wallpaper_sort_direction"
         private val BOTTOM_BAR_SELECTED_COLOR = Color(0xFF2A83FF)
     }
 
@@ -236,6 +240,12 @@ class MainActivity : BaseActivity() {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStackEntry?.destination?.route ?: ROUTE_MAIN
             val haptic = LocalHapticFeedback.current
+            val density = LocalDensity.current
+            val statusBarTopPadding = remember(this) {
+                val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+                if (id > 0) resources.getDimensionPixelSize(id) else 0
+            }
+            val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
 
             var selectedRootIndex by remember { mutableStateOf(0) }
             var requestedRootIndex by remember { mutableStateOf<Int?>(null) }
@@ -247,7 +257,28 @@ class MainActivity : BaseActivity() {
             var updateDialogState by remember { mutableStateOf(UpdateDialogState()) }
             var hasCheckedUpdate by remember { mutableStateOf(false) }
             var showMoreMenu by remember { mutableStateOf(false) }
+            var showSortMenu by remember { mutableStateOf(false) }
             var showFilterMenu by remember { mutableStateOf(false) }
+            var selectedSortMode by remember {
+                mutableStateOf(
+                    runCatching {
+                        MainWallpaperSortMode.valueOf(
+                            pref.getString(PREF_MAIN_WALLPAPER_SORT_MODE, MainWallpaperSortMode.Custom.name)
+                                ?: MainWallpaperSortMode.Custom.name
+                        )
+                    }.getOrDefault(MainWallpaperSortMode.Custom)
+                )
+            }
+            var selectedSortDirection by remember {
+                mutableStateOf(
+                    runCatching {
+                        MainWallpaperSortDirection.valueOf(
+                            pref.getString(PREF_MAIN_WALLPAPER_SORT_DIRECTION, MainWallpaperSortDirection.Descending.name)
+                                ?: MainWallpaperSortDirection.Descending.name
+                        )
+                    }.getOrDefault(MainWallpaperSortDirection.Descending)
+                )
+            }
             var selectedKindFilters by remember {
                 mutableStateOf(
                     pref.getString("main_wallpaper_kind_filters", "").orEmpty()
@@ -265,6 +296,14 @@ class MainActivity : BaseActivity() {
                 pref.edit()
                     .putString("main_wallpaper_kind_filters", filters.joinToString(",") { it.name })
                     .apply()
+            }
+            fun persistSortMode(mode: MainWallpaperSortMode) {
+                selectedSortMode = mode
+                pref.edit().putString(PREF_MAIN_WALLPAPER_SORT_MODE, mode.name).apply()
+            }
+            fun persistSortDirection(direction: MainWallpaperSortDirection) {
+                selectedSortDirection = direction
+                pref.edit().putString(PREF_MAIN_WALLPAPER_SORT_DIRECTION, direction.name).apply()
             }
             var wallpaperSelectionState by remember { mutableStateOf(SelectionBarState(false, false)) }
 
@@ -300,6 +339,7 @@ class MainActivity : BaseActivity() {
                     if (selectedRootIndex != page) {
                         selectedRootIndex = page
                         showMoreMenu = false
+                        showSortMenu = false
                         showFilterMenu = false
                         if (page != 0) showBottomBar = true
                     }
@@ -319,6 +359,7 @@ class MainActivity : BaseActivity() {
             fun selectRoot(index: Int) {
                 if (index == selectedRootIndex && currentRoute == ROUTE_MAIN && requestedRootIndex == null) {
                     showMoreMenu = false
+                    showSortMenu = false
                     showFilterMenu = false
                     return
                 }
@@ -326,12 +367,14 @@ class MainActivity : BaseActivity() {
                 selectedRootIndex = index
                 requestedRootIndex = index
                 showMoreMenu = false
+                showSortMenu = false
                 showFilterMenu = false
                 if (currentRoute != ROUTE_MAIN) navigateToRoute(navController, ROUTE_MAIN)
             }
 
             fun triggerBottomAdd() {
                 showMoreMenu = false
+                showSortMenu = false
                 showFilterMenu = false
                 if (currentRoute == ROUTE_MAIN && selectedRootIndex == 0) {
                     RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit)
@@ -375,11 +418,17 @@ class MainActivity : BaseActivity() {
                                     enableLiquidGlass = enableLiquidGlass,
                                     showBottomBar = showBottomBar,
                                     wallpaperSelectionState = wallpaperSelectionState,
-                                    showMoreMenu = showMoreMenu,
-                                    showFilterMenu = showFilterMenu,
+                                    showMoreMenu = showMoreMenu && selectedRootIndex == 0,
+                                    showSortMenu = showSortMenu && selectedRootIndex == 0,
+                                    showFilterMenu = showFilterMenu && selectedRootIndex == 0,
                                     selectedKindFilters = selectedKindFilters,
+                                    selectedSortMode = selectedSortMode,
+                                    selectedSortDirection = selectedSortDirection,
                                     onShowMoreMenuChange = { showMoreMenu = it },
+                                    onShowSortMenuChange = { showSortMenu = it },
                                     onShowFilterMenuChange = { showFilterMenu = it },
+                                    onSortModeSelected = { persistSortMode(it) },
+                                    onSortDirectionSelected = { persistSortDirection(it) },
                                     onToggleKindFilter = { filter ->
                                         val next = if (filter in selectedKindFilters) {
                                             selectedKindFilters - filter
@@ -394,6 +443,9 @@ class MainActivity : BaseActivity() {
                                 )
                                 1 -> AboutRouteScreen(
                                     useDarkTheme = useDarkTheme,
+                                    kindFilters = selectedKindFilters,
+                                    sortMode = selectedSortMode,
+                                    sortDirection = selectedSortDirection,
                                     onSelectionModeChange = { inSelection -> showBottomBar = !inSelection },
                                     showBackButton = false
                                 )
@@ -458,6 +510,95 @@ class MainActivity : BaseActivity() {
                     ) {
                         PlyModelTestRouteScreen(useDarkTheme = useDarkTheme)
                     }
+                }
+
+                if (showBottomBar && currentRoute == ROUTE_MAIN && selectedRootIndex == 1 && !wallpaperSelectionState.selectionMode) {
+                    MainTopBar(
+                        statusBarTopPaddingDp = statusBarTopPaddingDp,
+                        enableLiquidGlass = enableLiquidGlass,
+                        backdrop = rootBackdrop,
+                        isLightTheme = !useDarkTheme,
+                        onAdd = {},
+                        onApply = {},
+                        onMoreClick = { showMoreMenu = true },
+                        onSortClick = { showSortMenu = true },
+                        onFilterClick = { showFilterMenu = true },
+                        onPreview = {},
+                        showAddButton = false,
+                        showPreviewButton = false,
+                        showApplyButton = false,
+                        showMoreButton = true,
+                        showSortButton = true,
+                        showFilterButton = true,
+                        keepSlotWhenHidden = false
+                    )
+
+                    LiquidMoreMenuOverlay(
+                        visible = showMoreMenu,
+                        statusBarTopPaddingDp = statusBarTopPaddingDp,
+                        currentPageRoute = "group",
+                        useDarkTheme = useDarkTheme,
+                        enableLiquidGlass = enableLiquidGlass,
+                        liquidBackdrop = rootBackdrop,
+                        menuItems = listOf(
+                            LiquidMoreMenuItem("选择") {
+                                showMoreMenu = false
+                                RxBus.postWithCode(RxConstants.RX_TRIGGER_GROUP_OPTIONS, Unit)
+                            }
+                        ),
+                        onDismiss = { showMoreMenu = false }
+                    )
+
+                    LiquidMoreMenuOverlay(
+                        visible = showSortMenu,
+                        statusBarTopPaddingDp = statusBarTopPaddingDp,
+                        currentPageRoute = "group_sort",
+                        useDarkTheme = useDarkTheme,
+                        enableLiquidGlass = enableLiquidGlass,
+                        liquidBackdrop = rootBackdrop,
+                        menuWidth = 190.dp,
+                        triggerEndPadding = 120.dp,
+                        menuEndPadding = 120.dp,
+                        closeOnItemClick = false,
+                        triggerIconRes = R.drawable.sort,
+                        menuItems = buildSortMenuItems(
+                            selectedSortMode = selectedSortMode,
+                            selectedSortDirection = selectedSortDirection,
+                            onSortModeSelected = { persistSortMode(it) },
+                            onSortDirectionSelected = { persistSortDirection(it) }
+                        ),
+                        onDismiss = { showSortMenu = false }
+                    )
+
+                    LiquidMoreMenuOverlay(
+                        visible = showFilterMenu,
+                        statusBarTopPaddingDp = statusBarTopPaddingDp,
+                        currentPageRoute = "group_filter",
+                        useDarkTheme = useDarkTheme,
+                        enableLiquidGlass = enableLiquidGlass,
+                        liquidBackdrop = rootBackdrop,
+                        menuWidth = 176.dp,
+                        triggerEndPadding = 64.dp,
+                        menuEndPadding = 64.dp,
+                        closeOnItemClick = false,
+                        triggerIconRes = R.drawable.fliter,
+                        menuItems = MainWallpaperKindFilter.values().map { filter ->
+                            LiquidMoreMenuItem(
+                                label = filter.label,
+                                iconRes = filter.iconRes,
+                                checked = filter in selectedKindFilters,
+                                onClick = {
+                                    val next = if (filter in selectedKindFilters) {
+                                        selectedKindFilters - filter
+                                    } else {
+                                        selectedKindFilters + filter
+                                    }
+                                    persistKindFilters(next)
+                                }
+                            )
+                        },
+                        onDismiss = { showFilterMenu = false }
+                    )
                 }
 
                 if (showBottomBar && currentRoute == ROUTE_MAIN) {
@@ -741,10 +882,16 @@ private fun WallpaperRootPage(
     showBottomBar: Boolean,
     wallpaperSelectionState: SelectionBarState,
     showMoreMenu: Boolean,
+    showSortMenu: Boolean,
     showFilterMenu: Boolean,
     selectedKindFilters: Set<MainWallpaperKindFilter>,
+    selectedSortMode: MainWallpaperSortMode,
+    selectedSortDirection: MainWallpaperSortDirection,
     onShowMoreMenuChange: (Boolean) -> Unit,
+    onShowSortMenuChange: (Boolean) -> Unit,
     onShowFilterMenuChange: (Boolean) -> Unit,
+    onSortModeSelected: (MainWallpaperSortMode) -> Unit,
+    onSortDirectionSelected: (MainWallpaperSortDirection) -> Unit,
     onToggleKindFilter: (MainWallpaperKindFilter) -> Unit,
     onOpenSettingPage: () -> Unit,
     onOpenGroupPage: () -> Unit,
@@ -767,6 +914,8 @@ private fun WallpaperRootPage(
             MainRouteScreen(
                 useDarkTheme = useDarkTheme,
                 kindFilters = selectedKindFilters,
+                sortMode = selectedSortMode,
+                sortDirection = selectedSortDirection,
                 onOpenSettingPage = onOpenSettingPage,
                 onBottomBarVisibleChange = onBottomBarVisibleChange
             )
@@ -800,12 +949,14 @@ private fun WallpaperRootPage(
                 onAdd = { RxBus.postWithCode(RxConstants.RX_TRIGGER_ADD_WALLPAPER, Unit) },
                 onApply = { RxBus.postWithCode(RxConstants.RX_TRIGGER_APPLY_WALLPAPER, Unit) },
                 onMoreClick = { onShowMoreMenuChange(true) },
+                onSortClick = { onShowSortMenuChange(true) },
                 onFilterClick = { onShowFilterMenuChange(true) },
                 onPreview = { RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit) },
                 showAddButton = false,
                 showPreviewButton = true,
                 showApplyButton = true,
                 showMoreButton = true,
+                showSortButton = true,
                 showFilterButton = true,
                 keepSlotWhenHidden = true
             )
@@ -819,7 +970,7 @@ private fun WallpaperRootPage(
             enableLiquidGlass = enableLiquidGlass,
             liquidBackdrop = pageBackdrop,
             menuItems = listOf(
-                LiquidMoreMenuItem("保存") {
+                LiquidMoreMenuItem("保存到分组") {
                     onShowMoreMenuChange(false)
                     RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
                 },
@@ -829,6 +980,27 @@ private fun WallpaperRootPage(
                 }
             ),
             onDismiss = { onShowMoreMenuChange(false) }
+        )
+
+        LiquidMoreMenuOverlay(
+            visible = showSortMenu,
+            statusBarTopPaddingDp = statusBarTopPaddingDp,
+            currentPageRoute = "wallpaper_sort",
+            useDarkTheme = useDarkTheme,
+            enableLiquidGlass = enableLiquidGlass,
+            liquidBackdrop = pageBackdrop,
+            menuWidth = 190.dp,
+            triggerEndPadding = 120.dp,
+            menuEndPadding = 120.dp,
+            closeOnItemClick = false,
+            triggerIconRes = R.drawable.sort,
+            menuItems = buildSortMenuItems(
+                selectedSortMode = selectedSortMode,
+                selectedSortDirection = selectedSortDirection,
+                onSortModeSelected = onSortModeSelected,
+                onSortDirectionSelected = onSortDirectionSelected
+            ),
+            onDismiss = { onShowSortMenuChange(false) }
         )
 
         LiquidMoreMenuOverlay(
@@ -842,6 +1014,7 @@ private fun WallpaperRootPage(
             triggerEndPadding = 64.dp,
             menuEndPadding = 64.dp,
             closeOnItemClick = false,
+            triggerIconRes = R.drawable.fliter,
             menuItems = MainWallpaperKindFilter.values().map { filter ->
                 LiquidMoreMenuItem(
                     label = filter.label,
@@ -855,6 +1028,27 @@ private fun WallpaperRootPage(
     }
 }
 
+
+private fun buildSortMenuItems(
+    selectedSortMode: MainWallpaperSortMode,
+    selectedSortDirection: MainWallpaperSortDirection,
+    onSortModeSelected: (MainWallpaperSortMode) -> Unit,
+    onSortDirectionSelected: (MainWallpaperSortDirection) -> Unit
+): List<LiquidMoreMenuItem> {
+    return MainWallpaperSortMode.values().map { mode ->
+        LiquidMoreMenuItem(
+            label = mode.label,
+            checked = selectedSortMode == mode,
+            onClick = { onSortModeSelected(mode) }
+        )
+    } + MainWallpaperSortDirection.values().map { direction ->
+        LiquidMoreMenuItem(
+            label = direction.label,
+            checked = selectedSortDirection == direction,
+            onClick = { onSortDirectionSelected(direction) }
+        )
+    }
+}
 
 private fun lerpFloat(start: Float, stop: Float, fraction: Float): Float {
     return start + (stop - start) * fraction
@@ -877,7 +1071,8 @@ private fun LiquidMoreMenuOverlay(
     menuWidth: Dp = 140.dp,
     triggerEndPadding: Dp = 8.dp,
     menuEndPadding: Dp = 12.dp,
-    closeOnItemClick: Boolean = true
+    closeOnItemClick: Boolean = true,
+    @DrawableRes triggerIconRes: Int? = null
 ) {
     var mounted by remember { mutableStateOf(visible) }
     val morph = rememberLiquidMorphController(if (visible) 1f else 0f)
@@ -1009,7 +1204,16 @@ private fun LiquidMoreMenuOverlay(
                 },
             contentAlignment = Alignment.Center
         ) {
-            BasicText("⋯", style = TextStyle(textColor, 18.sp))
+            if (triggerIconRes != null) {
+                Icon(
+                    painter = painterResource(triggerIconRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = textColor
+                )
+            } else {
+                BasicText("⋯", style = TextStyle(textColor, 18.sp))
+            }
         }
 
         Box(

@@ -15,6 +15,9 @@ import com.zeaze.tianyinwallpaper.ui.commom.SaveData
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidConfirmOverlay
 import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
+import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperKindFilter
+import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperSortDirection
+import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperSortMode
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -96,6 +99,9 @@ private data class AboutGroupUiModel(
 @Composable
 fun AboutRouteScreen(
     useDarkTheme: Boolean,
+    kindFilters: Set<MainWallpaperKindFilter> = emptySet(),
+    sortMode: MainWallpaperSortMode = MainWallpaperSortMode.Custom,
+    sortDirection: MainWallpaperSortDirection = MainWallpaperSortDirection.Descending,
     onSelectionModeChange: (Boolean) -> Unit = {},
     showBackButton: Boolean = false,
     onBack: () -> Unit = {}
@@ -126,6 +132,42 @@ fun AboutRouteScreen(
     val groupBackgroundColor = if (isLightTheme) Color(0xFFF2F3F7) else Color(0xFF1C1C20).copy(alpha = 0.94f)
     val groupLabelColor = if (isLightTheme) Color(0xFF1A1A1F) else Color(0xFFF5F5FA)
     val selectedIndicatorColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF4DA3FF)
+    val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
+    var recentOpenedVersion by remember { mutableStateOf(0) }
+
+    fun groupKey(group: AboutGroupUiModel): String {
+        return "${group.saveData.name.orEmpty()}\u0000${group.saveData.s.orEmpty()}"
+    }
+
+    fun groupMatchesFilters(group: AboutGroupUiModel): Boolean {
+        if (kindFilters.isEmpty()) return true
+        return group.wallpapers.any { model ->
+            when (model.type) {
+                0 -> MainWallpaperKindFilter.ImageWallpaper in kindFilters
+                else -> MainWallpaperKindFilter.VideoWallpaper in kindFilters
+            }
+        }
+    }
+
+    fun groupTypeRank(group: AboutGroupUiModel): Int {
+        val hasImage = group.wallpapers.any { it.type == 0 }
+        val hasVideo = group.wallpapers.any { it.type != 0 }
+        return when {
+            hasImage && hasVideo -> 2
+            hasVideo -> 1
+            else -> 0
+        }
+    }
+
+    fun groupRecentRank(group: AboutGroupUiModel): Long {
+        recentOpenedVersion
+        return pref.getLong("group_recent_opened_${groupKey(group)}", 0L)
+    }
+
+    fun markGroupOpened(group: AboutGroupUiModel) {
+        pref.edit().putLong("group_recent_opened_${groupKey(group)}", System.currentTimeMillis()).apply()
+        recentOpenedVersion++
+    }
 
     fun updateSelectedIndices(from: Int, to: Int) {
         val currentSelected = selectedPositions.toList()
@@ -145,6 +187,7 @@ fun AboutRouteScreen(
     val reorderableState = rememberReorderableLazyListState(
         lazyListState = listState,
         onMove = { from, to ->
+            if (sortMode != MainWallpaperSortMode.Custom || kindFilters.isNotEmpty()) return@rememberReorderableLazyListState
             updateSelectedIndices(from.index, to.index)
             val movedItem = groupUiList.removeAt(from.index)
             groupUiList.add(to.index, movedItem)
@@ -185,13 +228,29 @@ fun AboutRouteScreen(
         }
     }
 
+    val filteredGroups = groupUiList.filter { groupMatchesFilters(it) }
+    val visibleGroups = if (sortMode == MainWallpaperSortMode.Custom) {
+        filteredGroups
+    } else {
+        val sorted = when (sortMode) {
+            MainWallpaperSortMode.Custom -> filteredGroups
+            MainWallpaperSortMode.AddedDate -> filteredGroups.sortedBy { -groupUiList.indexOf(it).toLong() }
+            MainWallpaperSortMode.Type -> filteredGroups.sortedWith(
+                compareBy<AboutGroupUiModel> { groupTypeRank(it) }.thenBy { it.saveData.name.orEmpty() }
+            )
+            MainWallpaperSortMode.Size -> filteredGroups.sortedBy { it.wallpapers.size }
+            MainWallpaperSortMode.RecentOpened -> filteredGroups.sortedBy { groupRecentRank(it) }
+        }
+        if (sortDirection == MainWallpaperSortDirection.Descending) sorted.asReversed() else sorted
+    }
+
     fun deleteSelectedGroups() {
         if (selectedPositions.isEmpty()) {
             Toast.makeText(context, "请先选择分组", Toast.LENGTH_SHORT).show()
             return
         }
-        val selectedSet = selectedPositions.toSet()
-        val remained = groupUiList.filterIndexed { index, _ -> index !in selectedSet }
+        val selectedKeys = selectedPositions.mapNotNull { visibleGroups.getOrNull(it) }.map { groupKey(it) }.toSet()
+        val remained = groupUiList.filter { groupKey(it) !in selectedKeys }
         val remainedJson = JSON.toJSONString(remained.map { it.saveData })
         FileUtil.save(context, remainedJson, FileUtil.dataPath) {
             scope.launch {
@@ -272,7 +331,7 @@ fun AboutRouteScreen(
                 )
             ) {
                 itemsIndexed(
-                    groupUiList,
+                    visibleGroups,
                     key = { _, item -> "${item.saveData.name ?: ""}\u0000${item.saveData.s ?: ""}" }
                 ) { index, group ->
                     val selected = selectedPositions.contains(index)
@@ -288,18 +347,24 @@ fun AboutRouteScreen(
                                     shape = RoundedCornerShape(28.dp)
                                     clip = true
                                 }
-                                .longPressDraggableHandle(
-                                    onDragStopped = {
-                                        if (pendingReorderSave) {
-                                            val newJson = JSON.toJSONString(groupUiList.map { it.saveData })
-                                            FileUtil.save(context, newJson, FileUtil.dataPath) {
-                                                lastGroupsJson = newJson
-                                                groupsVersion++
+                                .let { base ->
+                                    if (sortMode == MainWallpaperSortMode.Custom && kindFilters.isEmpty()) {
+                                        base.longPressDraggableHandle(
+                                            onDragStopped = {
+                                                if (pendingReorderSave) {
+                                                    val newJson = JSON.toJSONString(groupUiList.map { it.saveData })
+                                                    FileUtil.save(context, newJson, FileUtil.dataPath) {
+                                                        lastGroupsJson = newJson
+                                                        groupsVersion++
+                                                    }
+                                                    pendingReorderSave = false
+                                                }
                                             }
-                                            pendingReorderSave = false
-                                        }
+                                        )
+                                    } else {
+                                        base
                                     }
-                                )
+                                }
                                 .pointerInput(key, selectionMode) {
                                     awaitEachGesture {
                                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -334,6 +399,7 @@ fun AboutRouteScreen(
                                 if (selectionMode) {
                                     if (selected) selectedPositions.remove(index) else selectedPositions.add(index)
                                 } else {
+                                    markGroupOpened(group)
                                     pendingOverwriteGroup = group.saveData
                                 }
                             }
@@ -386,7 +452,7 @@ fun AboutRouteScreen(
         )
 
         if (selectionMode) {
-            val isAllSelected = selectedPositions.size == groupUiList.size && groupUiList.isNotEmpty()
+            val isAllSelected = selectedPositions.size == visibleGroups.size && visibleGroups.isNotEmpty()
             com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar(
                 modifier = Modifier.zIndex(3f),
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
@@ -402,11 +468,11 @@ fun AboutRouteScreen(
                         selectedPositions.clear()
                     } else {
                         selectedPositions.clear()
-                        groupUiList.indices.forEach { selectedPositions.add(it) }
+                        visibleGroups.indices.forEach { selectedPositions.add(it) }
                     }
                 }
             )
-        } else {
+        } else if (showBackButton) {
             Row(
                 modifier = Modifier
                     .zIndex(3f)
@@ -439,15 +505,6 @@ fun AboutRouteScreen(
                     )
                 }
 
-                AboutTopActionButton(
-                    text = "多选",
-                    onClick = { enterSelectionMode() },
-                    enableLiquidGlass = enableLiquidGlass,
-                    liquidBackdrop = liquidBackdrop,
-                    surfaceColor = adaptiveSurfaceColor,
-                    isDark = isDark,
-                    textColor = textColor
-                )
             }
         }
     }

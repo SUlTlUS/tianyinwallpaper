@@ -64,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -236,6 +237,8 @@ private fun isTimeWindowOverlap(startA: Int, endA: Int, startB: Int, endB: Int):
 fun MainRouteScreen(
     useDarkTheme: Boolean,
     kindFilters: Set<MainWallpaperKindFilter> = emptySet(),
+    sortMode: MainWallpaperSortMode = MainWallpaperSortMode.Custom,
+    sortDirection: MainWallpaperSortDirection = MainWallpaperSortDirection.Descending,
     onOpenSettingPage: () -> Unit,
     onBottomBarVisibleChange: (Boolean) -> Unit
 ) {
@@ -906,6 +909,87 @@ fun MainRouteScreen(
         )
     }
 
+    val mediaSizeCache = remember { mutableMapOf<String, Long>() }
+    var recentOpenedVersion by remember { mutableStateOf(0) }
+
+    fun resolveMediaSize(source: String?): Long {
+        if (source.isNullOrBlank()) return 0L
+        return mediaSizeCache.getOrPut(source) {
+            runCatching {
+                when {
+                    source.startsWith("content://") -> {
+                        context.contentResolver.query(
+                            Uri.parse(source),
+                            arrayOf(OpenableColumns.SIZE),
+                            null,
+                            null,
+                            null
+                        )?.use { cursor ->
+                            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (index >= 0 && cursor.moveToFirst()) cursor.getLong(index) else 0L
+                        } ?: 0L
+                    }
+                    source.startsWith("file://") -> File(Uri.parse(source).path.orEmpty()).length()
+                    else -> File(source).length()
+                }
+            }.getOrDefault(0L)
+        }
+    }
+
+    fun wallpaperSortId(model: TianYinWallpaperModel, index: Int): String {
+        return "wallpaper:${model.uuid ?: model.imgUri ?: model.videoUri ?: model.imgPath ?: model.videoPath ?: index}"
+    }
+
+    fun rasterSortId(group: RasterGroupModel): String = "raster:${group.id}"
+
+    fun depthSortId(model: DepthWallpaperModel): String = "depth:${model.id}"
+
+    fun markRecentOpened(id: String) {
+        pref.edit().putLong("main_recent_opened_$id", System.currentTimeMillis()).apply()
+        recentOpenedVersion++
+    }
+
+    fun wallpaperSize(model: TianYinWallpaperModel): Long {
+        return if (model.type == WALLPAPER_TYPE_DYNAMIC) {
+            resolveMediaSize(model.videoUri ?: model.videoPath)
+        } else {
+            resolveMediaSize(model.imgUri ?: model.imgPath)
+        }
+    }
+
+    fun itemTypeRank(item: MainUnifiedWallpaperItem): Int = when (item) {
+        is MainUnifiedWallpaperItem.Wallpaper -> if (item.model.type == WALLPAPER_TYPE_DYNAMIC) 1 else 0
+        is MainUnifiedWallpaperItem.Raster -> if (item.group.type == RasterGroupModel.TYPE_DYNAMIC) 3 else 2
+        is MainUnifiedWallpaperItem.Depth -> 4
+    }
+
+    fun itemAddedRank(item: MainUnifiedWallpaperItem): Long = when (item) {
+        is MainUnifiedWallpaperItem.Wallpaper -> -item.index.toLong()
+        is MainUnifiedWallpaperItem.Raster -> item.group.createdAt
+        is MainUnifiedWallpaperItem.Depth -> item.model.createdAt
+    }
+
+    fun itemSizeRank(item: MainUnifiedWallpaperItem): Long = when (item) {
+        is MainUnifiedWallpaperItem.Wallpaper -> wallpaperSize(item.model)
+        is MainUnifiedWallpaperItem.Raster -> {
+            if (item.group.type == RasterGroupModel.TYPE_DYNAMIC) {
+                resolveMediaSize(item.group.videoUri)
+            } else {
+                item.group.imageUris.sumOf { resolveMediaSize(it) }
+            }
+        }
+        is MainUnifiedWallpaperItem.Depth -> resolveMediaSize(item.model.gaussianUri)
+    }
+
+    fun itemRecentRank(item: MainUnifiedWallpaperItem): Long {
+        recentOpenedVersion
+        return when (item) {
+            is MainUnifiedWallpaperItem.Wallpaper -> pref.getLong("main_recent_opened_${wallpaperSortId(item.model, item.index)}", 0L)
+            is MainUnifiedWallpaperItem.Raster -> pref.getLong("main_recent_opened_${rasterSortId(item.group)}", 0L)
+            is MainUnifiedWallpaperItem.Depth -> pref.getLong("main_recent_opened_${depthSortId(item.model)}", 0L)
+        }
+    }
+
     fun removeWallpaperAt(index: Int) {
         if (index !in wallpapers.indices) return
         val removed = wallpapers.removeAt(index)
@@ -1072,12 +1156,32 @@ fun MainRouteScreen(
     val gridState = rememberLazyGridState()
 
 
-    val unifiedItems = buildMainUnifiedWallpaperItems(
+    val customUnifiedItems = buildMainUnifiedWallpaperItems(
         wallpapers = wallpapers,
         rasterGroups = rasterGroups,
         depthWallpapers = depthWallpapers,
         kindFilters = kindFilters
     )
+    val unifiedItems = if (sortMode == MainWallpaperSortMode.Custom) {
+        customUnifiedItems
+    } else {
+        val sorted = when (sortMode) {
+            MainWallpaperSortMode.Custom -> customUnifiedItems
+            MainWallpaperSortMode.AddedDate -> customUnifiedItems.sortedWith(
+                compareBy<MainUnifiedWallpaperItem> { itemAddedRank(it) }.thenBy { itemTypeRank(it) }
+            )
+            MainWallpaperSortMode.Type -> customUnifiedItems.sortedWith(
+                compareBy<MainUnifiedWallpaperItem> { itemTypeRank(it) }.thenByDescending { itemAddedRank(it) }
+            )
+            MainWallpaperSortMode.Size -> customUnifiedItems.sortedWith(
+                compareBy<MainUnifiedWallpaperItem> { itemSizeRank(it) }.thenBy { itemTypeRank(it) }
+            )
+            MainWallpaperSortMode.RecentOpened -> customUnifiedItems.sortedWith(
+                compareBy<MainUnifiedWallpaperItem> { itemRecentRank(it) }.thenBy { itemTypeRank(it) }
+            )
+        }
+        if (sortDirection == MainWallpaperSortDirection.Descending) sorted.asReversed() else sorted
+    }
 
     fun updateSelectedWallpaperIndices(from: Int, to: Int) {
         val currentSelected = selectedPositions.toList()
@@ -1220,7 +1324,13 @@ fun MainRouteScreen(
                                 shape = RoundedCornerShape(16.dp)
                                 clip = true
                             }
-                            .longPressDraggableHandle()
+                            .let { base ->
+                                if (sortMode == MainWallpaperSortMode.Custom) {
+                                    base.longPressDraggableHandle()
+                                } else {
+                                    base
+                                }
+                            }
 
                         when (item) {
                             is MainUnifiedWallpaperItem.Wallpaper -> {
@@ -1251,6 +1361,7 @@ fun MainRouteScreen(
                                                 if (selectionMode) {
                                                     if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
                                                 } else {
+                                                    markRecentOpened(wallpaperSortId(item.model, item.index))
                                                     fullScreenPreviewModel = item.model
                                                 }
                                             }
@@ -1270,6 +1381,7 @@ fun MainRouteScreen(
                                         if (selectionMode) {
                                             if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
                                         } else {
+                                            markRecentOpened(wallpaperSortId(item.model, item.index))
                                             fullScreenPreviewModel = item.model
                                         }
                                     },
@@ -1304,6 +1416,7 @@ fun MainRouteScreen(
                                                 if (selectionMode) {
                                                     if (selected) selectedRasterGroupIds.remove(item.group.id) else selectedRasterGroupIds.add(item.group.id)
                                                 } else {
+                                                    markRecentOpened(rasterSortId(item.group))
                                                     rasterDetailGroup = item.group
                                                 }
                                             }
@@ -1323,6 +1436,7 @@ fun MainRouteScreen(
                                         if (selectionMode) {
                                             if (selected) selectedRasterGroupIds.remove(item.group.id) else selectedRasterGroupIds.add(item.group.id)
                                         } else {
+                                            markRecentOpened(rasterSortId(item.group))
                                             rasterDetailGroup = item.group
                                         }
                                     },
@@ -1357,6 +1471,7 @@ fun MainRouteScreen(
                                                 if (selectionMode) {
                                                     if (selected) selectedDepthWallpaperIds.remove(item.model.id) else selectedDepthWallpaperIds.add(item.model.id)
                                                 } else {
+                                                    markRecentOpened(depthSortId(item.model))
                                                     depthPreviewModel = item.model
                                                 }
                                             }
@@ -1376,6 +1491,7 @@ fun MainRouteScreen(
                                         if (selectionMode) {
                                             if (selected) selectedDepthWallpaperIds.remove(item.model.id) else selectedDepthWallpaperIds.add(item.model.id)
                                         } else {
+                                            markRecentOpened(depthSortId(item.model))
                                             depthPreviewModel = item.model
                                         }
                                     },

@@ -213,12 +213,14 @@ fun MainTopBar(
     onAdd: () -> Unit,
     onApply: () -> Unit,
     onMoreClick: () -> Unit,
+    onSortClick: () -> Unit = {},
     onFilterClick: () -> Unit = {},
     onPreview: () -> Unit,
     showAddButton: Boolean = true,
     showPreviewButton: Boolean = true,
     showApplyButton: Boolean = true,
     showMoreButton: Boolean = true,
+    showSortButton: Boolean = false,
     showFilterButton: Boolean = true,
     keepSlotWhenHidden: Boolean = true
 ) {
@@ -272,6 +274,21 @@ fun MainTopBar(
             keepSlotWhenHidden = keepSlotWhenHidden,
             iconRes = R.drawable.complete,
             iconContentDescription = "完成",
+            iconSize = 20.dp
+        )
+
+        TopCircleLiquidButton(
+            visible = showSortButton,
+            onClick = onSortClick,
+            text = "",
+            textColor = textColor,
+            surfaceColor = adaptiveSurfaceColor,
+            isDark = isDark,
+            enableLiquidGlass = enableLiquidGlass,
+            backdrop = backdrop,
+            keepSlotWhenHidden = keepSlotWhenHidden,
+            iconRes = R.drawable.sort,
+            iconContentDescription = "排序",
             iconSize = 20.dp
         )
 
