@@ -14,6 +14,7 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.annotation.DrawableRes
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -43,6 +44,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
@@ -69,6 +71,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -120,10 +123,17 @@ import java.io.File
 import kotlinx.coroutines.launch
 
 class MainActivity : BaseActivity() {
-    private val bottomTabs: List<Pair<String, String>> = listOf(
-        ROUTE_MAIN to "壁纸",
-        ROUTE_ABOUT to "分组",
-        ROUTE_SETTING to "设置"
+    private data class BottomTabItem(
+        val route: String,
+        val title: String,
+        @param:DrawableRes val iconRes: Int,
+        @param:DrawableRes val selectedIconRes: Int
+    )
+
+    private val bottomTabs: List<BottomTabItem> = listOf(
+        BottomTabItem(ROUTE_MAIN, "壁纸", R.drawable.wallpaper, R.drawable.wallpaper_filled),
+        BottomTabItem(ROUTE_ABOUT, "分组", R.drawable.list, R.drawable.list_filled),
+        BottomTabItem(ROUTE_SETTING, "设置", R.drawable.setting, R.drawable.setting_filled)
     )
 
     private var showBottomBar by mutableStateOf(true)
@@ -464,9 +474,17 @@ class MainActivity : BaseActivity() {
                             bottomTabs.forEachIndexed { index, tab ->
                                 LiquidBottomTab({ selectRoot(index) }) {
                                     val selected = selectedRootIndex == index
+                                    val tabColor = if (selected) BOTTOM_BAR_SELECTED_COLOR else MaterialTheme.colors.onSurface
+                                    Icon(
+                                        painter = painterResource(id = if (selected) tab.selectedIconRes else tab.iconRes),
+                                        contentDescription = tab.title,
+                                        modifier = Modifier.size(21.dp),
+                                        tint = tabColor
+                                    )
                                     Text(
-                                        text = tab.second,
-                                        color = if (selected) BOTTOM_BAR_SELECTED_COLOR else MaterialTheme.colors.onSurface,
+                                        text = tab.title,
+                                        color = tabColor,
+                                        fontSize = 11.sp,
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                     )
                                 }
