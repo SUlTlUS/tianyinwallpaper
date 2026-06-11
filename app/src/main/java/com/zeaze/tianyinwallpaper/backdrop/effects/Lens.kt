@@ -12,6 +12,7 @@ import com.zeaze.tianyinwallpaper.backdrop.BackdropEffectScope
 import com.zeaze.tianyinwallpaper.backdrop.RoundedRectRefractionShaderString
 import com.zeaze.tianyinwallpaper.backdrop.RoundedRectRefractionWithDispersionShaderString
 import com.kyant.shapes.RoundedRectangularShape
+import com.kyant.backdrop.asAndroidRuntimeShader
 import com.zeaze.tianyinwallpaper.backdrop.highlight.effect
 
 fun BackdropEffectScope.lens(
@@ -53,7 +54,7 @@ fun BackdropEffectScope.lens(
                     setFloatUniform("chromaticAberration", 1f)
                 }
             }
-            RenderEffect.createRuntimeShaderEffect(shader, "content")
+            RenderEffect.createRuntimeShaderEffect(shader.asAndroidRuntimeShader(), "content")
         } else {
             throwUnsupportedSDFException()
         }

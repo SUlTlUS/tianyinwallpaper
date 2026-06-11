@@ -1,6 +1,5 @@
 package com.zeaze.tianyinwallpaper.ui.commom
 
-import android.graphics.RenderEffect
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -16,14 +15,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.backdrop.drawPlainBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
-import com.zeaze.tianyinwallpaper.backdrop.highlight.effect
+import com.zeaze.tianyinwallpaper.backdrop.effects.runtimeShaderEffect
 
 @Composable
 fun ProgressiveBlurContent(
@@ -48,11 +46,9 @@ fun ProgressiveBlurContent(
                     effects = {
                         blur(4.dp.toPx())
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            effect(
-                                RenderEffect.createRuntimeShaderEffect(
-                                    obtainRuntimeShader(
-                                        "AlphaMask",
-                                        """
+                            runtimeShaderEffect(
+                                key = "AlphaMask",
+                                shaderString = """
 uniform shader content;
 
 uniform float2 size;
@@ -67,14 +63,13 @@ half4 main(float2 coord) {
     return content.eval(coord) * alpha;
 }
 """
-                                    ).apply {
-                                        setFloatUniform("size", size.width, size.height)
-                                        //setColorUniform("tint", tintColor.toArgb())
-                                        //setFloatUniform("tintIntensity", 0.8f)
-                                    },
-                                    "content"
-                                )
-                            )
+                                ,
+                                uniformShaderName = "content"
+                            ) {
+                                setFloatUniform("size", size.width, size.height)
+                                //setColorUniform("tint", tintColor)
+                                //setFloatUniform("tintIntensity", 0.8f)
+                            }
                         }
                     }
                 )

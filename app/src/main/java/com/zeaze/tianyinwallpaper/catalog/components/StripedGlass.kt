@@ -1,6 +1,5 @@
 package com.zeaze.tianyinwallpaper.catalog.components
 
-import android.graphics.RenderEffect
 import android.os.Build
 import androidx.annotation.FloatRange
 import androidx.compose.animation.core.LinearEasing
@@ -35,7 +34,7 @@ import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.backdrop.BackdropEffectScope
 import com.zeaze.tianyinwallpaper.backdrop.drawPlainBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
-import com.zeaze.tianyinwallpaper.backdrop.highlight.effect
+import com.zeaze.tianyinwallpaper.backdrop.effects.runtimeShaderEffect
 import org.intellij.lang.annotations.Language
 import kotlin.math.PI
 
@@ -254,7 +253,11 @@ private fun BackdropEffectScope.stripedRefraction(
 
     val shaderName = "${profile.name}Refraction"
 
-    val shader = obtainRuntimeShader(shaderName, shaderString).apply {
+    runtimeShaderEffect(
+        key = shaderName,
+        shaderString = shaderString,
+        uniformShaderName = "content"
+    ) {
         setFloatUniform("size", size.width, size.height)
         setFloatUniform("amplitude", amplitudePx)
         setFloatUniform("wavelength", clampedWavelength)
@@ -272,8 +275,6 @@ private fun BackdropEffectScope.stripedRefraction(
             setFloatUniform("narrowWave", clampedNarrowWavelength)
         }
     }
-
-    effect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -1,10 +1,7 @@
 package com.zeaze.tianyinwallpaper.backdrop.effects
 
-import android.graphics.RenderEffect
-import android.os.Build
 import com.zeaze.tianyinwallpaper.backdrop.BackdropEffectScope
 import com.zeaze.tianyinwallpaper.backdrop.MetaballMaskShaderString
-import com.zeaze.tianyinwallpaper.backdrop.highlight.effect
 
 fun BackdropEffectScope.metaballMask(
     centerAX: Float,
@@ -19,9 +16,11 @@ fun BackdropEffectScope.metaballMask(
     opacity: Float = 1f,
     neckOnly: Boolean = false
 ) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-
-    val shader = obtainRuntimeShader("MetaballMask", MetaballMaskShaderString).apply {
+    runtimeShaderEffect(
+        key = "MetaballMask",
+        shaderString = MetaballMaskShaderString,
+        uniformShaderName = "content"
+    ) {
         setFloatUniform("size", size.width, size.height)
         setFloatUniform("centerA", centerAX, centerAY)
         setFloatUniform("radiusA", radiusAX, radiusAY)
@@ -31,5 +30,4 @@ fun BackdropEffectScope.metaballMask(
         setFloatUniform("opacity", opacity.coerceIn(0f, 1f))
         setFloatUniform("neckOnly", if (neckOnly) 1f else 0f)
     }
-    effect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
 }

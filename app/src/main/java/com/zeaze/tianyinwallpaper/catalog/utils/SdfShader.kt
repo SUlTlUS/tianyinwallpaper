@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.unit.dp
+import com.kyant.backdrop.asAndroidRuntimeShader
 import com.zeaze.tianyinwallpaper.backdrop.BackdropEffectScope
 import com.zeaze.tianyinwallpaper.backdrop.highlight.effect
 import org.intellij.lang.annotations.Language
@@ -41,13 +42,15 @@ class SdfShader(val sdfBitmap: Bitmap) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val shader =
                 obtainRuntimeShader("SdfShader", createSdfShaderString()).apply {
-                    setInputBuffer("sdfTex", sdfTexture)
                     setFloatUniform("size", size.width, size.height)
                     setFloatUniform("sdfTexSize", sdfBitmap.width.toFloat(), sdfBitmap.height.toFloat())
                     setFloatUniform("refractionHeight", refractionHeight)
                     setFloatUniform("lightAngle", lightAngle)
                 }
-            effect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
+            val androidShader = shader.asAndroidRuntimeShader().apply {
+                setInputBuffer("sdfTex", sdfTexture)
+            }
+            effect(RenderEffect.createRuntimeShaderEffect(androidShader, "content"))
         }
     }
 }

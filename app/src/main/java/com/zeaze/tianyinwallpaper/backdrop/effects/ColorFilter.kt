@@ -9,7 +9,6 @@ import androidx.annotation.FloatRange
 import androidx.compose.ui.graphics.asAndroidColorFilter
 import com.zeaze.tianyinwallpaper.backdrop.BackdropEffectScope
 import com.zeaze.tianyinwallpaper.backdrop.GammaAdjustmentShaderString
-import com.zeaze.tianyinwallpaper.backdrop.highlight.effect
 import kotlin.math.pow
 
 fun BackdropEffectScope.colorFilter(colorFilter: ColorFilter) {
@@ -72,12 +71,13 @@ fun BackdropEffectScope.exposureAdjustment(ev: Float) {
 }
 
 fun BackdropEffectScope.gammaAdjustment(power: Float) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-
-    val shader = obtainRuntimeShader("GammaAdjustment", GammaAdjustmentShaderString).apply {
+    runtimeShaderEffect(
+        key = "GammaAdjustment",
+        shaderString = GammaAdjustmentShaderString,
+        uniformShaderName = "content"
+    ) {
         setFloatUniform("power", power)
     }
-    effect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
 }
 
 private fun colorControlsColorFilter(

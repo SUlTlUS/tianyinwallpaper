@@ -1,10 +1,7 @@
 package com.zeaze.tianyinwallpaper.backdrop.effects
 
-import android.graphics.RenderEffect
-import android.os.Build
 import com.zeaze.tianyinwallpaper.backdrop.BackdropEffectScope
 import com.zeaze.tianyinwallpaper.backdrop.LiquidMetaballMaskShaderString
-import com.zeaze.tianyinwallpaper.backdrop.highlight.effect
 
 enum class LiquidMetaballShapeKind(val shaderValue: Float) {
     Ellipse(0f),
@@ -66,11 +63,13 @@ fun BackdropEffectScope.liquidMetaballMask(
     opacity: Float = 1f,
     neckOnly: Boolean = false
 ) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-
     val anchor = geometry.anchor
     val body = geometry.body
-    val shader = obtainRuntimeShader("LiquidMetaballMask", LiquidMetaballMaskShaderString).apply {
+    runtimeShaderEffect(
+        key = "LiquidMetaballMask",
+        shaderString = LiquidMetaballMaskShaderString,
+        uniformShaderName = "content"
+    ) {
         setFloatUniform("size", size.width, size.height)
         setFloatUniform("centerA", anchor.centerX, anchor.centerY)
         setFloatUniform("halfSizeA", anchor.halfWidth.coerceAtLeast(1f), anchor.halfHeight.coerceAtLeast(1f))
@@ -84,5 +83,4 @@ fun BackdropEffectScope.liquidMetaballMask(
         setFloatUniform("opacity", opacity.coerceIn(0f, 1f))
         setFloatUniform("neckOnly", if (neckOnly) 1f else 0f)
     }
-    effect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
 }

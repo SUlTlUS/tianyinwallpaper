@@ -11,12 +11,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.util.fastCoerceAtMost
 import com.zeaze.tianyinwallpaper.backdrop.AmbientHighlightShaderString
 import com.zeaze.tianyinwallpaper.backdrop.DefaultHighlightShaderString
 import com.zeaze.tianyinwallpaper.backdrop.RuntimeShaderCache
+import com.kyant.backdrop.asComposeShader
 import kotlin.math.PI
 
 @Immutable
@@ -79,10 +79,10 @@ interface HighlightStyle {
                 ).apply {
                     setFloatUniform("size", size.width, size.height)
                     setFloatUniform("cornerRadii", getCornerRadii(shape))
-                    setColorUniform("color", color.copy(alpha = 1f).toArgb())
+                    setColorUniform("color", color.copy(alpha = 1f))
                     setFloatUniform("angle", angle * (PI / 180f).toFloat())
                     setFloatUniform("falloff", falloff)
-                }
+                }.asComposeShader()
             } else {
                 null
             }
@@ -112,7 +112,7 @@ interface HighlightStyle {
                     setFloatUniform("cornerRadii", getCornerRadii(shape))
                     setFloatUniform("angle", 45f * (PI / 180f).toFloat())
                     setFloatUniform("falloff", 1f)
-                }
+                }.asComposeShader()
             } else {
                 null
             }
