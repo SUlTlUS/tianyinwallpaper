@@ -2321,8 +2321,8 @@ private fun MainThumbnailTypeIcon(
     val density = LocalDensity.current
     val targetPx = remember(density) { with(density) { 28.dp.roundToPx().coerceAtLeast(1) } }
     val marginPx = remember(density) { with(density) { 4.dp.roundToPx().coerceAtLeast(0) } }
-    val bakedBitmap = remember(sourceBitmap, iconRes, bakeKey, targetPx, marginPx, viewportAspectRatio, viewportSizePx) {
-        bakeThumbnailTypeIconBackground(
+    val bakedBadge = remember(sourceBitmap, iconRes, bakeKey, targetPx, marginPx, viewportAspectRatio, viewportSizePx) {
+        bakeThumbnailTypeIcon(
             source = sourceBitmap,
             targetPx = targetPx,
             viewportAspectRatio = viewportAspectRatio,
@@ -2341,9 +2341,9 @@ private fun MainThumbnailTypeIcon(
         modifier = glassModifier,
         contentAlignment = Alignment.Center
     ) {
-        if (bakedBitmap != null) {
+        if (bakedBadge != null) {
             Image(
-                bitmap = bakedBitmap,
+                bitmap = bakedBadge.bitmap,
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
                 modifier = Modifier.matchParentSize()
@@ -2359,19 +2359,24 @@ private fun MainThumbnailTypeIcon(
             painter = painterResource(iconRes),
             contentDescription = contentDescription,
             modifier = Modifier.size(16.dp),
-            tint = Color.White
+            tint = bakedBadge?.iconTint ?: Color.White
         )
     }
 }
 
-private fun bakeThumbnailTypeIconBackground(
+private data class BakedThumbnailTypeIcon(
+    val bitmap: ImageBitmap,
+    val iconTint: Color
+)
+
+private fun bakeThumbnailTypeIcon(
     source: Bitmap?,
     targetPx: Int,
     viewportAspectRatio: Float,
     viewportWidthPx: Int,
     viewportHeightPx: Int,
     badgeMarginPx: Int
-): ImageBitmap? {
+): BakedThumbnailTypeIcon? {
     if (
         source == null ||
         source.isRecycled ||
@@ -2443,8 +2448,34 @@ private fun bakeThumbnailTypeIconBackground(
         canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
         paint.color = android.graphics.Color.argb(28, 0, 0, 0)
         canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
-        output.asImageBitmap()
+        BakedThumbnailTypeIcon(
+            bitmap = output.asImageBitmap(),
+            iconTint = if (output.averageLuminance() > 0.62f) Color(0xDD111318) else Color.White
+        )
     }.getOrNull()
+}
+
+private fun Bitmap.averageLuminance(): Float {
+    if (isRecycled || width <= 0 || height <= 0) return 0f
+    var sum = 0f
+    val stepX = (width / 6).coerceAtLeast(1)
+    val stepY = (height / 6).coerceAtLeast(1)
+    var count = 0
+    var y = 0
+    while (y < height) {
+        var x = 0
+        while (x < width) {
+            val color = getPixel(x, y)
+            val r = android.graphics.Color.red(color) / 255f
+            val g = android.graphics.Color.green(color) / 255f
+            val b = android.graphics.Color.blue(color) / 255f
+            sum += 0.2126f * r + 0.7152f * g + 0.0722f * b
+            count++
+            x += stepX
+        }
+        y += stepY
+    }
+    return if (count == 0) 0f else sum / count
 }
 
 @Composable
