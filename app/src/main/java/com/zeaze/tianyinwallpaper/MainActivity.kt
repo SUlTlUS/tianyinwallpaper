@@ -557,8 +557,8 @@ class MainActivity : BaseActivity() {
                         enableLiquidGlass = enableLiquidGlass,
                         liquidBackdrop = rootBackdrop,
                         menuWidth = 190.dp,
-                        triggerEndPadding = 120.dp,
-                        menuEndPadding = 120.dp,
+                        triggerEndPadding = 112.dp,
+                        menuEndPadding = 112.dp,
                         closeOnItemClick = false,
                         triggerIconRes = R.drawable.sort,
                         menuItems = buildSortMenuItems(
@@ -990,8 +990,8 @@ private fun WallpaperRootPage(
             enableLiquidGlass = enableLiquidGlass,
             liquidBackdrop = pageBackdrop,
             menuWidth = 190.dp,
-            triggerEndPadding = 120.dp,
-            menuEndPadding = 120.dp,
+            triggerEndPadding = 112.dp,
+            menuEndPadding = 112.dp,
             closeOnItemClick = false,
             triggerIconRes = R.drawable.sort,
             menuItems = buildSortMenuItems(

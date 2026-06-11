@@ -205,6 +205,90 @@ private fun TopCapsuleLiquidButton(
 }
 
 @Composable
+private fun TopSortFilterLiquidCapsule(
+    visible: Boolean,
+    onSortClick: () -> Unit,
+    onFilterClick: () -> Unit,
+    textColor: Color,
+    surfaceColor: Color,
+    isDark: Boolean,
+    enableLiquidGlass: Boolean,
+    backdrop: LayerBackdrop?,
+    keepSlotWhenHidden: Boolean,
+    modifier: Modifier = Modifier,
+    width: Dp = 96.dp
+) {
+    if (visible) {
+        @Composable
+        fun CapsuleContent() {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(width / 2)
+                        .fillMaxHeight()
+                        .clickable(onClick = onSortClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.sort),
+                        contentDescription = "排序",
+                        modifier = Modifier.size(20.dp),
+                        tint = textColor
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .width(width / 2)
+                        .fillMaxHeight()
+                        .clickable(onClick = onFilterClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.fliter),
+                        contentDescription = "筛选",
+                        modifier = Modifier.size(20.dp),
+                        tint = textColor
+                    )
+                }
+            }
+        }
+
+        if (enableLiquidGlass && backdrop != null) {
+            LiquidButton(
+                onClick = {},
+                backdrop = backdrop,
+                modifier = modifier
+                    .width(width)
+                    .height(IosTopButtonHeight),
+                isInteractive = false,
+                surfaceColor = surfaceColor,
+                buttonHeight = IosTopButtonHeight,
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                CapsuleContent()
+            }
+        } else {
+            Surface(
+                modifier = modifier
+                    .width(width)
+                    .height(IosTopButtonHeight),
+                shape = Capsule(),
+                color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+                border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+            ) {
+                CapsuleContent()
+            }
+        }
+    } else if (keepSlotWhenHidden) {
+        Spacer(modifier = modifier.width(width).height(IosTopButtonHeight))
+    }
+}
+
+@Composable
 fun MainTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
@@ -277,35 +361,49 @@ fun MainTopBar(
             iconSize = 20.dp
         )
 
-        TopCircleLiquidButton(
-            visible = showSortButton,
-            onClick = onSortClick,
-            text = "",
-            textColor = textColor,
-            surfaceColor = adaptiveSurfaceColor,
-            isDark = isDark,
-            enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
-            keepSlotWhenHidden = keepSlotWhenHidden,
-            iconRes = R.drawable.sort,
-            iconContentDescription = "排序",
-            iconSize = 20.dp
-        )
+        if (showSortButton && showFilterButton) {
+            TopSortFilterLiquidCapsule(
+                visible = true,
+                onSortClick = onSortClick,
+                onFilterClick = onFilterClick,
+                textColor = textColor,
+                surfaceColor = adaptiveSurfaceColor,
+                isDark = isDark,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = backdrop,
+                keepSlotWhenHidden = keepSlotWhenHidden
+            )
+        } else {
+            TopCircleLiquidButton(
+                visible = showSortButton,
+                onClick = onSortClick,
+                text = "",
+                textColor = textColor,
+                surfaceColor = adaptiveSurfaceColor,
+                isDark = isDark,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = backdrop,
+                keepSlotWhenHidden = keepSlotWhenHidden,
+                iconRes = R.drawable.sort,
+                iconContentDescription = "排序",
+                iconSize = 20.dp
+            )
 
-        TopCircleLiquidButton(
-            visible = showFilterButton,
-            onClick = onFilterClick,
-            text = "",
-            textColor = textColor,
-            surfaceColor = adaptiveSurfaceColor,
-            isDark = isDark,
-            enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
-            keepSlotWhenHidden = keepSlotWhenHidden,
-            iconRes = R.drawable.fliter,
-            iconContentDescription = "筛选",
-            iconSize = 20.dp
-        )
+            TopCircleLiquidButton(
+                visible = showFilterButton,
+                onClick = onFilterClick,
+                text = "",
+                textColor = textColor,
+                surfaceColor = adaptiveSurfaceColor,
+                isDark = isDark,
+                enableLiquidGlass = enableLiquidGlass,
+                backdrop = backdrop,
+                keepSlotWhenHidden = keepSlotWhenHidden,
+                iconRes = R.drawable.fliter,
+                iconContentDescription = "筛选",
+                iconSize = 20.dp
+            )
+        }
 
         TopCircleLiquidButton(
             visible = showMoreButton,
