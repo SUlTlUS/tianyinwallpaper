@@ -234,7 +234,7 @@ class MainActivity : BaseActivity() {
         }
 
         MaterialTheme(colors = if (useDarkTheme) darkColors() else lightColors()) {
-            val themeBackgroundColor = MaterialTheme.colors.background
+            val themeBackgroundColor = if (useDarkTheme) Color(0xFF0A0A0C) else MaterialTheme.colors.background
             val enableLiquidGlass = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
             val navController = rememberNavController()
             val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -441,14 +441,105 @@ class MainActivity : BaseActivity() {
                                     onOpenGroupPage = { selectRoot(1) },
                                     onBottomBarVisibleChange = { setBottomBarVisible(it) }
                                 )
-                                1 -> AboutRouteScreen(
-                                    useDarkTheme = useDarkTheme,
-                                    kindFilters = selectedKindFilters,
-                                    sortMode = selectedSortMode,
-                                    sortDirection = selectedSortDirection,
-                                    onSelectionModeChange = { inSelection -> showBottomBar = !inSelection },
-                                    showBackButton = false
-                                )
+                                1 -> Box(Modifier.fillMaxSize()) {
+                                    AboutRouteScreen(
+                                        useDarkTheme = useDarkTheme,
+                                        kindFilters = selectedKindFilters,
+                                        sortMode = selectedSortMode,
+                                        sortDirection = selectedSortDirection,
+                                        onSelectionModeChange = { inSelection -> showBottomBar = !inSelection },
+                                        showBackButton = false
+                                    )
+
+                                    if (showBottomBar) {
+                                        MainTopBar(
+                                            statusBarTopPaddingDp = statusBarTopPaddingDp,
+                                            enableLiquidGlass = enableLiquidGlass,
+                                            backdrop = rootBackdrop,
+                                            isLightTheme = !useDarkTheme,
+                                            onAdd = {},
+                                            onApply = {},
+                                            onMoreClick = { showMoreMenu = true },
+                                            onSortClick = { showSortMenu = true },
+                                            onFilterClick = { showFilterMenu = true },
+                                            onPreview = {},
+                                            showAddButton = false,
+                                            showPreviewButton = false,
+                                            showApplyButton = false,
+                                            showMoreButton = true,
+                                            showSortButton = true,
+                                            showFilterButton = true,
+                                            keepSlotWhenHidden = false
+                                        )
+
+                                        LiquidMoreMenuOverlay(
+                                            visible = showMoreMenu && selectedRootIndex == 1,
+                                            statusBarTopPaddingDp = statusBarTopPaddingDp,
+                                            currentPageRoute = "group",
+                                            useDarkTheme = useDarkTheme,
+                                            enableLiquidGlass = enableLiquidGlass,
+                                            liquidBackdrop = rootBackdrop,
+                                            menuItems = listOf(
+                                                LiquidMoreMenuItem("选择") {
+                                                    showMoreMenu = false
+                                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_GROUP_OPTIONS, Unit)
+                                                }
+                                            ),
+                                            onDismiss = { showMoreMenu = false }
+                                        )
+
+                                        LiquidMoreMenuOverlay(
+                                            visible = showSortMenu && selectedRootIndex == 1,
+                                            statusBarTopPaddingDp = statusBarTopPaddingDp,
+                                            currentPageRoute = "group_sort",
+                                            useDarkTheme = useDarkTheme,
+                                            enableLiquidGlass = enableLiquidGlass,
+                                            liquidBackdrop = rootBackdrop,
+                                            menuWidth = 190.dp,
+                                            triggerEndPadding = 112.dp,
+                                            menuEndPadding = 112.dp,
+                                            closeOnItemClick = false,
+                                            triggerIconRes = R.drawable.sort,
+                                            menuItems = buildSortMenuItems(
+                                                selectedSortMode = selectedSortMode,
+                                                selectedSortDirection = selectedSortDirection,
+                                                onSortModeSelected = { persistSortMode(it) },
+                                                onSortDirectionSelected = { persistSortDirection(it) }
+                                            ),
+                                            onDismiss = { showSortMenu = false }
+                                        )
+
+                                        LiquidMoreMenuOverlay(
+                                            visible = showFilterMenu && selectedRootIndex == 1,
+                                            statusBarTopPaddingDp = statusBarTopPaddingDp,
+                                            currentPageRoute = "group_filter",
+                                            useDarkTheme = useDarkTheme,
+                                            enableLiquidGlass = enableLiquidGlass,
+                                            liquidBackdrop = rootBackdrop,
+                                            menuWidth = 176.dp,
+                                            triggerEndPadding = 64.dp,
+                                            menuEndPadding = 64.dp,
+                                            closeOnItemClick = false,
+                                            triggerIconRes = R.drawable.fliter,
+                                            menuItems = MainWallpaperKindFilter.values().map { filter ->
+                                                LiquidMoreMenuItem(
+                                                    label = filter.label,
+                                                    iconRes = filter.iconRes,
+                                                    checked = filter in selectedKindFilters,
+                                                    onClick = {
+                                                        val next = if (filter in selectedKindFilters) {
+                                                            selectedKindFilters - filter
+                                                        } else {
+                                                            selectedKindFilters + filter
+                                                        }
+                                                        persistKindFilters(next)
+                                                    }
+                                                )
+                                            },
+                                            onDismiss = { showFilterMenu = false }
+                                        )
+                                    }
+                                }
                                 2 -> SettingRouteScreen(
                                     useDarkTheme = useDarkTheme,
                                     onThemeModeChange = { mode -> themeMode = mode },
@@ -510,95 +601,6 @@ class MainActivity : BaseActivity() {
                     ) {
                         PlyModelTestRouteScreen(useDarkTheme = useDarkTheme)
                     }
-                }
-
-                if (showBottomBar && currentRoute == ROUTE_MAIN && selectedRootIndex == 1 && !wallpaperSelectionState.selectionMode) {
-                    MainTopBar(
-                        statusBarTopPaddingDp = statusBarTopPaddingDp,
-                        enableLiquidGlass = enableLiquidGlass,
-                        backdrop = rootBackdrop,
-                        isLightTheme = !useDarkTheme,
-                        onAdd = {},
-                        onApply = {},
-                        onMoreClick = { showMoreMenu = true },
-                        onSortClick = { showSortMenu = true },
-                        onFilterClick = { showFilterMenu = true },
-                        onPreview = {},
-                        showAddButton = false,
-                        showPreviewButton = false,
-                        showApplyButton = false,
-                        showMoreButton = true,
-                        showSortButton = true,
-                        showFilterButton = true,
-                        keepSlotWhenHidden = false
-                    )
-
-                    LiquidMoreMenuOverlay(
-                        visible = showMoreMenu,
-                        statusBarTopPaddingDp = statusBarTopPaddingDp,
-                        currentPageRoute = "group",
-                        useDarkTheme = useDarkTheme,
-                        enableLiquidGlass = enableLiquidGlass,
-                        liquidBackdrop = rootBackdrop,
-                        menuItems = listOf(
-                            LiquidMoreMenuItem("选择") {
-                                showMoreMenu = false
-                                RxBus.postWithCode(RxConstants.RX_TRIGGER_GROUP_OPTIONS, Unit)
-                            }
-                        ),
-                        onDismiss = { showMoreMenu = false }
-                    )
-
-                    LiquidMoreMenuOverlay(
-                        visible = showSortMenu,
-                        statusBarTopPaddingDp = statusBarTopPaddingDp,
-                        currentPageRoute = "group_sort",
-                        useDarkTheme = useDarkTheme,
-                        enableLiquidGlass = enableLiquidGlass,
-                        liquidBackdrop = rootBackdrop,
-                        menuWidth = 190.dp,
-                        triggerEndPadding = 112.dp,
-                        menuEndPadding = 112.dp,
-                        closeOnItemClick = false,
-                        triggerIconRes = R.drawable.sort,
-                        menuItems = buildSortMenuItems(
-                            selectedSortMode = selectedSortMode,
-                            selectedSortDirection = selectedSortDirection,
-                            onSortModeSelected = { persistSortMode(it) },
-                            onSortDirectionSelected = { persistSortDirection(it) }
-                        ),
-                        onDismiss = { showSortMenu = false }
-                    )
-
-                    LiquidMoreMenuOverlay(
-                        visible = showFilterMenu,
-                        statusBarTopPaddingDp = statusBarTopPaddingDp,
-                        currentPageRoute = "group_filter",
-                        useDarkTheme = useDarkTheme,
-                        enableLiquidGlass = enableLiquidGlass,
-                        liquidBackdrop = rootBackdrop,
-                        menuWidth = 176.dp,
-                        triggerEndPadding = 64.dp,
-                        menuEndPadding = 64.dp,
-                        closeOnItemClick = false,
-                        triggerIconRes = R.drawable.fliter,
-                        menuItems = MainWallpaperKindFilter.values().map { filter ->
-                            LiquidMoreMenuItem(
-                                label = filter.label,
-                                iconRes = filter.iconRes,
-                                checked = filter in selectedKindFilters,
-                                onClick = {
-                                    val next = if (filter in selectedKindFilters) {
-                                        selectedKindFilters - filter
-                                    } else {
-                                        selectedKindFilters + filter
-                                    }
-                                    persistKindFilters(next)
-                                }
-                            )
-                        },
-                        onDismiss = { showFilterMenu = false }
-                    )
                 }
 
                 if (showBottomBar && currentRoute == ROUTE_MAIN) {

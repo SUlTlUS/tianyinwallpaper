@@ -1269,7 +1269,7 @@ fun MainRouteScreen(
         }
     }
 
-    val contentLayerBackground = MaterialTheme.colors.background
+    val contentLayerBackground = if (useDarkTheme) Color(0xFF0A0A0C) else MaterialTheme.colors.background
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
     Box(modifier = Modifier.fillMaxSize()) {
