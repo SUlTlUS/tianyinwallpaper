@@ -1,10 +1,28 @@
+<!--
+  ~ Copyright (C) 2026 The Android Open Source Project
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FF000000"
-        android:fillType="evenOdd"
-        android:pathData="M4,3C2.9,3 2,3.9 2,5V19C2,20.1 2.9,21 4,21H20C21.1,21 22,20.1 22,19V5C22,3.9 21.1,3 20,3H4ZM6,17.2H18.2L14.3,12.2C14.1,11.9 13.7,11.9 13.4,12.2L10.9,15.3L9.3,13.4C9.1,13.1 8.7,13.1 8.4,13.4L6,17.2ZM16.5,6.8C15.6,6.8 14.9,7.5 14.9,8.4C14.9,9.3 15.6,10 16.5,10C17.4,10 18.1,9.3 18.1,8.4C18.1,7.5 17.4,6.8 16.5,6.8Z" />
+    android:width="811.29dp"
+    android:height="865dp"
+    android:viewportWidth="811.29"
+    android:viewportHeight="865">
+  <group
+      android:scaleY="-1"
+      android:translateY="865">
+  <path
+      android:fillColor="#FF000000"
+      android:pathData="M0,610L0,772Q0,793 6.5,810Q13,827 26,840Q40,853 58,859Q76,865 99,865L226,865Q248,865 265,859Q282,853 295,840Q308,827 314.5,810Q321,793 321,772L321,610L0,610ZM0,307L0,559L321,559L321,307ZM99,0Q76,0 58,6.5Q40,13 26,25Q13,38 6.5,55Q0,72 0,94L0,256L321,256L321,94Q321,72 314.5,55Q308,38 295,26Q282,13 265,6.5Q248,0 226,0L99,0ZM372,568L372,764Q373,767 373,770.5Q373,774 374,777Q374,780 374.5,783.5Q375,787 375,790Q386,801 398.5,806.5Q411,812 426,813Q441,814 456,810Q471,806 487,797L596,734Q615,723 627,708.5Q639,694 644,677Q649,659 646,641Q643,623 632,605L551,464L372,568ZM372,154L372,508L526,420ZM622,223 L547,354 675,575Q676,577 676.5,578.5Q677,580 678,582Q679,584 680,585.5Q681,587 682,589Q689,586 696,582Q703,578 709,572Q716,567 722,559.5Q728,552 733,543L796,434Q807,415 810,396.5Q813,378 809,360Q804,343 792.5,329Q781,315 763,304L622,223ZM396,92 L517,303 578,198 396,92Z"/>
+  </group>
 </vector>

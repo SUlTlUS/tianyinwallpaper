@@ -1,16 +1,28 @@
+<!--
+  ~ Copyright (C) 2026 The Android Open Source Project
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FF000000"
-        android:fillType="evenOdd"
-        android:pathData="M4,3C2.9,3 2,3.9 2,5V19C2,20.1 2.9,21 4,21H20C21.1,21 22,20.1 22,19V5C22,3.9 21.1,3 20,3H4ZM4,5H20V19H4V5Z" />
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="M6,17.2H18.2L14.3,12.2C14.1,11.9 13.7,11.9 13.4,12.2L10.9,15.3L9.3,13.4C9.1,13.1 8.7,13.1 8.4,13.4L6,17.2Z" />
-    <path
-        android:fillColor="#FF000000"
-        android:pathData="M16.5,6.8C15.6,6.8 14.9,7.5 14.9,8.4C14.9,9.3 15.6,10 16.5,10C17.4,10 18.1,9.3 18.1,8.4C18.1,7.5 17.4,6.8 16.5,6.8Z" />
+    android:width="840.78dp"
+    android:height="865dp"
+    android:viewportWidth="840.78"
+    android:viewportHeight="865">
+  <group
+      android:scaleY="-1"
+      android:translateY="865">
+  <path
+      android:fillColor="#FF000000"
+      android:pathData="M106,0Q80,0 60,6.5Q40,13 27,25Q13,38 6.5,57Q0,76 0,101L0,765Q0,790 6.5,808.5Q13,827 27,840Q40,853 60,859Q80,865 106,865L248,865Q273,865 292.5,859Q312,853 325,840Q338,827 344.5,808.5Q351,790 351,765L351,101Q351,76 344.5,57Q338,38 325,26Q312,13 292.5,6.5Q273,0 248,0ZM107,60L247,60Q256,60 264,63.5Q272,67 278,73Q284,79 287.5,87Q291,95 291,104L291,762Q291,771 287.5,779Q284,787 278,793Q272,799 264.5,802Q257,805 247,805L107,805Q97,805 88.5,802Q80,799 73,793Q67,787 63.5,779Q60,771 60,762L60,104Q60,95 63.5,87Q67,79 73,73Q80,67 88.5,63.5Q97,60 107,60ZM31,537L31,597L320,597L320,537ZM31,269L31,329L320,329L320,269ZM317,709 L355,774Q367,796 382.5,809Q398,822 416,826Q434,830 454.5,825.5Q475,821 497,808L620,737Q642,724 655.5,709Q669,694 674,677Q679,659 675,639.5Q671,620 659,599L337,41L285,71L605,626Q610,634 611,642.5Q612,651 610,659Q608,668 603,674.5Q598,681 590,685L468,756Q459,761 450,762.5Q441,764 432,762Q424,760 417,754.5Q410,749 405,741L335,619L317,709ZM338,521L338,590L548,469L518,417L338,521ZM329,217L329,286L414,237L384,184L329,217ZM630,612 L639,616Q656,622 671.5,621.5Q687,621 701,614Q715,607 728,594Q741,581 751,563L822,440Q835,418 839,398Q843,378 838,360Q834,343 821,328Q808,313 786,300L330,37L387,139L754,351Q762,356 767,362Q772,368 774,377Q777,385 775.5,393.5Q774,402 770,411L700,532Q695,541 688,546.5Q681,552 672,555Q663,557 654.5,556Q646,555 638,551L603,530L630,612ZM497,346 L532,406 626,243 574,213 497,346Z"/>
+  </group>
 </vector>

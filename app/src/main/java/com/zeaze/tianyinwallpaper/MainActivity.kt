@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -122,6 +123,22 @@ import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
 import kotlinx.coroutines.launch
 
+private data class LiquidMoreMenuItem(
+    val label: String,
+    @param:DrawableRes val iconRes: Int? = null,
+    val checked: Boolean = false,
+    val onClick: () -> Unit
+)
+
+private val MainWallpaperKindFilter.iconRes: Int
+    @DrawableRes get() = when (this) {
+        MainWallpaperKindFilter.ImageWallpaper -> R.drawable.picture
+        MainWallpaperKindFilter.VideoWallpaper -> R.drawable.video
+        MainWallpaperKindFilter.StaticRaster -> R.drawable.pictureraster
+        MainWallpaperKindFilter.VideoRaster -> R.drawable.videoraster
+        MainWallpaperKindFilter.Depth -> R.drawable.depth
+    }
+
 class MainActivity : BaseActivity() {
     private data class BottomTabItem(
         val route: String,
@@ -193,14 +210,14 @@ class MainActivity : BaseActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val appearance = if (!useDarkTheme) {
                     WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
                 } else {
                     0
                 }
                 view.windowInsetsController?.setSystemBarsAppearance(
                     appearance,
                     WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
                 )
             } else {
                 @Suppress("DEPRECATION")
@@ -448,8 +465,8 @@ class MainActivity : BaseActivity() {
                     val bottomBarBottomPadding = bottomInsets.calculateBottomPadding() + 12.dp
                     val bottomGroupHorizontalPadding = 18.dp
                     val bottomGroupGap = 8.dp
-                    val bottomGroupHeight = 63.dp
-                    val bottomActionSize = 63.dp
+                    val bottomGroupHeight = 64.dp
+                    val bottomActionSize = 64.dp
                     val addButtonFallbackSurfaceColor = if (useDarkTheme) Color(0xAA2A2A2E) else Color(0xE6FFFFFF)
                     val addButtonTextColor = if (useDarkTheme) Color.White else Color(0xFF111318)
                     Row(
@@ -475,18 +492,25 @@ class MainActivity : BaseActivity() {
                                 LiquidBottomTab({ selectRoot(index) }) {
                                     val selected = selectedRootIndex == index
                                     val tabColor = if (selected) BOTTOM_BAR_SELECTED_COLOR else MaterialTheme.colors.onSurface
-                                    Icon(
-                                        painter = painterResource(id = if (selected) tab.selectedIconRes else tab.iconRes),
-                                        contentDescription = tab.title,
-                                        modifier = Modifier.size(21.dp),
-                                        tint = tabColor
-                                    )
-                                    Text(
-                                        text = tab.title,
-                                        color = tabColor,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                                    )
+                                    Column(
+                                        modifier = Modifier.fillMaxSize(),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = if (selected) tab.selectedIconRes else tab.iconRes),
+                                            contentDescription = tab.title,
+                                            modifier = Modifier.size(21.dp),
+                                            tint = tabColor
+                                        )
+                                        Text(
+                                            text = tab.title,
+                                            color = tabColor,
+                                            fontSize = 11.sp,
+                                            lineHeight = 11.sp,
+                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -795,11 +819,11 @@ private fun WallpaperRootPage(
             enableLiquidGlass = enableLiquidGlass,
             liquidBackdrop = pageBackdrop,
             menuItems = listOf(
-                "保存" to {
+                LiquidMoreMenuItem("保存") {
                     onShowMoreMenuChange(false)
                     RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
                 },
-                "选择" to {
+                LiquidMoreMenuItem("选择") {
                     onShowMoreMenuChange(false)
                     RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_SELECT_MODE, Unit)
                 }
@@ -819,8 +843,12 @@ private fun WallpaperRootPage(
             menuEndPadding = 64.dp,
             closeOnItemClick = false,
             menuItems = MainWallpaperKindFilter.values().map { filter ->
-                val checked = filter in selectedKindFilters
-                (if (checked) "✓ ${filter.label}" else filter.label) to { onToggleKindFilter(filter) }
+                LiquidMoreMenuItem(
+                    label = filter.label,
+                    iconRes = filter.iconRes,
+                    checked = filter in selectedKindFilters,
+                    onClick = { onToggleKindFilter(filter) }
+                )
             },
             onDismiss = { onShowFilterMenuChange(false) }
         )
@@ -844,7 +872,7 @@ private fun LiquidMoreMenuOverlay(
     useDarkTheme: Boolean,
     enableLiquidGlass: Boolean,
     liquidBackdrop: LayerBackdrop?,
-    menuItems: List<Pair<String, () -> Unit>>,
+    menuItems: List<LiquidMoreMenuItem>,
     onDismiss: () -> Unit,
     menuWidth: Dp = 140.dp,
     triggerEndPadding: Dp = 8.dp,
@@ -1040,19 +1068,37 @@ private fun LiquidMoreMenuOverlay(
                     .graphicsLayer { alpha = itemAlpha },
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                menuItems.forEach { (label, onClick) ->
+                menuItems.forEach { item ->
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .height(44.dp)
                             .clip(Capsule())
-                            .clickable(enabled = menuItemsEnabled) { triggerMenuItem(onClick) }
-                            .padding(horizontal = 16.dp),
+                            .clickable(enabled = menuItemsEnabled) { triggerMenuItem(item.onClick) }
+                            .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                        horizontalArrangement = Arrangement.Start
                     ) {
                         BasicText(
-                            text = label,
+                            text = if (item.checked) "✓" else "",
+                            modifier = Modifier.width(18.dp),
+                            style = TextStyle(
+                                color = textColor,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                        item.iconRes?.let { iconRes ->
+                            Icon(
+                                painter = painterResource(iconRes),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = textColor
+                            )
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        BasicText(
+                            text = item.label,
                             style = TextStyle(
                                 color = textColor,
                                 fontSize = 15.sp

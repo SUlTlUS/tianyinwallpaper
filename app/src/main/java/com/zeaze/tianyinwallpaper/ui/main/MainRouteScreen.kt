@@ -24,6 +24,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.fadeIn
@@ -54,6 +55,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Icon
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.foundation.border
@@ -80,6 +82,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -2171,6 +2174,29 @@ private fun MainWallpaperFilterBar(
 }
 
 @Composable
+private fun MainThumbnailTypeIcon(
+    @DrawableRes iconRes: Int,
+    contentDescription: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .padding(4.dp)
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(Color(0x66000000)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = contentDescription,
+            modifier = Modifier.size(16.dp),
+            tint = Color.White
+        )
+    }
+}
+
+@Composable
 private fun MainUnifiedWallpaperCard(
     modifier: Modifier = Modifier,
     model: TianYinWallpaperModel,
@@ -2189,16 +2215,10 @@ private fun MainUnifiedWallpaperCard(
             modifier = Modifier.fillMaxSize(),
             model = model
         )
-        Text(
-            text = if (model.type == 0) "图片" else "视频",
-            color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(3.dp)
-                .background(Color(0x66000000), RoundedCornerShape(16.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+        MainThumbnailTypeIcon(
+            iconRes = if (model.type == 0) R.drawable.picture else R.drawable.video,
+            contentDescription = if (model.type == 0) "图片" else "视频",
+            modifier = Modifier.align(Alignment.TopEnd)
         )
         if (isSelected) {
             Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
@@ -2256,16 +2276,10 @@ private fun MainUnifiedRasterCard(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        Text(
-            text = if (group.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
-            color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(3.dp)
-                .background(Color(0x66000000), RoundedCornerShape(16.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+        MainThumbnailTypeIcon(
+            iconRes = if (group.type == RasterGroupModel.TYPE_STATIC) R.drawable.pictureraster else R.drawable.videoraster,
+            contentDescription = if (group.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
+            modifier = Modifier.align(Alignment.TopEnd)
         )
         if (isSelected) {
             Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
@@ -2319,16 +2333,10 @@ private fun MainUnifiedDepthCard(
                 style = TextStyle(Color.White.copy(alpha = 0.78f), 12.sp, fontWeight = FontWeight.Medium)
             )
         }
-        Text(
-            text = "景深",
-            color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(3.dp)
-                .background(Color(0x66000000), RoundedCornerShape(16.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+        MainThumbnailTypeIcon(
+            iconRes = R.drawable.depth,
+            contentDescription = "景深",
+            modifier = Modifier.align(Alignment.TopEnd)
         )
         if (isSelected) {
             Box(modifier = Modifier.fillMaxSize().background(Color(0x77000000)))
@@ -2419,4 +2427,3 @@ private fun copyMainRouteOnlineThumbnailToDepthCache(
         }
     }
 }
-
