@@ -16,7 +16,8 @@ fun BackdropEffectScope.metaballMask(
     radiusBX: Float,
     radiusBY: Float,
     smoothness: Float,
-    opacity: Float = 1f
+    opacity: Float = 1f,
+    neckOnly: Boolean = false
 ) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
 
@@ -28,6 +29,7 @@ fun BackdropEffectScope.metaballMask(
         setFloatUniform("radiusB", radiusBX, radiusBY)
         setFloatUniform("smoothness", smoothness.coerceAtLeast(0.001f))
         setFloatUniform("opacity", opacity.coerceIn(0f, 1f))
+        setFloatUniform("neckOnly", if (neckOnly) 1f else 0f)
     }
     effect(RenderEffect.createRuntimeShaderEffect(shader, "content"))
 }
