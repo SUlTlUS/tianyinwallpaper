@@ -25,14 +25,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import com.kyant.shapes.Capsule
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
-import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
-import com.zeaze.tianyinwallpaper.backdrop.effects.blur
-import com.zeaze.tianyinwallpaper.backdrop.effects.lens
-import com.zeaze.tianyinwallpaper.backdrop.effects.metaballMask
-import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
-import kotlin.math.abs
+import com.zeaze.tianyinwallpaper.backdrop.effects.LiquidMetaballBlob
+import com.zeaze.tianyinwallpaper.backdrop.effects.LiquidMetaballGeometry
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -94,17 +89,32 @@ fun LiquidDraggableMetaballButton(
         contentAlignment = Alignment.Center
     ) {
         if (connection > 0.01f) {
-            DynamicMetaballNeck(
+            LiquidMetaballSurface(
                 backdrop = backdrop,
-                isLightTheme = isLightTheme,
-                actionSize = actionSize,
-                width = with(density) { (leftReachPx + actionPx + rightReachPx).toDp() },
-                offsetX = with(density) { (-leftReachPx).toDp() },
-                gapPx = gapPx,
-                leftReachPx = leftReachPx,
-                dragOffset = dragOffset,
-                alpha = connection * 0.58f,
-                smoothness = actionPx * (0.14f + connection * 0.52f),
+                modifier = Modifier
+                    .offset(x = with(density) { (-leftReachPx).toDp() })
+                    .requiredWidth(with(density) { (leftReachPx + actionPx + rightReachPx).toDp() })
+                    .height(actionSize),
+                geometry = {
+                    val radius = actionSize.toPx() / 2f
+                    LiquidMetaballGeometry(
+                        anchor = LiquidMetaballBlob.ellipse(
+                            centerX = leftReachPx - gapPx - radius,
+                            centerY = size.height / 2f,
+                            radiusX = radius,
+                            radiusY = radius
+                        ),
+                        body = LiquidMetaballBlob.ellipse(
+                            centerX = leftReachPx + radius + dragOffset.x,
+                            centerY = size.height / 2f + dragOffset.y,
+                            radiusX = radius,
+                            radiusY = radius
+                        )
+                    )
+                },
+                smoothness = with(density) { (actionPx * (0.14f + connection * 0.52f)).toDp() },
+                opacity = connection * 0.58f,
+                neckOnly = true,
                 blurRadius = blurRadius,
                 lensRadius = lensRadius
             )
@@ -156,54 +166,4 @@ fun LiquidDraggableMetaballButton(
             content = content
         )
     }
-}
-
-@Composable
-private fun DynamicMetaballNeck(
-    backdrop: Backdrop,
-    isLightTheme: Boolean,
-    actionSize: Dp,
-    width: Dp,
-    offsetX: Dp,
-    gapPx: Float,
-    leftReachPx: Float,
-    dragOffset: Offset,
-    alpha: Float,
-    smoothness: Float,
-    blurRadius: Dp,
-    lensRadius: Dp
-) {
-    val radius = with(LocalDensity.current) { actionSize.toPx() } / 2f
-    Box(
-        modifier = Modifier
-            .offset(x = offsetX)
-            .requiredWidth(width)
-            .height(actionSize)
-            .graphicsLayer { this.alpha = alpha.coerceIn(0f, 1f) }
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { Capsule() },
-                effects = {
-                    val anchorCenterX = leftReachPx - gapPx - radius
-                    val anchorCenterY = size.height / 2f
-                    val buttonCenterX = leftReachPx + radius + dragOffset.x
-                    val buttonCenterY = size.height / 2f + dragOffset.y
-                    vibrancy()
-                    blur(blurRadius.toPx())
-                    lens(lensRadius.toPx(), lensRadius.toPx(), chromaticAberration = true)
-                    metaballMask(
-                        centerAX = anchorCenterX,
-                        centerAY = anchorCenterY,
-                        radiusAX = radius,
-                        radiusAY = radius,
-                        centerBX = buttonCenterX,
-                        centerBY = buttonCenterY,
-                        radiusBX = radius,
-                        radiusBY = radius,
-                        smoothness = smoothness,
-                        opacity = 1f
-                    )
-                }
-            )
-    )
 }

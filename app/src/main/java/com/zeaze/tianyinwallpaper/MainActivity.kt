@@ -96,9 +96,7 @@ import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
 import com.zeaze.tianyinwallpaper.base.BaseActivity
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
-import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTab
-import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabs
-import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomBarWithMetaball
 import com.zeaze.tianyinwallpaper.catalog.utils.LiquidMorphPhysics
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberLiquidMorphController
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
@@ -442,79 +440,25 @@ class MainActivity : BaseActivity() {
                     val bottomActionSize = 64.dp
                     val addButtonFallbackSurfaceColor = if (useDarkTheme) Color(0xAA2A2A2E) else Color(0xE6FFFFFF)
                     val addButtonTextColor = if (useDarkTheme) Color.White else Color(0xFF111318)
-                    val showBottomAddButton = true
-
-                    Row(
+                    LiquidBottomBarWithMetaball(
+                        selectedTabIndex = { selectedRootIndex },
+                        onTabSelected = { index -> selectRoot(index) },
+                        tabs = bottomTabs.map { it.second },
+                        backdrop = if (enableLiquidGlass) rootBackdrop else null,
+                        isLightTheme = !useDarkTheme,
+                        onAddClick = { triggerBottomAdd() },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .padding(horizontal = bottomGroupHorizontalPadding)
                             .padding(bottom = bottomBarBottomPadding),
-                        horizontalArrangement = Arrangement.spacedBy(bottomGroupGap),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        LiquidBottomTabs(
-                            selectedTabIndex = { selectedRootIndex },
-                            onTabSelected = { index -> selectRoot(index) },
-                            backdrop = if (enableLiquidGlass) rootBackdrop else null,
-                            tabsCount = bottomTabs.size,
-                            isLightTheme = !useDarkTheme,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(bottomGroupHeight)
-                        ) {
-                            bottomTabs.forEachIndexed { index, (_, title) ->
-                                LiquidBottomTab({ selectRoot(index) }) {
-                                    val selected = selectedRootIndex == index
-                                    Text(
-                                        text = title,
-                                        color = if (selected) BOTTOM_BAR_SELECTED_COLOR else MaterialTheme.colors.onSurface,
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                                    )
-                                }
-                            }
-                        }
-
-                        if (showBottomAddButton) {
-                            if (enableLiquidGlass && rootBackdrop != null) {
-                                LiquidButton(
-                                    onClick = { triggerBottomAdd() },
-                                    backdrop = rootBackdrop,
-                                    surfaceColor = Color.Unspecified,
-                                    modifier = Modifier.size(bottomActionSize),
-                                    buttonHeight = bottomActionSize,
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    BasicText(
-                                        text = "+",
-                                        style = TextStyle(
-                                            color = addButtonTextColor,
-                                            fontSize = 32.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    )
-                                }
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(bottomActionSize)
-                                        .clip(CircleShape)
-                                        .background(addButtonFallbackSurfaceColor)
-                                        .clickable { triggerBottomAdd() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    BasicText(
-                                        text = "+",
-                                        style = TextStyle(
-                                            color = addButtonTextColor,
-                                            fontSize = 32.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
+                        groupGap = bottomGroupGap,
+                        groupHeight = bottomGroupHeight,
+                        actionSize = bottomActionSize,
+                        selectedColor = BOTTOM_BAR_SELECTED_COLOR,
+                        addTextColor = addButtonTextColor,
+                        fallbackAddSurfaceColor = addButtonFallbackSurfaceColor
+                    )
                 }
             }
 
