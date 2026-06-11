@@ -1389,6 +1389,7 @@ fun MainRouteScreen(
                                     model = item.model,
                                     isSelected = selected,
                                     enableLiquidGlass = enableLiquidGlass,
+                                    useDarkTheme = useDarkTheme,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
@@ -1444,6 +1445,7 @@ fun MainRouteScreen(
                                     group = item.group,
                                     isSelected = selected,
                                     enableLiquidGlass = enableLiquidGlass,
+                                    useDarkTheme = useDarkTheme,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedRasterGroupIds.remove(item.group.id) else selectedRasterGroupIds.add(item.group.id)
@@ -1499,6 +1501,7 @@ fun MainRouteScreen(
                                     model = item.model,
                                     isSelected = selected,
                                     enableLiquidGlass = enableLiquidGlass,
+                                    useDarkTheme = useDarkTheme,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedDepthWallpaperIds.remove(item.model.id) else selectedDepthWallpaperIds.add(item.model.id)
@@ -2314,6 +2317,7 @@ private fun MainThumbnailTypeIcon(
     sourceBitmap: Bitmap?,
     viewportAspectRatio: Float,
     viewportSizePx: IntSize,
+    useDarkTheme: Boolean,
     bakeKey: Any?,
     modifier: Modifier = Modifier
 ) {
@@ -2321,21 +2325,27 @@ private fun MainThumbnailTypeIcon(
     val density = LocalDensity.current
     val targetPx = remember(density) { with(density) { 28.dp.roundToPx().coerceAtLeast(1) } }
     val marginPx = remember(density) { with(density) { 4.dp.roundToPx().coerceAtLeast(0) } }
-    val bakedBadge = remember(sourceBitmap, iconRes, bakeKey, targetPx, marginPx, viewportAspectRatio, viewportSizePx) {
+    val bakedBadge = remember(sourceBitmap, iconRes, useDarkTheme, bakeKey, targetPx, marginPx, viewportAspectRatio, viewportSizePx) {
         bakeThumbnailTypeIcon(
             source = sourceBitmap,
             targetPx = targetPx,
             viewportAspectRatio = viewportAspectRatio,
             viewportWidthPx = viewportSizePx.width,
             viewportHeightPx = viewportSizePx.height,
+            useDarkTheme = useDarkTheme,
             badgeMarginPx = marginPx
         )
     }
+    val iconTint = if (useDarkTheme) Color.White else Color(0xDD111318)
     val glassModifier = modifier
         .padding(4.dp)
         .size(28.dp)
         .clip(badgeShape)
-        .border(1.dp, Color.White.copy(alpha = 0.34f), badgeShape)
+        .border(
+            width = 1.dp,
+            color = if (useDarkTheme) Color.White.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.58f),
+            shape = badgeShape
+        )
 
     Box(
         modifier = glassModifier,
@@ -2352,14 +2362,14 @@ private fun MainThumbnailTypeIcon(
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    .background(Color.White.copy(alpha = 0.24f))
+                    .background(if (useDarkTheme) Color.Black.copy(alpha = 0.34f) else Color.White.copy(alpha = 0.42f))
             )
         }
         Icon(
             painter = painterResource(iconRes),
             contentDescription = contentDescription,
             modifier = Modifier.size(16.dp),
-            tint = bakedBadge?.iconTint ?: Color.White
+            tint = bakedBadge?.iconTint ?: iconTint
         )
     }
 }
@@ -2375,6 +2385,7 @@ private fun bakeThumbnailTypeIcon(
     viewportAspectRatio: Float,
     viewportWidthPx: Int,
     viewportHeightPx: Int,
+    useDarkTheme: Boolean,
     badgeMarginPx: Int
 ): BakedThumbnailTypeIcon? {
     if (
@@ -2444,38 +2455,22 @@ private fun bakeThumbnailTypeIcon(
 
         val rect = RectF(0f, 0f, targetPx.toFloat(), targetPx.toFloat())
         paint.style = Paint.Style.FILL
-        paint.color = android.graphics.Color.argb(70, 255, 255, 255)
-        canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
-        paint.color = android.graphics.Color.argb(28, 0, 0, 0)
-        canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
+        if (useDarkTheme) {
+            paint.color = android.graphics.Color.argb(92, 0, 0, 0)
+            canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
+            paint.color = android.graphics.Color.argb(24, 255, 255, 255)
+            canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
+        } else {
+            paint.color = android.graphics.Color.argb(122, 255, 255, 255)
+            canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
+            paint.color = android.graphics.Color.argb(12, 0, 0, 0)
+            canvas.drawRoundRect(rect, targetPx / 2f, targetPx / 2f, paint)
+        }
         BakedThumbnailTypeIcon(
             bitmap = output.asImageBitmap(),
-            iconTint = if (output.averageLuminance() > 0.62f) Color(0xDD111318) else Color.White
+            iconTint = if (useDarkTheme) Color.White else Color(0xDD111318)
         )
     }.getOrNull()
-}
-
-private fun Bitmap.averageLuminance(): Float {
-    if (isRecycled || width <= 0 || height <= 0) return 0f
-    var sum = 0f
-    val stepX = (width / 6).coerceAtLeast(1)
-    val stepY = (height / 6).coerceAtLeast(1)
-    var count = 0
-    var y = 0
-    while (y < height) {
-        var x = 0
-        while (x < width) {
-            val color = getPixel(x, y)
-            val r = android.graphics.Color.red(color) / 255f
-            val g = android.graphics.Color.green(color) / 255f
-            val b = android.graphics.Color.blue(color) / 255f
-            sum += 0.2126f * r + 0.7152f * g + 0.0722f * b
-            count++
-            x += stepX
-        }
-        y += stepY
-    }
-    return if (count == 0) 0f else sum / count
 }
 
 @Composable
@@ -2484,6 +2479,7 @@ private fun MainUnifiedWallpaperCard(
     model: TianYinWallpaperModel,
     isSelected: Boolean,
     enableLiquidGlass: Boolean,
+    useDarkTheme: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
@@ -2517,6 +2513,7 @@ private fun MainUnifiedWallpaperCard(
             sourceBitmap = if (enableLiquidGlass) bitmap else null,
             viewportAspectRatio = cardAspectRatio,
             viewportSizePx = cardSizePx,
+            useDarkTheme = useDarkTheme,
             bakeKey = model.uuid ?: model.imgUri ?: model.videoUri ?: model.imgPath ?: model.type,
             modifier = Modifier.align(Alignment.TopEnd)
         )
@@ -2532,6 +2529,7 @@ private fun MainUnifiedRasterCard(
     group: RasterGroupModel,
     isSelected: Boolean,
     enableLiquidGlass: Boolean,
+    useDarkTheme: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -2591,6 +2589,7 @@ private fun MainUnifiedRasterCard(
             sourceBitmap = if (enableLiquidGlass) bitmap else null,
             viewportAspectRatio = cardAspectRatio,
             viewportSizePx = cardSizePx,
+            useDarkTheme = useDarkTheme,
             bakeKey = group.id to bitmap,
             contentDescription = if (group.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
             modifier = Modifier.align(Alignment.TopEnd)
@@ -2618,6 +2617,7 @@ private fun MainUnifiedDepthCard(
     model: DepthWallpaperModel,
     isSelected: Boolean,
     enableLiquidGlass: Boolean,
+    useDarkTheme: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -2661,6 +2661,7 @@ private fun MainUnifiedDepthCard(
             sourceBitmap = if (enableLiquidGlass) bitmap else null,
             viewportAspectRatio = cardAspectRatio,
             viewportSizePx = cardSizePx,
+            useDarkTheme = useDarkTheme,
             bakeKey = model.id to bitmap,
             contentDescription = "景深",
             modifier = Modifier.align(Alignment.TopEnd)
