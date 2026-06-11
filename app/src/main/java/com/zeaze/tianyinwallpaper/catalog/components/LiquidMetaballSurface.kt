@@ -61,6 +61,8 @@ fun LiquidMetaballSurface(
                             neckOnly = neckOnly
                         )
                     },
+                    highlight = null,
+                    shadow = null,
                     onDrawSurface = {
                         if (surfaceColor.isSpecified) {
                             drawRect(surfaceColor)
