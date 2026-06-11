@@ -694,17 +694,12 @@ class MainActivity : BaseActivity() {
                                 buttonHeight = bottomActionSize,
                                 contentPadding = PaddingValues(0.dp),
                                 surfaceColor = bottomTabsStyle.containerColor,
-                                style = bottomAddButtonStyle
-                            ) {
-                                BasicText(
-                                    text = "+",
-                                    style = TextStyle(
-                                        color = addButtonTextColor,
-                                        fontSize = 32.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                )
-                            }
+                                style = bottomAddButtonStyle,
+                                iconRes = R.drawable.plus,
+                                iconContentDescription = "添加",
+                                iconSize = 30.dp,
+                                iconTint = addButtonTextColor
+                            )
                         } else {
                             Box(
                                 modifier = Modifier
