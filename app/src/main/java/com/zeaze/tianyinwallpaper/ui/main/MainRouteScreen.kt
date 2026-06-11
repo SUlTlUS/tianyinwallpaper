@@ -155,6 +155,7 @@ import androidx.compose.ui.geometry.Rect
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
+import kotlin.math.roundToInt
 
 internal const val WALLPAPER_TYPE_STATIC = 0
 internal const val WALLPAPER_TYPE_DYNAMIC = 1
@@ -2302,14 +2303,15 @@ private fun MainThumbnailTypeIcon(
     @DrawableRes iconRes: Int,
     contentDescription: String,
     sourceBitmap: Bitmap?,
+    viewportAspectRatio: Float,
     bakeKey: Any?,
     modifier: Modifier = Modifier
 ) {
     val badgeShape = RoundedCornerShape(999.dp)
     val density = LocalDensity.current
     val targetPx = remember(density) { with(density) { 28.dp.roundToPx().coerceAtLeast(1) } }
-    val bakedBitmap = remember(sourceBitmap, iconRes, bakeKey, targetPx) {
-        bakeThumbnailTypeIconBackground(sourceBitmap, targetPx)
+    val bakedBitmap = remember(sourceBitmap, iconRes, bakeKey, targetPx, viewportAspectRatio) {
+        bakeThumbnailTypeIconBackground(sourceBitmap, targetPx, viewportAspectRatio)
     }
     val glassModifier = modifier
         .padding(4.dp)
@@ -2344,14 +2346,48 @@ private fun MainThumbnailTypeIcon(
     }
 }
 
-private fun bakeThumbnailTypeIconBackground(source: Bitmap?, targetPx: Int): ImageBitmap? {
+private fun bakeThumbnailTypeIconBackground(
+    source: Bitmap?,
+    targetPx: Int,
+    viewportAspectRatio: Float
+): ImageBitmap? {
     if (source == null || source.isRecycled || source.width <= 0 || source.height <= 0 || targetPx <= 0) {
         return null
     }
     return runCatching {
-        val cropSide = minOf(source.width, source.height).coerceAtLeast(1)
-        val srcLeft = (source.width - cropSide).coerceAtLeast(0)
-        val crop = Bitmap.createBitmap(source, srcLeft, 0, cropSide, cropSide)
+        val sourceAspectRatio = source.width.toFloat() / source.height.toFloat()
+        val safeViewportAspectRatio = viewportAspectRatio
+            .takeIf { it.isFinite() && it > 0f }
+            ?: sourceAspectRatio
+        val visibleRect = if (sourceAspectRatio > safeViewportAspectRatio) {
+            val visibleWidth = (source.height * safeViewportAspectRatio)
+                .roundToInt()
+                .coerceIn(1, source.width)
+            RectF(
+                (source.width - visibleWidth) / 2f,
+                0f,
+                (source.width + visibleWidth) / 2f,
+                source.height.toFloat()
+            )
+        } else {
+            val visibleHeight = (source.width / safeViewportAspectRatio)
+                .roundToInt()
+                .coerceIn(1, source.height)
+            RectF(
+                0f,
+                (source.height - visibleHeight) / 2f,
+                source.width.toFloat(),
+                (source.height + visibleHeight) / 2f
+            )
+        }
+        val cropSide = minOf(visibleRect.width(), visibleRect.height())
+            .roundToInt()
+            .coerceAtLeast(1)
+        val srcLeft = (visibleRect.right.roundToInt() - cropSide)
+            .coerceIn(0, source.width - cropSide)
+        val srcTop = visibleRect.top.roundToInt()
+            .coerceIn(0, source.height - cropSide)
+        val crop = Bitmap.createBitmap(source, srcLeft, srcTop, cropSide, cropSide)
         val blurSeedSize = 8.coerceAtMost(targetPx).coerceAtLeast(1)
         val blurSeed = Bitmap.createScaledBitmap(crop, blurSeedSize, blurSeedSize, true)
         val frosted = Bitmap.createScaledBitmap(blurSeed, targetPx, targetPx, true)
@@ -2384,10 +2420,11 @@ private fun MainUnifiedWallpaperCard(
     onLongClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val cardAspectRatio = context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() }
     val bitmap = rememberWallpaperCardBitmap(model)
     Box(
         modifier = modifier
-            .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
+            .aspectRatio(cardAspectRatio)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black)
     ) {
@@ -2408,6 +2445,7 @@ private fun MainUnifiedWallpaperCard(
             iconRes = if (model.type == 0) R.drawable.picture else R.drawable.video,
             contentDescription = if (model.type == 0) "图片" else "视频",
             sourceBitmap = if (enableLiquidGlass) bitmap else null,
+            viewportAspectRatio = cardAspectRatio,
             bakeKey = model.uuid ?: model.imgUri ?: model.videoUri ?: model.imgPath ?: model.type,
             modifier = Modifier.align(Alignment.TopEnd)
         )
@@ -2427,6 +2465,7 @@ private fun MainUnifiedRasterCard(
     onLongClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val cardAspectRatio = context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() }
     val request = remember(group.id, group.type, group.videoUri, group.imageUris.firstOrNull()) {
         if (group.type == RasterGroupModel.TYPE_STATIC) {
             val firstImageUri = group.imageUris.firstOrNull()
@@ -2456,7 +2495,7 @@ private fun MainUnifiedRasterCard(
     }
     Box(
         modifier = modifier
-            .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
+            .aspectRatio(cardAspectRatio)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF18181A))
     ) {
@@ -2477,6 +2516,7 @@ private fun MainUnifiedRasterCard(
         MainThumbnailTypeIcon(
             iconRes = if (group.type == RasterGroupModel.TYPE_STATIC) R.drawable.pictureraster else R.drawable.videoraster,
             sourceBitmap = if (enableLiquidGlass) bitmap else null,
+            viewportAspectRatio = cardAspectRatio,
             bakeKey = group.id to bitmap,
             contentDescription = if (group.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
             modifier = Modifier.align(Alignment.TopEnd)
@@ -2508,6 +2548,7 @@ private fun MainUnifiedDepthCard(
     onLongClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val cardAspectRatio = context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() }
     val bitmap by produceState<Bitmap?>(initialValue = null, model.id, model.gaussianUri) {
         value = withContext(Dispatchers.IO) {
             val file = DepthPrefs.sogThumbnailFile(context, model.id)
@@ -2516,7 +2557,7 @@ private fun MainUnifiedDepthCard(
     }
     Box(
         modifier = modifier
-            .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
+            .aspectRatio(cardAspectRatio)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF18181A))
     ) {
@@ -2543,6 +2584,7 @@ private fun MainUnifiedDepthCard(
         MainThumbnailTypeIcon(
             iconRes = R.drawable.depth,
             sourceBitmap = if (enableLiquidGlass) bitmap else null,
+            viewportAspectRatio = cardAspectRatio,
             bakeKey = model.id to bitmap,
             contentDescription = "景深",
             modifier = Modifier.align(Alignment.TopEnd)

@@ -339,6 +339,7 @@ class MainActivity : BaseActivity() {
                 if (requested == null) {
                     val page = rootPagerState.currentPage
                     if (selectedRootIndex != page) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         selectedRootIndex = page
                         showMoreMenu = false
                         showSortMenu = false
