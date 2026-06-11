@@ -69,10 +69,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -101,6 +103,7 @@ import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
 import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
+import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
 import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
@@ -1262,6 +1265,7 @@ fun MainRouteScreen(
                                     modifier = itemModifier,
                                     model = item.model,
                                     isSelected = selected,
+                                    enableLiquidGlass = enableLiquidGlass,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
@@ -1314,6 +1318,7 @@ fun MainRouteScreen(
                                     modifier = itemModifier,
                                     group = item.group,
                                     isSelected = selected,
+                                    enableLiquidGlass = enableLiquidGlass,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedRasterGroupIds.remove(item.group.id) else selectedRasterGroupIds.add(item.group.id)
@@ -1366,6 +1371,7 @@ fun MainRouteScreen(
                                     modifier = itemModifier,
                                     model = item.model,
                                     isSelected = selected,
+                                    enableLiquidGlass = enableLiquidGlass,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedDepthWallpaperIds.remove(item.model.id) else selectedDepthWallpaperIds.add(item.model.id)
@@ -2177,18 +2183,74 @@ private fun MainWallpaperFilterBar(
 private fun MainThumbnailTypeIcon(
     @DrawableRes iconRes: Int,
     contentDescription: String,
+    backdrop: Backdrop?,
+    bakeKey: Any?,
     modifier: Modifier = Modifier
 ) {
     val badgeShape = RoundedCornerShape(999.dp)
+    val bakedLayer = if (backdrop != null) rememberLayerBackdrop() else null
+    var bakedBitmap by remember(backdrop, iconRes, bakeKey) { mutableStateOf<ImageBitmap?>(null) }
+    val glassModifier = modifier
+        .padding(4.dp)
+        .size(28.dp)
+        .clip(badgeShape)
+        .border(1.dp, Color.White.copy(alpha = 0.34f), badgeShape)
+
+    LaunchedEffect(backdrop, bakedLayer, iconRes, bakeKey) {
+        bakedBitmap = null
+        val layer = bakedLayer ?: return@LaunchedEffect
+        repeat(4) {
+            withFrameNanos { }
+            val image = runCatching { layer.graphicsLayer.toImageBitmap() }.getOrNull()
+            if (image != null && image.width > 0 && image.height > 0) {
+                bakedBitmap = image
+                return@LaunchedEffect
+            }
+        }
+    }
+
     Box(
-        modifier = modifier
-            .padding(4.dp)
-            .size(28.dp)
-            .clip(badgeShape)
-            .background(Color.White.copy(alpha = 0.24f))
-            .border(1.dp, Color.White.copy(alpha = 0.34f), badgeShape),
+        modifier = glassModifier,
         contentAlignment = Alignment.Center
     ) {
+        val bitmap = bakedBitmap
+        when {
+            bitmap != null -> {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.FillBounds,
+                    modifier = Modifier.matchParentSize()
+                )
+            }
+            backdrop != null && bakedLayer != null -> {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .drawBackdrop(
+                            backdrop = backdrop,
+                            shape = { Capsule() },
+                            effects = {
+                                vibrancy()
+                                blur(4f.dp.toPx())
+                                lens(8f.dp.toPx(), 12f.dp.toPx())
+                            },
+                            exportedBackdrop = bakedLayer,
+                            onDrawSurface = {
+                                drawRect(Color.White.copy(alpha = 0.22f))
+                                drawRect(Color.Black.copy(alpha = 0.08f))
+                            }
+                        )
+                )
+            }
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color.White.copy(alpha = 0.24f))
+                )
+            }
+        }
         Icon(
             painter = painterResource(iconRes),
             contentDescription = contentDescription,
@@ -2203,23 +2265,33 @@ private fun MainUnifiedWallpaperCard(
     modifier: Modifier = Modifier,
     model: TianYinWallpaperModel,
     isSelected: Boolean,
+    enableLiquidGlass: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val badgeSourceBackdrop = rememberLayerBackdrop()
     Box(
         modifier = modifier
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
             .clip(RoundedCornerShape(16.dp))
             .background(Color.Black)
     ) {
-        WallpaperCardImage(
-            modifier = Modifier.fillMaxSize(),
-            model = model
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .let { if (enableLiquidGlass) it.layerBackdrop(badgeSourceBackdrop) else it }
+        ) {
+            WallpaperCardImage(
+                modifier = Modifier.fillMaxSize(),
+                model = model
+            )
+        }
         MainThumbnailTypeIcon(
             iconRes = if (model.type == 0) R.drawable.picture else R.drawable.video,
             contentDescription = if (model.type == 0) "图片" else "视频",
+            backdrop = if (enableLiquidGlass) badgeSourceBackdrop else null,
+            bakeKey = model.uuid ?: model.imgUri ?: model.videoUri ?: model.imgPath ?: model.type,
             modifier = Modifier.align(Alignment.TopEnd)
         )
         if (isSelected) {
@@ -2233,6 +2305,7 @@ private fun MainUnifiedRasterCard(
     modifier: Modifier = Modifier,
     group: RasterGroupModel,
     isSelected: Boolean,
+    enableLiquidGlass: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -2264,22 +2337,32 @@ private fun MainUnifiedRasterCard(
     val bitmap by produceState<Bitmap?>(initialValue = request?.let { ThumbnailUtils.getFromCache(it) }, request) {
         value = request?.let { ThumbnailUtils.loadThumbnail(context, it) }
     }
+    val badgeSourceBackdrop = rememberLayerBackdrop()
     Box(
         modifier = modifier
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF18181A))
     ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF18181A))
+                .let { if (enableLiquidGlass) it.layerBackdrop(badgeSourceBackdrop) else it }
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
         MainThumbnailTypeIcon(
             iconRes = if (group.type == RasterGroupModel.TYPE_STATIC) R.drawable.pictureraster else R.drawable.videoraster,
+            backdrop = if (enableLiquidGlass) badgeSourceBackdrop else null,
+            bakeKey = group.id to bitmap,
             contentDescription = if (group.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
             modifier = Modifier.align(Alignment.TopEnd)
         )
@@ -2305,6 +2388,7 @@ private fun MainUnifiedDepthCard(
     modifier: Modifier = Modifier,
     model: DepthWallpaperModel,
     isSelected: Boolean,
+    enableLiquidGlass: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -2315,28 +2399,38 @@ private fun MainUnifiedDepthCard(
             if (file.exists()) BitmapFactory.decodeFile(file.absolutePath) else null
         }
     }
+    val badgeSourceBackdrop = rememberLayerBackdrop()
     Box(
         modifier = modifier
             .aspectRatio(context.resources.displayMetrics.let { it.widthPixels.toFloat() / it.heightPixels.toFloat() })
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF18181A))
     ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            BasicText(
-                text = model.displayName.ifBlank { "Gaussian SOG" },
-                modifier = Modifier.align(Alignment.Center).padding(8.dp),
-                style = TextStyle(Color.White.copy(alpha = 0.78f), 12.sp, fontWeight = FontWeight.Medium)
-            )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF18181A))
+                .let { if (enableLiquidGlass) it.layerBackdrop(badgeSourceBackdrop) else it }
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap!!.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                BasicText(
+                    text = model.displayName.ifBlank { "Gaussian SOG" },
+                    modifier = Modifier.align(Alignment.Center).padding(8.dp),
+                    style = TextStyle(Color.White.copy(alpha = 0.78f), 12.sp, fontWeight = FontWeight.Medium)
+                )
+            }
         }
         MainThumbnailTypeIcon(
             iconRes = R.drawable.depth,
+            backdrop = if (enableLiquidGlass) badgeSourceBackdrop else null,
+            bakeKey = model.id to bitmap,
             contentDescription = "景深",
             modifier = Modifier.align(Alignment.TopEnd)
         )
