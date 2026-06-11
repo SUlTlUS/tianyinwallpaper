@@ -36,10 +36,6 @@ import androidx.compose.ui.unit.sp
 import com.kyant.shapes.Capsule
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
-import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
-import com.zeaze.tianyinwallpaper.backdrop.effects.blur
-import com.zeaze.tianyinwallpaper.backdrop.effects.lens
-import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 
 /**
@@ -222,13 +218,23 @@ private fun TopSortFilterLiquidCapsule(
     backdrop: LayerBackdrop?,
     keepSlotWhenHidden: Boolean,
     modifier: Modifier = Modifier,
-    width: Dp = 88.dp
+    width: Dp = 96.dp
 ) {
     if (visible) {
         @Composable
         fun CapsuleContent() {
             Row(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(onSortClick, onFilterClick) {
+                        detectTapGestures { offset ->
+                            if (offset.x < size.width / 2f) {
+                                onSortClick()
+                            } else {
+                                onFilterClick()
+                            }
+                        }
+                    },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
@@ -262,30 +268,16 @@ private fun TopSortFilterLiquidCapsule(
         }
 
         if (enableLiquidGlass && backdrop != null) {
-            Box(
+            LiquidButton(
+                onClick = {},
+                backdrop = backdrop,
                 modifier = modifier
                     .width(width)
-                    .height(IosTopButtonHeight)
-                    .drawBackdrop(
-                        backdrop = backdrop,
-                        shape = { Capsule() },
-                        effects = {
-                            vibrancy()
-                            blur(2.dp.toPx())
-                            lens(12.dp.toPx(), 24.dp.toPx())
-                        },
-                        onDrawSurface = { drawRect(surfaceColor) }
-                    )
-                    .pointerInput(onSortClick, onFilterClick) {
-                        detectTapGestures { offset ->
-                            if (offset.x < size.width / 2f) {
-                                onSortClick()
-                            } else {
-                                onFilterClick()
-                            }
-                        }
-                    },
-                contentAlignment = Alignment.Center
+                    .height(IosTopButtonHeight),
+                isInteractive = false,
+                surfaceColor = surfaceColor,
+                buttonHeight = IosTopButtonHeight,
+                contentPadding = PaddingValues(0.dp)
             ) {
                 CapsuleContent()
             }
@@ -293,16 +285,7 @@ private fun TopSortFilterLiquidCapsule(
             Surface(
                 modifier = modifier
                     .width(width)
-                    .height(IosTopButtonHeight)
-                    .pointerInput(onSortClick, onFilterClick) {
-                        detectTapGestures { offset ->
-                            if (offset.x < size.width / 2f) {
-                                onSortClick()
-                            } else {
-                                onFilterClick()
-                            }
-                        }
-                    },
+                    .height(IosTopButtonHeight),
                 shape = Capsule(),
                 color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
                 border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
