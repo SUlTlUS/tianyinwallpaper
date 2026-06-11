@@ -216,7 +216,7 @@ private fun TopSortFilterLiquidCapsule(
     backdrop: LayerBackdrop?,
     keepSlotWhenHidden: Boolean,
     modifier: Modifier = Modifier,
-    width: Dp = 96.dp
+    width: Dp = 88.dp
 ) {
     if (visible) {
         @Composable
@@ -313,7 +313,7 @@ fun MainTopBar(
             .fillMaxWidth()
             .padding(top = statusBarTopPaddingDp + 8.dp, start = 12.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         val isDark = !isLightTheme
         val adaptiveSurfaceColor = if (isDark) Color.Black.copy(0.3f) else Color.White.copy(0.3f)
