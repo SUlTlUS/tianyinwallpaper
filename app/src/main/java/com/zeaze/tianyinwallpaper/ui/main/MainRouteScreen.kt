@@ -101,11 +101,13 @@ import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
 import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
+import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
 import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
@@ -1262,6 +1264,8 @@ fun MainRouteScreen(
                                     modifier = itemModifier,
                                     model = item.model,
                                     isSelected = selected,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    liquidBackdrop = liquidBackdrop,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedPositions.remove(item.index) else selectedPositions.add(item.index)
@@ -1314,6 +1318,8 @@ fun MainRouteScreen(
                                     modifier = itemModifier,
                                     group = item.group,
                                     isSelected = selected,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    liquidBackdrop = liquidBackdrop,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedRasterGroupIds.remove(item.group.id) else selectedRasterGroupIds.add(item.group.id)
@@ -1366,6 +1372,8 @@ fun MainRouteScreen(
                                     modifier = itemModifier,
                                     model = item.model,
                                     isSelected = selected,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    liquidBackdrop = liquidBackdrop,
                                     onClick = {
                                         if (selectionMode) {
                                             if (selected) selectedDepthWallpaperIds.remove(item.model.id) else selectedDepthWallpaperIds.add(item.model.id)
@@ -2177,14 +2185,36 @@ private fun MainWallpaperFilterBar(
 private fun MainThumbnailTypeIcon(
     @DrawableRes iconRes: Int,
     contentDescription: String,
+    enableLiquidGlass: Boolean,
+    liquidBackdrop: LayerBackdrop?,
     modifier: Modifier = Modifier
 ) {
+    val fallbackShape = RoundedCornerShape(999.dp)
     Box(
         modifier = modifier
             .padding(4.dp)
             .size(28.dp)
-            .clip(CircleShape)
-            .background(Color(0x66000000)),
+            .let { base ->
+                if (enableLiquidGlass && liquidBackdrop != null) {
+                    base.drawBackdrop(
+                        backdrop = liquidBackdrop,
+                        shape = { Capsule() },
+                        effects = {
+                            vibrancy()
+                            blur(6f.dp.toPx())
+                            lens(12f.dp.toPx(), 16f.dp.toPx())
+                        },
+                        onDrawSurface = {
+                            drawRect(Color.White.copy(alpha = 0.20f))
+                            drawRect(Color.Black.copy(alpha = 0.10f))
+                        }
+                    )
+                } else {
+                    base
+                        .clip(fallbackShape)
+                        .background(Color(0x66000000))
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         Icon(
@@ -2201,6 +2231,8 @@ private fun MainUnifiedWallpaperCard(
     modifier: Modifier = Modifier,
     model: TianYinWallpaperModel,
     isSelected: Boolean,
+    enableLiquidGlass: Boolean,
+    liquidBackdrop: LayerBackdrop?,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
@@ -2218,6 +2250,8 @@ private fun MainUnifiedWallpaperCard(
         MainThumbnailTypeIcon(
             iconRes = if (model.type == 0) R.drawable.picture else R.drawable.video,
             contentDescription = if (model.type == 0) "图片" else "视频",
+            enableLiquidGlass = enableLiquidGlass,
+            liquidBackdrop = liquidBackdrop,
             modifier = Modifier.align(Alignment.TopEnd)
         )
         if (isSelected) {
@@ -2231,6 +2265,8 @@ private fun MainUnifiedRasterCard(
     modifier: Modifier = Modifier,
     group: RasterGroupModel,
     isSelected: Boolean,
+    enableLiquidGlass: Boolean,
+    liquidBackdrop: LayerBackdrop?,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -2279,6 +2315,8 @@ private fun MainUnifiedRasterCard(
         MainThumbnailTypeIcon(
             iconRes = if (group.type == RasterGroupModel.TYPE_STATIC) R.drawable.pictureraster else R.drawable.videoraster,
             contentDescription = if (group.type == RasterGroupModel.TYPE_STATIC) "图集光栅" else "视频光栅",
+            enableLiquidGlass = enableLiquidGlass,
+            liquidBackdrop = liquidBackdrop,
             modifier = Modifier.align(Alignment.TopEnd)
         )
         if (isSelected) {
@@ -2303,6 +2341,8 @@ private fun MainUnifiedDepthCard(
     modifier: Modifier = Modifier,
     model: DepthWallpaperModel,
     isSelected: Boolean,
+    enableLiquidGlass: Boolean,
+    liquidBackdrop: LayerBackdrop?,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -2336,6 +2376,8 @@ private fun MainUnifiedDepthCard(
         MainThumbnailTypeIcon(
             iconRes = R.drawable.depth,
             contentDescription = "景深",
+            enableLiquidGlass = enableLiquidGlass,
+            liquidBackdrop = liquidBackdrop,
             modifier = Modifier.align(Alignment.TopEnd)
         )
         if (isSelected) {
