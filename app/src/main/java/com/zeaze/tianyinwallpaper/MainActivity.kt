@@ -958,7 +958,7 @@ private fun WallpaperRootPage(
                 showMoreButton = true,
                 showSortButton = true,
                 showFilterButton = true,
-                keepSlotWhenHidden = true
+                keepSlotWhenHidden = false
             )
         }
 
