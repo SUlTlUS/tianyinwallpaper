@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "com.zeaze.tianyinwallpaper"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.zeaze.tianyinwallpaper"
