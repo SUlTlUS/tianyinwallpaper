@@ -360,13 +360,16 @@ fun MainTopBar(
         TopCircleLiquidButton(
             visible = showMoreButton,
             onClick = onMoreClick,
-            text = "⋯",
+            text = "",
             textColor = textColor,
             surfaceColor = adaptiveSurfaceColor,
             isDark = isDark,
             enableLiquidGlass = enableLiquidGlass,
             backdrop = backdrop,
-            keepSlotWhenHidden = keepSlotWhenHidden
+            keepSlotWhenHidden = keepSlotWhenHidden,
+            iconRes = R.drawable.more,
+            iconContentDescription = "更多",
+            iconSize = 20.dp
         )
     }
 }

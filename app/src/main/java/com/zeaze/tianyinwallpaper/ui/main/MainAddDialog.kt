@@ -22,6 +22,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.annotation.DrawableRes
+import androidx.compose.material.Icon
+import androidx.compose.ui.res.painterResource
+import com.zeaze.tianyinwallpaper.R
 
 @Composable
 fun MainAddDialog(
@@ -42,7 +46,7 @@ fun MainAddDialog(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 20.dp),
+            .padding(horizontal = 24.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.Start
     ) {
         BasicText(
@@ -61,7 +65,6 @@ fun MainAddDialog(
             text = "常规",
             contentColor = contentColor
         )
-        Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -71,21 +74,16 @@ fun MainAddDialog(
                 contentColor = contentColor,
                 backgroundColor = accentColor.copy(alpha = 0.12f),
                 onClick = onPickImageWallpaper,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                iconRes = R.drawable.picture
             )
             WallpaperTypeItem(
                 label = "视频",
                 contentColor = contentColor,
                 backgroundColor = accentColor.copy(alpha = 0.12f),
                 onClick = onPickVideoWallpaper,
-                modifier = Modifier.weight(1f)
-            )
-            WallpaperTypeItem(
-                label = "文件夹",
-                contentColor = contentColor,
-                backgroundColor = accentColor.copy(alpha = 0.12f),
-                onClick = onPickFolderWallpaper,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                iconRes = R.drawable.video
             )
         }
 
@@ -95,7 +93,6 @@ fun MainAddDialog(
             text = "光栅",
             contentColor = contentColor
         )
-        Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -105,14 +102,16 @@ fun MainAddDialog(
                 contentColor = contentColor,
                 backgroundColor = accentColor.copy(alpha = 0.12f),
                 onClick = onPickRasterImages,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                iconRes = R.drawable.pictureraster
             )
             WallpaperTypeItem(
                 label = "视频光栅",
                 contentColor = contentColor,
                 backgroundColor = accentColor.copy(alpha = 0.12f),
                 onClick = onPickRasterVideo,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                iconRes = R.drawable.videoraster
             )
         }
 
@@ -122,7 +121,6 @@ fun MainAddDialog(
             text = "景深",
             contentColor = contentColor
         )
-        Spacer(Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -132,27 +130,38 @@ fun MainAddDialog(
                 contentColor = contentColor,
                 backgroundColor = accentColor.copy(alpha = 0.12f),
                 onClick = onPickDepthSog,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                iconRes = R.drawable.depth
             )
             WallpaperTypeItem(
                 label = "在线生成",
                 contentColor = contentColor,
                 backgroundColor = accentColor.copy(alpha = 0.12f),
                 onClick = onOpenOnlineSog,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                iconRes = R.drawable.depth
             )
         }
 
         Spacer(Modifier.height(18.dp))
 
-        WallpaperTypeItem(
-            label = cancelText,
-            contentColor = contentColor,
-            backgroundColor = containerColor.copy(alpha = 0.22f),
-            onClick = onDismiss,
-            compact = true,
-            modifier = Modifier.fillMaxWidth()
+        WallpaperTypeSectionTitle(
+            text = "",
+            contentColor = contentColor
         )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            WallpaperTypeItem(
+                label = "文件夹",
+                contentColor = contentColor,
+                backgroundColor = accentColor.copy(alpha = 0.12f),
+                onClick = onPickFolderWallpaper,
+                modifier = Modifier.weight(1f),
+                iconRes = R.drawable.folder
+            )
+        }
     }
 }
 
@@ -161,41 +170,37 @@ private fun WallpaperTypeSectionTitle(
     text: String,
     contentColor: Color
 ) {
-    BasicText(
-        text = text,
-        modifier = Modifier.fillMaxWidth(),
-        style = TextStyle(
-            color = contentColor.copy(alpha = 0.72f),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium
-        )
-    )
+
 }
 
 @Composable
 private fun WallpaperTypeItem(
     label: String,
+    @DrawableRes iconRes: Int,
     contentColor: Color,
     backgroundColor: Color,
     onClick: () -> Unit,
-    compact: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
-            .height(if (compact) 48.dp else 92.dp)
+            .height(75.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(backgroundColor)
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = if (compact) 0.dp else 12.dp),
+            .padding(horizontal = 8.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        if (!compact) {
-            // 图标占位：之后可直接把此 Box 替换成 Icon(...)。
-            Box(Modifier.size(28.dp))
-            Spacer(Modifier.height(8.dp))
-        }
+        Icon(
+            painter = painterResource(id = iconRes),
+            contentDescription = label,
+            modifier = Modifier.size(28.dp),
+            tint = contentColor
+        )
+
+        Spacer(Modifier.height(8.dp))
+
         BasicText(
             text = label,
             style = TextStyle(
