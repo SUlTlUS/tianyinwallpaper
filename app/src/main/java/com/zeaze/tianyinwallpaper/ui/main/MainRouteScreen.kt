@@ -1579,38 +1579,42 @@ fun MainRouteScreen(
                 ) {
                     when (state) {
                         DialogState.Type -> {
-                            Column(
-                                Modifier.padding(16.dp, 20.dp, 16.dp, 20.dp).fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                BasicText(context.getString(R.string.main_select_wallpaper_type_tip), style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold))
-                                Spacer(Modifier.height(8.dp))
-                                val items = listOf(
-                                    "图片壁纸" to { showWallpaperTypeDialog = false; imageLaunch.launch(arrayOf("image/*")) },
-                                    "视频壁纸" to { showWallpaperTypeDialog = false; videoLaunch.launch(arrayOf("video/*")) },
-                                    "文件夹壁纸" to { showWallpaperTypeDialog = false; directoryLaunch.launch(null) },
-                                    "光栅图片组" to { showWallpaperTypeDialog = false; rasterStaticLaunch.launch(arrayOf("image/*")) },
-                                    "光栅视频" to { showWallpaperTypeDialog = false; rasterDynamicLaunch.launch(arrayOf("video/*")) },
-                                    "本地 SOG 景深" to { showWallpaperTypeDialog = false; depthSogLaunch.launch(arrayOf("*/*")) },
-                                    "在线生成 SOG" to { showWallpaperTypeDialog = false; showDepthOnlinePage = true },
-                                    context.getString(R.string.common_cancel) to { showWallpaperTypeDialog = false }
-                                )
-                                items.forEach { (label, onClick) ->
-                                    Row(
-                                        Modifier
-                                            .clip(Capsule())
-                                            .background(if(label == context.getString(R.string.common_cancel)) containerColor.copy(0.2f) else accentColor)
-                                            .clickable { onClick() }
-                                            .height(48.dp)
-                                            .fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        BasicText(label, style = TextStyle(if(label == context.getString(R.string.common_cancel)) contentColor else Color.White, 16.sp))
-                                    }
-                                }
-                            }
+                            MainAddDialog(
+                                title = context.getString(R.string.main_select_wallpaper_type_tip),
+                                cancelText = context.getString(R.string.common_cancel),
+                                contentColor = contentColor,
+                                accentColor = accentColor,
+                                containerColor = containerColor,
+                                onPickImageWallpaper = {
+                                    showWallpaperTypeDialog = false
+                                    imageLaunch.launch(arrayOf("image/*"))
+                                },
+                                onPickVideoWallpaper = {
+                                    showWallpaperTypeDialog = false
+                                    videoLaunch.launch(arrayOf("video/*"))
+                                },
+                                onPickFolderWallpaper = {
+                                    showWallpaperTypeDialog = false
+                                    directoryLaunch.launch(null)
+                                },
+                                onPickRasterImages = {
+                                    showWallpaperTypeDialog = false
+                                    rasterStaticLaunch.launch(arrayOf("image/*"))
+                                },
+                                onPickRasterVideo = {
+                                    showWallpaperTypeDialog = false
+                                    rasterDynamicLaunch.launch(arrayOf("video/*"))
+                                },
+                                onPickDepthSog = {
+                                    showWallpaperTypeDialog = false
+                                    depthSogLaunch.launch(arrayOf("*/*"))
+                                },
+                                onOpenOnlineSog = {
+                                    showWallpaperTypeDialog = false
+                                    showDepthOnlinePage = true
+                                },
+                                onDismiss = { showWallpaperTypeDialog = false }
+                            )
                         }
                         DialogState.Permission -> {
                             Column(
