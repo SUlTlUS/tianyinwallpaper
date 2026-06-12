@@ -76,6 +76,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 
@@ -107,6 +108,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -178,6 +180,30 @@ import androidx.compose.ui.input.pointer.pointerInput
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
 private const val MIN_STATIC_GROUP_IMAGES = 2
+
+@Composable
+private fun RasterAdjustButtonContent(textColor: Color) {
+    Row(
+        modifier = Modifier.padding(horizontal = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.adjustments),
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = textColor
+        )
+        BasicText(
+            "调节参数",
+            style = TextStyle(
+                color = textColor,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium
+            )
+        )
+    }
+}
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -422,62 +448,32 @@ fun RasterDetailScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val isStatic = group.type == RasterGroupModel.TYPE_STATIC
+            val actionLuminanceState = if (isStatic) imageActionLuminanceState else videoActionLuminanceState
+            val actionTextColor = actionLuminanceState?.contentColor ?: onPage
+            val actionClick = { if (isStatic) onImageAction() else onVideoAction() }
             if (enableLiquidGlass && detailBackdrop != null) {
                 LiquidButton(
-                    onClick = onImageAction,
+                    onClick = actionClick,
                     backdrop = detailBackdrop,
-                    surfaceColor = if (isStatic) Color(0xFF2A83FF).copy(alpha = 0.75f)
-                    else pillBackground,
-                    tint = if (isStatic) Color(0xFF2A83FF) else Color.Unspecified,
-                    luminanceState = imageActionLuminanceState,
+                    surfaceColor = pillBackground,
+                    luminanceState = actionLuminanceState,
                     modifier = Modifier.height(44.dp)
                 ) {
-                    BasicText(
-                        "图集",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            if (isStatic) Color.White else imageActionLuminanceState?.contentColor ?: onPage,
-                            15.sp
-                        )
-                    )
-                }
-                LiquidButton(
-                    onClick = onVideoAction,
-                    backdrop = detailBackdrop,
-                    surfaceColor = if (!isStatic) Color(0xFF2A83FF).copy(alpha = 0.75f)
-                    else pillBackground,
-                    tint = if (!isStatic) Color(0xFF2A83FF) else Color.Unspecified,
-                    luminanceState = videoActionLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        "视频",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            if (!isStatic) Color.White else videoActionLuminanceState?.contentColor ?: onPage,
-                            15.sp
-                        )
-                    )
+                    RasterAdjustButtonContent(textColor = actionTextColor)
                 }
             } else {
-                Text(
-                    text = "图集光栅",
-                    color = onPage,
+                Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (isStatic) Color(0x332A83FF) else Color.Transparent)
-                        .combinedClickable(onClick = onImageAction)
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                )
-                Text(
-                    text = "视频光栅",
-                    color = onPage,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (!isStatic) Color(0x332A83FF) else Color.Transparent)
-                        .combinedClickable(onClick = onVideoAction)
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                )
+                        .height(44.dp)
+                        .clip(Capsule())
+                        .background(pillBackground)
+                        .combinedClickable(onClick = actionClick)
+                        .padding(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RasterAdjustButtonContent(textColor = actionTextColor)
+                }
             }
         }
 

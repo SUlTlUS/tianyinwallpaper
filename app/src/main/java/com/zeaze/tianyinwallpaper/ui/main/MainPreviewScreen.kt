@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Icon
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
@@ -74,6 +75,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -90,6 +92,7 @@ import com.alibaba.fastjson.JSON
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
 import com.zeaze.tianyinwallpaper.App
+import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
@@ -731,6 +734,65 @@ private data class VideoPlayerHolder(
     val player: MediaPlayer,
     var uri: String?
 )
+
+@Composable
+private fun DetailAdjustButton(
+    onClick: () -> Unit,
+    enableLiquidGlass: Boolean,
+    backdrop: Backdrop?,
+    luminanceState: com.zeaze.tianyinwallpaper.catalog.utils.AdaptiveLuminanceGlassState?,
+    surfaceColor: Color,
+    textColor: Color,
+    modifier: Modifier = Modifier
+) {
+    @Composable
+    fun Content() {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.adjustments),
+                contentDescription = null,
+                modifier = Modifier.width(18.dp).height(18.dp),
+                tint = textColor
+            )
+            BasicText(
+                "调节参数",
+                style = TextStyle(
+                    color = textColor,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            )
+        }
+    }
+
+    if (enableLiquidGlass && backdrop != null) {
+        LiquidButton(
+            onClick = onClick,
+            backdrop = backdrop,
+            surfaceColor = surfaceColor,
+            luminanceState = luminanceState,
+            modifier = modifier.height(44.dp)
+        ) {
+            Content()
+        }
+    } else {
+        Surface(
+            modifier = modifier
+                .height(44.dp)
+                .clickable(onClick = onClick),
+            shape = Capsule(),
+            color = surfaceColor
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Content()
+            }
+        }
+    }
+}
 
 @Composable
 private fun DetailModeButton(
@@ -1420,35 +1482,18 @@ internal fun WallpaperDetailScreen(
                 .padding(bottom = bottomActionPadding),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            val onVideoButtonClick = {
-                if (isDynamicWallpaper) showVideoDialog = true else onReplaceAction(true)
-            }
-            val onImageButtonClick = {
-                if (!isDynamicWallpaper) showImageDialog = true else onReplaceAction(false)
-            }
-
-            DetailModeButton(
-                label = "视频",
-                selected = isDynamicWallpaper,
-                onClick = onVideoButtonClick,
+            DetailAdjustButton(
+                onClick = {
+                    if (isDynamicWallpaper) showVideoDialog = true else showImageDialog = true
+                },
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = detailBackdrop,
-                luminanceState = replaceLuminanceState,
-                baseSurfaceColor = pillBackground,
-                selectedTint = Color(0xFF2A83FF),
-                unselectedTextColor = resolvedContentColor(replaceLuminanceState, onPage)
-            )
-
-            DetailModeButton(
-                label = "图片",
-                selected = !isDynamicWallpaper,
-                onClick = onImageButtonClick,
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = detailBackdrop,
-                luminanceState = timeLuminanceState,
-                baseSurfaceColor = pillBackground,
-                selectedTint = Color(0xFF2A83FF),
-                unselectedTextColor = resolvedContentColor(timeLuminanceState, onPage)
+                luminanceState = if (isDynamicWallpaper) replaceLuminanceState else timeLuminanceState,
+                surfaceColor = pillBackground,
+                textColor = resolvedContentColor(
+                    if (isDynamicWallpaper) replaceLuminanceState else timeLuminanceState,
+                    onPage
+                )
             )
         }
 
