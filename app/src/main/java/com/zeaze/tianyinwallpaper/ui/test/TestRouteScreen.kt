@@ -61,12 +61,14 @@ import com.zeaze.tianyinwallpaper.catalog.components.GlassProfile
 import com.zeaze.tianyinwallpaper.catalog.components.StripedDirection
 import com.zeaze.tianyinwallpaper.catalog.components.StripedGlass
 import com.zeaze.tianyinwallpaper.catalog.components.rememberStripedPhase
+import com.kyant.shapes.Capsule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
 fun CorrugatedTestRouteScreen(
-    useDarkTheme: Boolean
+    useDarkTheme: Boolean,
+    onBack: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isLightTheme = !useDarkTheme
@@ -274,6 +276,23 @@ fun CorrugatedTestRouteScreen(
                 ) {
                     Box(modifier = Modifier.width(24.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = 0.5f)))
                 }
+            }
+        }
+
+        if (onBack != null) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(Capsule())
+                    .background(panelColor)
+                    .clickable { onBack() }
+                    .padding(horizontal = 18.dp)
+                    .height(48.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("‹ 返回设置", color = textColor, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             }
         }
 

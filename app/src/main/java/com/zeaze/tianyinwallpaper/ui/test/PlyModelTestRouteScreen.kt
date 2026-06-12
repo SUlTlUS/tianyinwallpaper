@@ -58,7 +58,8 @@ import kotlin.math.roundToInt
 
 @Composable
 fun PlyModelTestRouteScreen(
-    useDarkTheme: Boolean
+    useDarkTheme: Boolean,
+    onBack: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isLightTheme = !useDarkTheme
@@ -122,6 +123,17 @@ fun PlyModelTestRouteScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            if (onBack != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clickable { onBack() },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("‹ 返回设置", color = contentColor, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                }
+            }
             Text(
                 text = "Gaussian SOG 测试",
                 style = TextStyle(

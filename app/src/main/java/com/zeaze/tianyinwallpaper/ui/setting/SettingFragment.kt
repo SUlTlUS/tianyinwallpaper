@@ -49,6 +49,7 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -114,7 +115,16 @@ fun SettingRouteScreen(
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     val editor = remember(pref) { pref.edit() }
 
-    var corrugatedTestVisible by remember { mutableStateOf(pref.getBoolean(PREF_CORRUGATED_TEST_ENABLED, false)) }
+    var testPagesVisible by remember { mutableStateOf(pref.getBoolean(PREF_CORRUGATED_TEST_ENABLED, false)) }
+    DisposableEffect(pref) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
+            if (key == PREF_CORRUGATED_TEST_ENABLED) {
+                testPagesVisible = preferences.getBoolean(PREF_CORRUGATED_TEST_ENABLED, false)
+            }
+        }
+        pref.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { pref.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 
     var hidePermissionDialog by remember { mutableStateOf(pref.getBoolean("hide_permission_dialog", false)) }
     var rand by remember { mutableStateOf(pref.getBoolean("rand", false)) }
@@ -547,10 +557,10 @@ fun SettingRouteScreen(
                         .clip(RoundedCornerShape(28.dp))
                         .background(groupBackgroundColor)
                 ) {
-                    SettingTextItem("Gaussian SOG 测试页", contentColor) {
-                        onOpenPlyModelTest()
-                    }
-                    if (corrugatedTestVisible) {
+                    if (testPagesVisible) {
+                        SettingTextItem("Gaussian SOG 测试页", contentColor) {
+                            onOpenPlyModelTest()
+                        }
                         SettingTextItem("波纹玻璃测试页", contentColor) {
                             onOpenCorrugatedTest()
                         }
@@ -1147,7 +1157,7 @@ fun AppInfoRouteScreen(
     val verName = getVersionName(context)
     val aboutText = remember { getAboutText() }
 
-    // 版本号点击5次开关波纹玻璃测试页入口
+    // 版本号点击5次开关测试页入口
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     var corrugatedTestEnabled by remember { mutableStateOf(pref.getBoolean(PREF_CORRUGATED_TEST_ENABLED, false)) }
     var versionTapCount by remember { mutableStateOf(0) }
@@ -1156,21 +1166,22 @@ fun AppInfoRouteScreen(
     var updateDialogState by remember { mutableStateOf(UpdateDialogState()) }
     var shouldCheckUpdate by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .let { m ->
-                if (enableLiquidGlass && liquidBackdrop != null) {
-                    m.layerBackdrop(liquidBackdrop)
-                } else m
-            }
-    ) {
-        Box(Modifier.fillMaxSize().background(backgroundColor))
-
-        Column(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = statusBarTopPaddingDp)
+                .let { m ->
+                    if (enableLiquidGlass && liquidBackdrop != null) {
+                        m.layerBackdrop(liquidBackdrop)
+                    } else m
+                }
+        ) {
+            Box(Modifier.fillMaxSize().background(backgroundColor))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = statusBarTopPaddingDp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -1254,7 +1265,7 @@ fun AppInfoRouteScreen(
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                             Toast.makeText(
                                 context,
-                                if (corrugatedTestEnabled) "已开启波纹玻璃测试页" else "已关闭波纹玻璃测试页",
+                                if (corrugatedTestEnabled) "已开启测试页" else "已关闭测试页",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -1339,7 +1350,8 @@ fun AppInfoRouteScreen(
                 }
             }
             
-            Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(48.dp))
+            }
         }
 
         UpdateDialog(

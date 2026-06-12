@@ -141,6 +141,12 @@ private data class LiquidMoreMenuItem(
     val onClick: () -> Unit
 )
 
+private enum class SettingsOverlayPage {
+    AppInfo,
+    CorrugatedTest,
+    SogTest
+}
+
 private val MainWallpaperKindFilter.iconRes: Int
     @DrawableRes get() = when (this) {
         MainWallpaperKindFilter.ImageWallpaper -> R.drawable.picture
@@ -323,6 +329,7 @@ class MainActivity : BaseActivity() {
             } else null
 
             val appInfoScope = rememberCoroutineScope()
+            var settingsOverlayPage by remember { mutableStateOf<SettingsOverlayPage?>(null) }
             var showAppInfoPage by remember { mutableStateOf(false) }
             var renderAppInfoPage by remember { mutableStateOf(false) }
             val appInfoPageWidthPx = remember(this) {
@@ -370,6 +377,7 @@ class MainActivity : BaseActivity() {
                     )
                     renderAppInfoPage = false
                     appInfoPageOffset.snapTo(appInfoPageWidthPx)
+                    settingsOverlayPage = null
                 }
             }
 
@@ -648,10 +656,17 @@ class MainActivity : BaseActivity() {
                                         showMoreMenu = false
                                         showSortMenu = false
                                         showFilterMenu = false
+                                        settingsOverlayPage = SettingsOverlayPage.AppInfo
                                         showAppInfoPage = true
                                     },
-                                    onOpenCorrugatedTest = { openCorrugatedTestPage() },
-                                    onOpenPlyModelTest = { openPlyModelTestPage() }
+                                    onOpenCorrugatedTest = {
+                                        settingsOverlayPage = SettingsOverlayPage.CorrugatedTest
+                                        showAppInfoPage = true
+                                    },
+                                    onOpenPlyModelTest = {
+                                        settingsOverlayPage = SettingsOverlayPage.SogTest
+                                        showAppInfoPage = true
+                                    }
                                 )
                             }
                         }
@@ -803,10 +818,27 @@ class MainActivity : BaseActivity() {
                                 alpha = 1f
                             }
                     ) {
-                        com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(
-                            useDarkTheme = useDarkTheme,
-                            onBack = { closeAppInfoPage() }
-                        )
+                        when (settingsOverlayPage) {
+                            SettingsOverlayPage.AppInfo -> {
+                                com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(
+                                    useDarkTheme = useDarkTheme,
+                                    onBack = { closeAppInfoPage() }
+                                )
+                            }
+                            SettingsOverlayPage.CorrugatedTest -> {
+                                CorrugatedTestRouteScreen(
+                                    useDarkTheme = useDarkTheme,
+                                    onBack = { closeAppInfoPage() }
+                                )
+                            }
+                            SettingsOverlayPage.SogTest -> {
+                                PlyModelTestRouteScreen(
+                                    useDarkTheme = useDarkTheme,
+                                    onBack = { closeAppInfoPage() }
+                                )
+                            }
+                            null -> Unit
+                        }
                     }
 
                     Box(
