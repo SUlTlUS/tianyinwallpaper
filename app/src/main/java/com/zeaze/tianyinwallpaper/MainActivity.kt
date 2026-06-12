@@ -13,16 +13,21 @@ import android.view.View
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.annotation.DrawableRes
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +38,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -125,6 +131,7 @@ import com.zeaze.tianyinwallpaper.update.UpdateDialog
 import com.zeaze.tianyinwallpaper.update.UpdateDialogState
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private data class LiquidMoreMenuItem(
@@ -165,7 +172,6 @@ class MainActivity : BaseActivity() {
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
         private const val ROUTE_MAIN = "main"
         private const val ROUTE_ABOUT = "about"
-        private const val ROUTE_APP_INFO = "app_info"
         private const val ROUTE_SETTING = "setting"
         private const val ROUTE_CORRUGATED_TEST = "corrugated_test"
         private const val ROUTE_PLY_MODEL_TEST = "ply_model_test"
@@ -315,6 +321,83 @@ class MainActivity : BaseActivity() {
                     drawContent()
                 }
             } else null
+
+            val appInfoScope = rememberCoroutineScope()
+            var showAppInfoPage by remember { mutableStateOf(false) }
+            var renderAppInfoPage by remember { mutableStateOf(false) }
+            val appInfoPageWidthPx = remember(this) {
+                resources.displayMetrics.widthPixels.toFloat().coerceAtLeast(1f)
+            }
+            val appInfoPageOffset = remember { Animatable(appInfoPageWidthPx) }
+            var appInfoBackDragOffsetPx by remember { mutableStateOf(0f) }
+            var appInfoBackGestureActive by remember { mutableStateOf(false) }
+            val appInfoBackEdgePx = with(density) { 40.dp.toPx() }
+
+            fun closeAppInfoPage() {
+                if (!renderAppInfoPage && !showAppInfoPage) return
+                appInfoScope.launch {
+                    val startOffset = (appInfoPageOffset.value + appInfoBackDragOffsetPx)
+                        .coerceIn(0f, appInfoPageWidthPx)
+                    appInfoBackDragOffsetPx = 0f
+                    appInfoBackGestureActive = false
+                    appInfoPageOffset.snapTo(startOffset)
+                    showAppInfoPage = false
+                }
+            }
+
+            LaunchedEffect(showAppInfoPage, appInfoPageWidthPx) {
+                if (showAppInfoPage) {
+                    renderAppInfoPage = true
+                    appInfoBackDragOffsetPx = 0f
+                    appInfoBackGestureActive = false
+                    appInfoPageOffset.snapTo(appInfoPageWidthPx)
+                    appInfoPageOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                } else if (renderAppInfoPage) {
+                    appInfoBackDragOffsetPx = 0f
+                    appInfoBackGestureActive = false
+                    appInfoPageOffset.animateTo(
+                        targetValue = appInfoPageWidthPx,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                    renderAppInfoPage = false
+                    appInfoPageOffset.snapTo(appInfoPageWidthPx)
+                }
+            }
+
+            PredictiveBackHandler(enabled = showAppInfoPage) { progress ->
+                try {
+                    progress.collect { backEvent ->
+                        appInfoBackGestureActive = true
+                        appInfoBackDragOffsetPx = (appInfoPageWidthPx * backEvent.progress)
+                            .coerceIn(0f, appInfoPageWidthPx)
+                    }
+                    val startOffset = (appInfoPageOffset.value + appInfoBackDragOffsetPx)
+                        .coerceIn(0f, appInfoPageWidthPx)
+                    appInfoBackDragOffsetPx = 0f
+                    appInfoBackGestureActive = false
+                    appInfoPageOffset.snapTo(startOffset)
+                    showAppInfoPage = false
+                } catch (_: CancellationException) {
+                    appInfoBackGestureActive = false
+                    appInfoBackDragOffsetPx = 0f
+                    appInfoPageOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                }
+            }
 
             LaunchedEffect(pendingRoute) {
                 val route = pendingRoute ?: return@LaunchedEffect
@@ -561,32 +644,17 @@ class MainActivity : BaseActivity() {
                                 2 -> SettingRouteScreen(
                                     useDarkTheme = useDarkTheme,
                                     onThemeModeChange = { mode -> themeMode = mode },
-                                    onOpenAppInfo = { openAppInfoPage() },
+                                    onOpenAppInfo = {
+                                        showMoreMenu = false
+                                        showSortMenu = false
+                                        showFilterMenu = false
+                                        showAppInfoPage = true
+                                    },
                                     onOpenCorrugatedTest = { openCorrugatedTestPage() },
                                     onOpenPlyModelTest = { openPlyModelTestPage() }
                                 )
                             }
                         }
-                    }
-                    composable(
-                        route = ROUTE_APP_INFO,
-                        enterTransition = {
-                            slideIntoContainer(
-                                AnimatedContentTransitionScope.SlideDirection.Left,
-                                animationSpec = tween(280)
-                            )
-                        },
-                        popExitTransition = {
-                            slideOutOfContainer(
-                                AnimatedContentTransitionScope.SlideDirection.Right,
-                                animationSpec = tween(280)
-                            )
-                        }
-                    ) {
-                        com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(
-                            useDarkTheme = useDarkTheme,
-                            onBack = { navController.popBackStack() }
-                        )
                     }
                     composable(
                         route = ROUTE_CORRUGATED_TEST,
@@ -724,6 +792,59 @@ class MainActivity : BaseActivity() {
                         }
                     }
                 }
+
+                if (renderAppInfoPage || showAppInfoPage) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(8f)
+                            .graphicsLayer {
+                                translationX = appInfoPageOffset.value + appInfoBackDragOffsetPx
+                                alpha = 1f
+                            }
+                    ) {
+                        com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(
+                            useDarkTheme = useDarkTheme,
+                            onBack = { closeAppInfoPage() }
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(40.dp)
+                            .align(Alignment.CenterStart)
+                            .zIndex(9f)
+                            .pointerInput(showAppInfoPage, appInfoPageWidthPx) {
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        appInfoBackGestureActive = showAppInfoPage && offset.x <= appInfoBackEdgePx
+                                    },
+                                    onDragCancel = {
+                                        appInfoBackGestureActive = false
+                                        appInfoBackDragOffsetPx = 0f
+                                    },
+                                    onDragEnd = {
+                                        if (appInfoBackGestureActive && appInfoBackDragOffsetPx > appInfoPageWidthPx * 0.28f) {
+                                            closeAppInfoPage()
+                                        } else {
+                                            appInfoBackDragOffsetPx = 0f
+                                        }
+                                        appInfoBackGestureActive = false
+                                    },
+                                    onDrag = { _, dragAmount ->
+                                        if (appInfoBackGestureActive) {
+                                            val nextOffset = (appInfoBackDragOffsetPx + dragAmount.x)
+                                                .coerceIn(0f, appInfoPageWidthPx)
+                                            if (nextOffset != appInfoBackDragOffsetPx) {
+                                                appInfoBackDragOffsetPx = nextOffset
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                    )
+                }
             }
 
             UpdateDialog(
@@ -784,10 +905,6 @@ class MainActivity : BaseActivity() {
             launchSingleTop = true
             restoreState = true
         }
-    }
-
-    private fun openAppInfoPage() {
-        pendingRoute = ROUTE_APP_INFO
     }
 
     private fun openCorrugatedTestPage() {
