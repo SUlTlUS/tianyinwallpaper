@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -55,6 +55,7 @@ fun LiquidButtonGroup(
     luminanceState: AdaptiveLuminanceGlassState? = null,
     style: LiquidButtonStyle = LiquidButtonStyle.Default,
     buttonHeight: Dp = style.height,
+    buttonWidth: Dp = buttonHeight,
     contentPadding: PaddingValues = PaddingValues(horizontal = style.horizontalPadding),
     buttonSpacing: Dp = 0.dp,
     enabled: (index: Int) -> Boolean = { true },
@@ -69,6 +70,8 @@ fun LiquidButtonGroup(
     if (buttonCount <= 0) return
 
     val safeButtonCount = buttonCount
+    val groupWidth = buttonWidth * safeButtonCount.toFloat() +
+        buttonSpacing * (safeButtonCount - 1).coerceAtLeast(0).toFloat()
     val animationScope = rememberCoroutineScope()
     val interactiveHighlight = remember(animationScope) {
         InteractiveHighlight(animationScope = animationScope)
@@ -76,7 +79,7 @@ fun LiquidButtonGroup(
 
     Row(
         modifier
-            .widthIn(min = buttonHeight * safeButtonCount)
+            .width(groupWidth)
             .drawBackdrop(
                 backdrop = backdrop,
                 shape = { Capsule() },
