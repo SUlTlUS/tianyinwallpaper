@@ -294,23 +294,16 @@ fun DepthPreviewOverlay(
                 LiquidButton(
                     onClick = { if (!previewLoading) onApply() },
                     backdrop = detailBackdrop,
-                    surfaceColor = if (previewLoading) Color.Gray.copy(alpha = 0.5f)
-                    else accentColor.copy(alpha = 0.75f),
-                    tint = if (previewLoading) Color.Unspecified else accentColor,
+                    surfaceColor = pillBackground,
                     luminanceState = applyLuminanceState,
                     modifier = Modifier
                         .height(44.dp)
-                        .graphicsLayer { alpha = if (previewLoading) 0.5f else 1f }
-                ) {
-                    BasicText(
-                        "应用",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = if (previewLoading) Color.White.copy(alpha = 0.5f) else Color.White,
-                            fontSize = 15.sp
-                        )
-                    )
-                }
+                        .graphicsLayer { alpha = if (previewLoading) 0.5f else 1f },
+                    iconRes = R.drawable.complete,
+                    iconContentDescription = "应用",
+                    iconSize = 18.dp,
+                    iconTint = accentColor
+                )
             } else {
                 DepthPreviewPill(
                     text = "取消",
@@ -318,12 +311,24 @@ fun DepthPreviewOverlay(
                     background = pillBackground,
                     onClick = { closeWithAnimation() }
                 )
-                DepthPreviewPill(
-                    text = "应用",
-                    color = if (previewLoading) Color.White.copy(alpha = 0.5f) else Color.White,
-                    background = if (previewLoading) Color.Gray.copy(alpha = 0.3f) else Color(0x662A83FF),
-                    onClick = { if (!previewLoading) onApply() }
-                )
+                Row(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clip(Capsule())
+                        .background(pillBackground)
+                        .clickable { if (!previewLoading) onApply() }
+                        .padding(horizontal = 14.dp)
+                        .graphicsLayer { alpha = if (previewLoading) 0.5f else 1f },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.complete),
+                        contentDescription = "应用",
+                        modifier = Modifier.width(18.dp).height(18.dp),
+                        tint = accentColor
+                    )
+                }
             }
         }
 
@@ -424,14 +429,6 @@ private fun DepthAdjustButtonContent(textColor: Color) {
             contentDescription = null,
             modifier = Modifier.width(18.dp).height(18.dp),
             tint = textColor
-        )
-        BasicText(
-            "调节参数",
-            style = TextStyle(
-                color = textColor,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
-            )
         )
     }
 }

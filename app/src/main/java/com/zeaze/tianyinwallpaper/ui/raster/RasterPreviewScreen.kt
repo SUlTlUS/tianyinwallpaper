@@ -1,26 +1,8 @@
 package com.zeaze.tianyinwallpaper.ui.raster
 
-import android.app.Activity
-import android.app.WallpaperManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
-import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.os.Build
-import android.util.Log
-import android.widget.Toast
-import com.zeaze.tianyinwallpaper.utils.RasterPrefs
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Spring
@@ -35,18 +17,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -61,18 +37,12 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed as lazyItemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -81,44 +51,31 @@ import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size as GeometrySize
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyGridState
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
@@ -130,8 +87,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import com.alibaba.fastjson.JSON
-import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
@@ -140,42 +95,21 @@ import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.effects.blur
 import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
-import com.zeaze.tianyinwallpaper.backdrop.effects.vibrancy
 import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
-import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
-import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.model.RasterGroupModel
-import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
-import com.zeaze.tianyinwallpaper.service.VideoRasterWallpaperService
-import com.zeaze.tianyinwallpaper.service.raster.KeyframeTranscoder
-import com.zeaze.tianyinwallpaper.service.StaticRasterWallpaperService
-import com.zeaze.tianyinwallpaper.ui.commom.ProgressiveBlurContent
-import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
-import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedContent
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimationMode
-import com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar
 import com.zeaze.tianyinwallpaper.utils.FileUtil
-import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
 import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
-import com.zeaze.tianyinwallpaper.utils.showToast
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
-import java.io.IOException
-import java.util.UUID
 
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-
-import androidx.compose.ui.input.pointer.pointerInput
 
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
@@ -193,14 +127,6 @@ private fun RasterAdjustButtonContent(textColor: Color) {
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = textColor
-        )
-        BasicText(
-            "调节参数",
-            style = TextStyle(
-                color = textColor,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium
-            )
         )
     }
 }
@@ -402,23 +328,16 @@ fun RasterDetailScreen(
                 LiquidButton(
                     onClick = { if (!videoLoading) onApply() },
                     backdrop = detailBackdrop,
-                    surfaceColor = if (videoLoading) Color.Gray.copy(alpha = 0.5f)
-                    else Color(0xFF2A83FF).copy(alpha = 0.75f),
-                    tint = if (videoLoading) Color.Unspecified else Color(0xFF2A83FF),
+                    surfaceColor = pillBackground,
                     luminanceState = applyLuminanceState,
                     modifier = Modifier.height(44.dp).graphicsLayer {
                         alpha = if (videoLoading) 0.5f else 1f
-                    }
-                ) {
-                    BasicText(
-                        "应用",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            if (videoLoading) Color.White.copy(alpha = 0.5f) else Color.White,
-                            15.sp
-                        )
-                    )
-                }
+                    },
+                    iconRes = R.drawable.complete,
+                    iconContentDescription = "应用",
+                    iconSize = 18.dp,
+                    iconTint = accentColor
+                )
             } else {
                 Text(
                     text = "取消", color = onPage,
@@ -428,15 +347,24 @@ fun RasterDetailScreen(
                         .combinedClickable(onClick = onDismiss)
                         .padding(horizontal = 18.dp, vertical = 8.dp)
                 )
-                Text(
-                    text = "应用",
-                    color = if (videoLoading) Color.White.copy(alpha = 0.5f) else Color.White,
+                Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(if (videoLoading) Color.Gray.copy(alpha = 0.3f) else Color(0x662A83FF))
+                        .height(44.dp)
+                        .clip(Capsule())
+                        .background(pillBackground)
                         .combinedClickable(onClick = { if (!videoLoading) onApply() })
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                )
+                        .padding(horizontal = 14.dp)
+                        .graphicsLayer { alpha = if (videoLoading) 0.5f else 1f },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.complete),
+                        contentDescription = "应用",
+                        modifier = Modifier.size(18.dp),
+                        tint = accentColor
+                    )
+                }
             }
         }
 

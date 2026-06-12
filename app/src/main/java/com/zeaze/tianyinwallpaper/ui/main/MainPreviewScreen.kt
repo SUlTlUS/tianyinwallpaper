@@ -12,6 +12,7 @@ import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -758,14 +759,6 @@ private fun DetailAdjustButton(
                 modifier = Modifier.width(18.dp).height(18.dp),
                 tint = textColor
             )
-            BasicText(
-                "调节参数",
-                style = TextStyle(
-                    color = textColor,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            )
         }
     }
 
@@ -902,8 +895,29 @@ private fun DetailHeaderChip(
     luminanceState: com.zeaze.tianyinwallpaper.catalog.utils.AdaptiveLuminanceGlassState?,
     surfaceColor: Color,
     textColor: Color,
-    tint: Color? = null
+    tint: Color? = null,
+    @DrawableRes iconRes: Int? = null,
+    iconContentDescription: String? = null,
+    iconTint: Color = textColor
 ) {
+    @Composable
+    fun Content() {
+        if (iconRes != null) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = iconContentDescription,
+                modifier = Modifier.width(18.dp).height(18.dp),
+                tint = iconTint
+            )
+        } else {
+            androidx.compose.foundation.text.BasicText(
+                label,
+                modifier = Modifier.padding(horizontal = 14.dp),
+                style = TextStyle(textColor, 15.sp)
+            )
+        }
+    }
+
     if (enableLiquidGlass && backdrop != null) {
         if (tint != null) {
             LiquidButton(
@@ -914,11 +928,7 @@ private fun DetailHeaderChip(
                 luminanceState = luminanceState,
                 modifier = Modifier.height(44.dp)
             ) {
-                androidx.compose.foundation.text.BasicText(
-                    label,
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                    style = TextStyle(textColor, 15.sp)
-                )
+                Content()
             }
         } else {
             LiquidButton(
@@ -928,12 +938,21 @@ private fun DetailHeaderChip(
                 luminanceState = luminanceState,
                 modifier = Modifier.height(44.dp)
             ) {
-                androidx.compose.foundation.text.BasicText(
-                    label,
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                    style = TextStyle(textColor, 15.sp)
-                )
+                Content()
             }
+        }
+    } else if (iconRes != null) {
+        Row(
+            modifier = Modifier
+                .height(44.dp)
+                .clip(Capsule())
+                .background(surfaceColor)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Content()
         }
     } else {
         Text(
@@ -1470,9 +1489,11 @@ internal fun WallpaperDetailScreen(
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = detailBackdrop,
                 luminanceState = applyLuminanceState,
-                surfaceColor = Color(0xFF2A83FF).copy(alpha = 0.75f),
-                textColor = Color.White,
-                tint = Color(0xFF2A83FF)
+                surfaceColor = pillBackground,
+                textColor = accentColor,
+                iconRes = R.drawable.complete,
+                iconContentDescription = "应用",
+                iconTint = accentColor
             )
         }
 
