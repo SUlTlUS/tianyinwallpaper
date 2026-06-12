@@ -280,17 +280,12 @@ fun DepthPreviewOverlay(
                     backdrop = detailBackdrop,
                     surfaceColor = pillBackground,
                     luminanceState = cancelLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        "取消",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = cancelLuminanceState?.contentColor ?: contentColor,
-                            fontSize = 15.sp
-                        )
-                    )
-                }
+                    modifier = Modifier.height(44.dp),
+                    iconRes = R.drawable.back,
+                    iconContentDescription = "取消",
+                    iconSize = 18.dp,
+                    iconTint = cancelLuminanceState?.contentColor ?: contentColor
+                )
                 LiquidButton(
                     onClick = { if (!previewLoading) onApply() },
                     backdrop = detailBackdrop,
@@ -305,12 +300,23 @@ fun DepthPreviewOverlay(
                     iconTint = accentColor
                 )
             } else {
-                DepthPreviewPill(
-                    text = "取消",
-                    color = contentColor,
-                    background = pillBackground,
-                    onClick = { closeWithAnimation() }
-                )
+                Row(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clip(Capsule())
+                        .background(pillBackground)
+                        .clickable { closeWithAnimation() }
+                        .padding(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.back),
+                        contentDescription = "取消",
+                        modifier = Modifier.width(18.dp).height(18.dp),
+                        tint = contentColor
+                    )
+                }
                 Row(
                     modifier = Modifier
                         .height(44.dp)

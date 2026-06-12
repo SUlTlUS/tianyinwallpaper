@@ -1478,7 +1478,10 @@ internal fun WallpaperDetailScreen(
                 backdrop = detailBackdrop,
                 luminanceState = cancelLuminanceState,
                 surfaceColor = pillBackground,
-                textColor = resolvedContentColor(cancelLuminanceState, onPage)
+                textColor = resolvedContentColor(cancelLuminanceState, onPage),
+                iconRes = R.drawable.back,
+                iconContentDescription = "取消",
+                iconTint = resolvedContentColor(cancelLuminanceState, onPage)
             )
             DetailHeaderChip(
                 label = "应用",

@@ -313,17 +313,12 @@ fun RasterDetailScreen(
                     backdrop = detailBackdrop,
                     surfaceColor = pillBackground,
                     luminanceState = cancelLuminanceState,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    BasicText(
-                        "取消",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(
-                            color = cancelLuminanceState?.contentColor ?: onPage,
-                            fontSize = 15.sp
-                        )
-                    )
-                }
+                    modifier = Modifier.height(44.dp),
+                    iconRes = R.drawable.back,
+                    iconContentDescription = "取消",
+                    iconSize = 18.dp,
+                    iconTint = cancelLuminanceState?.contentColor ?: onPage
+                )
                 // 应用按钮 - 蓝色按钮也联动 luminance
                 LiquidButton(
                     onClick = { if (!videoLoading) onApply() },
@@ -339,14 +334,23 @@ fun RasterDetailScreen(
                     iconTint = accentColor
                 )
             } else {
-                Text(
-                    text = "取消", color = onPage,
+                Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
+                        .height(44.dp)
+                        .clip(Capsule())
                         .background(pillBackground)
                         .combinedClickable(onClick = onDismiss)
-                        .padding(horizontal = 18.dp, vertical = 8.dp)
-                )
+                        .padding(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.back),
+                        contentDescription = "取消",
+                        modifier = Modifier.size(18.dp),
+                        tint = onPage
+                    )
+                }
                 Row(
                     modifier = Modifier
                         .height(44.dp)
