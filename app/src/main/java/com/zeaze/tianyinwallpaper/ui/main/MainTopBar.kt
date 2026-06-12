@@ -35,6 +35,7 @@ import com.kyant.shapes.Capsule
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButtonGroup
 
 /**
  * 选择模式状态数据类，用于 RxBus 通信
@@ -205,6 +206,73 @@ private fun TopCapsuleLiquidButton(
 }
 
 @Composable
+private fun TopSortFilterLiquidGroup(
+    showSortButton: Boolean,
+    showFilterButton: Boolean,
+    onSortClick: () -> Unit,
+    onFilterClick: () -> Unit,
+    textColor: Color,
+    surfaceColor: Color,
+    isDark: Boolean,
+    enableLiquidGlass: Boolean,
+    backdrop: LayerBackdrop?
+) {
+    val buttonCount = (if (showSortButton) 1 else 0) + (if (showFilterButton) 1 else 0)
+    if (buttonCount <= 0) return
+
+    fun isSortItem(index: Int): Boolean = showSortButton && index == 0
+
+    if (enableLiquidGlass && backdrop != null) {
+        LiquidButtonGroup(
+            buttonCount = buttonCount,
+            onButtonClick = { index ->
+                if (isSortItem(index)) onSortClick() else onFilterClick()
+            },
+            backdrop = backdrop,
+            surfaceColor = surfaceColor,
+            buttonHeight = IosTopButtonHeight,
+            contentPadding = PaddingValues(0.dp),
+            iconRes = { index -> if (isSortItem(index)) R.drawable.sort else R.drawable.fliter },
+            iconContentDescription = { index -> if (isSortItem(index)) "\u6392\u5e8f" else "\u7b5b\u9009" },
+            iconSize = { 20.dp },
+            iconTint = { textColor }
+        )
+    } else {
+        Surface(
+            modifier = Modifier
+                .height(IosTopButtonHeight)
+                .width(IosTopButtonHeight * buttonCount),
+            shape = Capsule(),
+            color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
+            border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(buttonCount) { index ->
+                    val sortItem = isSortItem(index)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clickable(onClick = if (sortItem) onSortClick else onFilterClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = if (sortItem) R.drawable.sort else R.drawable.fliter),
+                            contentDescription = if (sortItem) "\u6392\u5e8f" else "\u7b5b\u9009",
+                            modifier = Modifier.size(20.dp),
+                            tint = textColor
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun MainTopBar(
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     enableLiquidGlass: Boolean,
@@ -277,34 +345,16 @@ fun MainTopBar(
             iconSize = 16.dp
         )
 
-        TopCircleLiquidButton(
-            visible = showSortButton,
-            onClick = onSortClick,
-            text = "",
+        TopSortFilterLiquidGroup(
+            showSortButton = showSortButton,
+            showFilterButton = showFilterButton,
+            onSortClick = onSortClick,
+            onFilterClick = onFilterClick,
             textColor = textColor,
             surfaceColor = adaptiveSurfaceColor,
             isDark = isDark,
             enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
-            keepSlotWhenHidden = keepSlotWhenHidden,
-            iconRes = R.drawable.sort,
-            iconContentDescription = "排序",
-            iconSize = 20.dp
-        )
-
-        TopCircleLiquidButton(
-            visible = showFilterButton,
-            onClick = onFilterClick,
-            text = "",
-            textColor = textColor,
-            surfaceColor = adaptiveSurfaceColor,
-            isDark = isDark,
-            enableLiquidGlass = enableLiquidGlass,
-            backdrop = backdrop,
-            keepSlotWhenHidden = keepSlotWhenHidden,
-            iconRes = R.drawable.fliter,
-            iconContentDescription = "筛选",
-            iconSize = 20.dp
+            backdrop = backdrop
         )
 
         TopCircleLiquidButton(
