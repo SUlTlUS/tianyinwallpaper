@@ -39,45 +39,23 @@ fun LiquidButton(
     iconOffsetY: Dp = 0.dp,
     content: (@Composable RowScope.() -> Unit)? = null
 ) {
-    if (enableMetaballDrag) {
-        LiquidDraggableMetaballButton(
-            onClick = onClick,
-            backdrop = backdrop,
-            modifier = modifier,
-            tint = tint,
-            surfaceColor = surfaceColor,
-            luminanceState = luminanceState,
-            style = style,
-            buttonHeight = buttonHeight,
-            contentPadding = contentPadding,
-            iconRes = iconRes,
-            iconContentDescription = iconContentDescription,
-            iconSize = iconSize,
-            iconTint = iconTint,
-            iconOffsetX = iconOffsetX,
-            iconOffsetY = iconOffsetY,
-            content = content,
-            gapToAnchor = metaballGapToAnchor
-        )
-    } else {
-        LiquidButtonCore(
-            onClick = onClick,
-            backdrop = backdrop,
-            modifier = modifier,
-            isInteractive = isInteractive,
-            tint = tint,
-            surfaceColor = surfaceColor,
-            luminanceState = luminanceState,
-            style = style,
-            buttonHeight = buttonHeight,
-            contentPadding = contentPadding,
-            iconRes = iconRes,
-            iconContentDescription = iconContentDescription,
-            iconSize = iconSize,
-            iconTint = iconTint,
-            iconOffsetX = iconOffsetX,
-            iconOffsetY = iconOffsetY,
-            content = content
-        )
-    }
+    LiquidButtonCore(
+        onClick = onClick,
+        backdrop = backdrop,
+        modifier = modifier,
+        isInteractive = isInteractive,
+        tint = tint,
+        surfaceColor = surfaceColor,
+        luminanceState = luminanceState,
+        style = style,
+        buttonHeight = buttonHeight,
+        contentPadding = contentPadding,
+        iconRes = iconRes,
+        iconContentDescription = iconContentDescription,
+        iconSize = iconSize,
+        iconTint = iconTint,
+        iconOffsetX = iconOffsetX,
+        iconOffsetY = iconOffsetY,
+        content = content
+    )
 }

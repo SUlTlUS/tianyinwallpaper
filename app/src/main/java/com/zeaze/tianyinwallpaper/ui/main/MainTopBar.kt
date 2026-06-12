@@ -274,7 +274,7 @@ fun MainTopBar(
             keepSlotWhenHidden = keepSlotWhenHidden,
             iconRes = R.drawable.complete,
             iconContentDescription = "完成",
-            iconSize = 20.dp
+            iconSize = 16.dp
         )
 
         TopCircleLiquidButton(
