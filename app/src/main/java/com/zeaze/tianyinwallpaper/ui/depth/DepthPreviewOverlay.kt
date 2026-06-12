@@ -50,6 +50,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.material.CircularProgressIndicator
+import androidx.compose.material.Icon
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -91,6 +92,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -103,6 +105,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
 import com.zeaze.tianyinwallpaper.App
+import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
@@ -333,25 +336,27 @@ fun DepthPreviewOverlay(
                 LiquidButton(
                     onClick = { showParamPanel = true },
                     backdrop = detailBackdrop,
-                    surfaceColor = accentColor.copy(alpha = 0.75f),
-                    tint = accentColor,
+                    surfaceColor = pillBackground,
                     luminanceState = gaussianLuminanceState,
                     modifier = Modifier.height(44.dp)
                 ) {
-                    BasicText(
-                        "参数调节",
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        style = TextStyle(Color.White, 15.sp)
+                    DepthAdjustButtonContent(
+                        textColor = gaussianLuminanceState?.contentColor ?: contentColor
                     )
                 }
             } else {
-                DepthPreviewKindPill(
-                    text = "参数调节",
-                    selected = true,
-                    contentColor = contentColor,
-                    accentColor = accentColor,
-                    onClick = { showParamPanel = true }
-                )
+                Row(
+                    modifier = Modifier
+                        .height(44.dp)
+                        .clip(Capsule())
+                        .background(pillBackground)
+                        .clickable { showParamPanel = true }
+                        .padding(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DepthAdjustButtonContent(textColor = contentColor)
+                }
             }
         }
 
@@ -404,6 +409,30 @@ fun DepthPreviewOverlay(
                 modifier = Modifier
             )
         }
+    }
+}
+
+@Composable
+private fun DepthAdjustButtonContent(textColor: Color) {
+    Row(
+        modifier = Modifier.padding(horizontal = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.adjustments),
+            contentDescription = null,
+            modifier = Modifier.width(18.dp).height(18.dp),
+            tint = textColor
+        )
+        BasicText(
+            "调节参数",
+            style = TextStyle(
+                color = textColor,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium
+            )
+        )
     }
 }
 
