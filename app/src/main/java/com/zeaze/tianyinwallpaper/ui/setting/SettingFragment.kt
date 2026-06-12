@@ -557,7 +557,7 @@ fun SettingRouteScreen(
                         }
                     }
                     SettingTextItem("关于", contentColor) {
-                        showAppInfoPage = true
+                        onOpenAppInfo()
                     }
                 }
                 

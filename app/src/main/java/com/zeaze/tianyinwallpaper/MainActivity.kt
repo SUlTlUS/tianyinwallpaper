@@ -583,7 +583,10 @@ class MainActivity : BaseActivity() {
                             )
                         }
                     ) {
-                        com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(useDarkTheme = useDarkTheme)
+                        com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(
+                            useDarkTheme = useDarkTheme,
+                            onBack = { navController.popBackStack() }
+                        )
                     }
                     composable(
                         route = ROUTE_CORRUGATED_TEST,
