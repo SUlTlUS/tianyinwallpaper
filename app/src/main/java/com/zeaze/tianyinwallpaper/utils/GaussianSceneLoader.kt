@@ -12,6 +12,7 @@ import java.util.Locale
 object GaussianSceneLoader {
     private const val TAG = "GaussianSceneLoader"
     private const val MAX_SCENE_CACHE_ENTRIES = 1
+    private const val SCENE_CACHE_VERSION = 3
     private val gaussianLoadLock = Any()
     private val sceneCache = object : LinkedHashMap<CacheKey, CachedScene>(MAX_SCENE_CACHE_ENTRIES, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, CachedScene>?): Boolean {
@@ -28,7 +29,8 @@ object GaussianSceneLoader {
     private data class CacheKey(
         val uriString: String,
         val maxSplats: Int,
-        val viewportAspectBucket: Int
+        val viewportAspectBucket: Int,
+        val version: Int = SCENE_CACHE_VERSION
     )
 
     private data class CachedScene(

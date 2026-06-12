@@ -558,10 +558,10 @@ fun SettingRouteScreen(
                         .background(groupBackgroundColor)
                 ) {
                     if (testPagesVisible) {
-                        SettingTextItem("Gaussian SOG 测试页", contentColor) {
+                        SettingTextItem("SOG测试", contentColor) {
                             onOpenPlyModelTest()
                         }
-                        SettingTextItem("波纹玻璃测试页", contentColor) {
+                        SettingTextItem("玻璃测试", contentColor) {
                             onOpenCorrugatedTest()
                         }
                     }

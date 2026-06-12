@@ -33,6 +33,7 @@ import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
 import com.zeaze.tianyinwallpaper.renderer.NativeGaussianRendererFactory
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
+import com.zeaze.tianyinwallpaper.utils.GaussianSogLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.exp
@@ -98,11 +99,15 @@ private fun NativeGaussianPreviewView(
     val context = LocalContext.current
     val appContext = context.applicationContext
     val renderer = remember(appContext) { NativeGaussianRendererFactory.create(appContext) }
-    var scene by remember(model.gaussianUri) { mutableStateOf<GaussianPlyLoader.GaussianScene?>(null) }
+    var contentLoaded by remember(model.gaussianUri, model.gaussianMaxSplats) { mutableStateOf(false) }
     var isRendererStarted by remember { mutableStateOf(false) }
+    var previewWidth by remember { mutableStateOf(0) }
+    var previewHeight by remember { mutableStateOf(0) }
+    var activeLoadKey by remember { mutableStateOf<String?>(null) }
+    var loadedContentKey by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(scene, isRendererStarted) {
-        onLoadingChanged(scene == null || !isRendererStarted)
+    LaunchedEffect(contentLoaded, isRendererStarted) {
+        onLoadingChanged(!contentLoaded || !isRendererStarted)
     }
 
     DisposableEffect(Unit) {
@@ -112,29 +117,98 @@ private fun NativeGaussianPreviewView(
         }
     }
 
-    LaunchedEffect(model.gaussianUri, model.gaussianMaxSplats) {
+    LaunchedEffect(model.gaussianUri, model.gaussianMaxSplats, previewWidth, previewHeight) {
+        if (previewWidth <= 0 || previewHeight <= 0) return@LaunchedEffect
+        val previewMaxSplats = model.nativePreviewMaxSplats()
+        val viewportAspect = previewWidth.toFloat() / previewHeight.coerceAtLeast(1).toFloat()
+        val loadKey = "${model.gaussianUri}|$previewMaxSplats|${(viewportAspect * 1000f).toInt()}"
+        if (contentLoaded && loadedContentKey == loadKey) return@LaunchedEffect
+        if (activeLoadKey == loadKey) return@LaunchedEffect
+        activeLoadKey = loadKey
         onLoadingChanged(true)
-        scene = null
-        scene = withContext(Dispatchers.IO) {
-            val previewMaxSplats = model.nativePreviewMaxSplats()
+        contentLoaded = false
+        val loadResult = withContext(Dispatchers.IO) {
             if (model.gaussianMaxSplats > previewMaxSplats) {
                 Log.d(
                     TAG,
                     "native preview splat budget capped requested=${model.gaussianMaxSplats} preview=$previewMaxSplats"
                 )
             }
+            var sogStage: GaussianSogLoader.SogGpuStage? = null
+            runCatching {
+                GaussianSogLoader.loadGpuSceneStagesOrThrow(
+                    context = appContext,
+                    uriString = model.gaussianUri,
+                    maxSplats = previewMaxSplats,
+                    viewportAspect = viewportAspect
+                ) { stage ->
+                    sogStage = stage
+                    true
+                }
+            }.onFailure {
+                Log.w(TAG, "native preview SOG GPU load failed uri=${model.gaussianUri}", it)
+            }
+            sogStage?.let { return@withContext NativePreviewLoadResult.Sog(it) }
+            GaussianSceneLoader.clearSceneCache()
             val result = GaussianSceneLoader.loadSceneDetailed(
-                context = context.applicationContext,
+                context = appContext,
                 uriString = model.gaussianUri,
                 maxSplats = previewMaxSplats,
-                viewportAspect = context.resources.displayMetrics.widthPixels.toFloat() /
-                    context.resources.displayMetrics.heightPixels.coerceAtLeast(1).toFloat()
+                viewportAspect = viewportAspect
             )
             result.error?.let { Log.w(TAG, "native preview gaussian load failed error=$it uri=${model.gaussianUri}") }
-            result.scene
+            result.scene?.let(NativePreviewLoadResult::Scene) ?: NativePreviewLoadResult.Failed
         }
-        scene?.let { renderer.loadGaussians(it) }
-        renderer.resetCamera()
+        if (activeLoadKey != loadKey) {
+            return@LaunchedEffect
+        }
+        val loaded = when (loadResult) {
+            is NativePreviewLoadResult.Sog -> {
+                val uploaded = renderer.loadSogGaussians(loadResult.stage.chunks)
+                if (uploaded) {
+                    val stage = loadResult.stage
+                    Log.d(
+                        TAG,
+                        "native preview SOG GPU loaded stage=${stage.stageIndex + 1}/${stage.stageCount} " +
+                            "lod=${stage.lodLevel} chunks=${stage.chunks.size} count=${stage.count} " +
+                            "visible=${stage.screenVisibleSplatCount} aux=${stage.auxiliarySplatCount} " +
+                            "viewportAspect=$viewportAspect"
+                    )
+                    true
+                } else {
+                    val fallback = withContext(Dispatchers.IO) {
+                        GaussianSceneLoader.clearSceneCache()
+                        val result = GaussianSceneLoader.loadSceneDetailed(
+                            context = appContext,
+                            uriString = model.gaussianUri,
+                            maxSplats = previewMaxSplats,
+                            viewportAspect = viewportAspect
+                        )
+                        result.error?.let {
+                            Log.w(TAG, "native preview gaussian fallback load failed error=$it uri=${model.gaussianUri}")
+                        }
+                        result.scene
+                    }
+                    if (activeLoadKey == loadKey && fallback != null) {
+                        renderer.loadGaussians(fallback)
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            is NativePreviewLoadResult.Scene -> {
+                renderer.loadGaussians(loadResult.scene)
+                true
+            }
+            NativePreviewLoadResult.Failed -> false
+        }
+        activeLoadKey = null
+        contentLoaded = loaded
+        loadedContentKey = if (loaded) loadKey else null
+        if (loaded) {
+            renderer.resetCamera()
+        }
     }
 
     LaunchedEffect(model.parallaxStrength, model.cameraZoom, model.centerOffsetX, model.centerOffsetY, model.focusDepth) {
@@ -148,21 +222,29 @@ private fun NativeGaussianPreviewView(
             TextureView(viewContext).apply {
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                        previewWidth = width.coerceAtLeast(1)
+                        previewHeight = height.coerceAtLeast(1)
                         renderer.start(Surface(surface))
                         renderer.resize(width, height)
                         renderer.updateParams(model.parallaxStrength, 0f)
                         renderer.updateGaussianParams(model.nativePreviewParams())
                         isRendererStarted = true
-                        scene?.let { renderer.loadGaussians(it) }
                     }
 
                     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
+                        previewWidth = width.coerceAtLeast(1)
+                        previewHeight = height.coerceAtLeast(1)
                         renderer.resize(width, height)
                         renderer.requestRender()
                     }
 
                     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                         isRendererStarted = false
+                        contentLoaded = false
+                        activeLoadKey = null
+                        loadedContentKey = null
+                        previewWidth = 0
+                        previewHeight = 0
                         renderer.stopAndWait(300)
                         return true
                     }
@@ -177,22 +259,6 @@ private fun NativeGaussianPreviewView(
         },
         modifier = modifier
     )
-
-    if (!isRendererStarted) {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colors.background),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "正在加载",
-                color = MaterialTheme.colors.onBackground.copy(alpha = 0.7f),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
 
     DisposableEffect(context, model.sensorSensitivity, previewFps) {
         val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -261,6 +327,12 @@ private const val TAG = "DepthPreviewView"
 private const val NATIVE_PREVIEW_MIN_GAUSSIAN_SPLATS = 100_000
 private const val NATIVE_PREVIEW_MAX_GAUSSIAN_SPLATS = 800_000
 
+private sealed class NativePreviewLoadResult {
+    data class Sog(val stage: GaussianSogLoader.SogGpuStage) : NativePreviewLoadResult()
+    data class Scene(val scene: GaussianPlyLoader.GaussianScene) : NativePreviewLoadResult()
+    object Failed : NativePreviewLoadResult()
+}
+
 private fun DepthWallpaperModel.nativePreviewMaxSplats(): Int {
     return gaussianMaxSplats.coerceIn(
         NATIVE_PREVIEW_MIN_GAUSSIAN_SPLATS,
@@ -269,11 +341,16 @@ private fun DepthWallpaperModel.nativePreviewMaxSplats(): Int {
 }
 
 private fun DepthWallpaperModel.nativePreviewParams(): DepthGLRenderer.GaussianRenderParams {
+    val coverageBoost = gaussianCoverageBoost(
+        splats = nativePreviewMaxSplats(),
+        minSplats = NATIVE_PREVIEW_MIN_GAUSSIAN_SPLATS,
+        maxSplats = NATIVE_PREVIEW_MAX_GAUSSIAN_SPLATS
+    )
     return DepthGLRenderer.GaussianRenderParams(
-        splatScale = 1.35f,
+        splatScale = 1.35f * (1f + coverageBoost * 0.28f),
         globalOpacity = 1.0f,
-        alphaFalloff = 0.72f,
-        minPointSize = 0.5f,
+        alphaFalloff = (0.72f - coverageBoost * 0.14f).coerceAtLeast(0.5f),
+        minPointSize = 0.5f + coverageBoost * 0.18f,
         maxPointSize = 120f,
         cameraZoom = cameraZoom,
         centerOffsetX = centerOffsetX,
@@ -281,4 +358,14 @@ private fun DepthWallpaperModel.nativePreviewParams(): DepthGLRenderer.GaussianR
         focusDepthOffset = focusDepth,
         useLayerCache = false
     )
+}
+
+private fun gaussianCoverageBoost(
+    splats: Int,
+    minSplats: Int,
+    maxSplats: Int
+): Float {
+    val span = (maxSplats - minSplats).coerceAtLeast(1).toFloat()
+    val normalized = ((splats - minSplats) / span).coerceIn(0f, 1f)
+    return 1f - normalized
 }

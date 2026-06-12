@@ -69,8 +69,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
         val scene: GaussianPlyLoader.GaussianScene,
         val positionBuffer: Int,
         val colorBuffer: Int,
-        val scaleBuffer: Int,
-        val rotationBuffer: Int,
+        val covarianceBuffer: Int,
         val count: Int
     )
 
@@ -668,59 +667,13 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 return
             }
 
-            val imageAspect = scene.imageWidth.toFloat() / scene.imageHeight.coerceAtLeast(1).toFloat()
-            val screenAspect = sW.toFloat() / sH.coerceAtLeast(1).toFloat()
-            val fillX: Float
-            val fillY: Float
-            if (imageAspect > screenAspect) {
-                fillX = imageAspect / screenAspect
-                fillY = 1f
-            } else {
-                fillX = 1f
-                fillY = screenAspect / imageAspect
-            }
-            val pointScale = (
-                max(
-                    sW.toFloat() / scene.imageWidth.coerceAtLeast(1).toFloat(),
-                    sH.toFloat() / scene.imageHeight.coerceAtLeast(1).toFloat()
-                ) * GAUSSIAN_SPLAT_SCALE * gaussianParams.splatScale
-                ).coerceIn(0.35f, 30f)
-
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uFocal"), scene.focalLengthPx)
-            GLES20.glUniform2f(
-                GLES20.glGetUniformLocation(gaussianQuadProg, "uImageSize"),
-                scene.imageWidth.toFloat(),
-                scene.imageHeight.toFloat()
-            )
             GLES20.glUniform2f(
                 GLES20.glGetUniformLocation(gaussianQuadProg, "uSurfaceSize"),
                 sW.coerceAtLeast(1).toFloat(),
                 sH.coerceAtLeast(1).toFloat()
             )
-            GLES20.glUniform2f(GLES20.glGetUniformLocation(gaussianQuadProg, "uFillScale"), fillX, fillY)
-            GLES20.glUniform2f(GLES20.glGetUniformLocation(gaussianQuadProg, "uTilt"), tiltX, tiltY)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uStrength"), parallaxStrength)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uFocusDepth"), scene.focusDepth)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uFarDepth"), scene.parallaxAnchorDepth)
-            GLES20.glUniform3f(
-                GLES20.glGetUniformLocation(gaussianQuadProg, "uSceneCenter"),
-                scene.sceneCenterX,
-                scene.sceneCenterY,
-                scene.sceneCenterZ
-            )
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uSceneRadius"), scene.sceneRadius)
-            GLES20.glUniform1f(
-                GLES20.glGetUniformLocation(gaussianQuadProg, "uDefaultCameraDistance"),
-                scene.defaultCameraDistance
-            )
+            uploadGaussianCameraUniforms(scene)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uTanHalfFov"), GAUSSIAN_TAN_HALF_FOV)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uCameraZoom"), gaussianParams.cameraZoom)
-            GLES20.glUniform2f(
-                GLES20.glGetUniformLocation(gaussianQuadProg, "uCenterOffset"),
-                gaussianParams.centerOffsetX,
-                gaussianParams.centerOffsetY
-            )
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uFocusDepthOffset"), gaussianParams.focusDepthOffset)
             GLES20.glUniform1f(
                 GLES20.glGetUniformLocation(gaussianQuadProg, "uPointScale"),
                 gaussianParams.splatScale.coerceIn(0.25f, 3f)
@@ -729,7 +682,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uAlphaFalloff"), gaussianParams.alphaFalloff)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(gaussianQuadProg, "uQuadExtent"), GAUSSIAN_QUAD_EXTENT)
 
-            GLES30.glDrawArraysInstanced(GLES20.GL_TRIANGLES, 0, GAUSSIAN_QUAD_VERTEX_COUNT, drawSplatCount)
+            GLES30.glDrawArraysInstanced(GLES20.GL_TRIANGLE_STRIP, 0, GAUSSIAN_QUAD_VERTEX_COUNT, drawSplatCount)
             logGlError("gaussian draw quads")
 
             disableGaussianQuadVertexAttributes()
@@ -1014,15 +967,130 @@ class DepthGLRenderer : NativeGaussianRenderer {
             scene.scales.position(0)
         }
 
+        private fun uploadGaussianCameraUniforms(scene: GaussianPlyLoader.GaussianScene) {
+            val radius = max(scene.sceneRadius, 0.001f)
+            val targetX = scene.sceneCenterX + gaussianParams.centerOffsetX * radius
+            val targetY = scene.sceneCenterY + gaussianParams.centerOffsetY * radius
+            val targetZ = scene.sceneCenterZ + radius * gaussianParams.focusDepthOffset
+            val frameDistance = max(scene.defaultCameraDistance, radius * 0.02f)
+            val distance = max(frameDistance / max(gaussianParams.cameraZoom, 0.6f), radius * 0.02f)
+            var tangentX = tiltX * frameDistance * max(parallaxStrength, 0.02f) * 2.4f
+            var tangentY = -tiltY * frameDistance * max(parallaxStrength, 0.02f) * 2.4f
+            val maxTangent = distance * 0.75f
+            var tangentLength = sqrt(tangentX * tangentX + tangentY * tangentY)
+            if (tangentLength > maxTangent && tangentLength > 0.0001f) {
+                val scale = maxTangent / tangentLength
+                tangentX *= scale
+                tangentY *= scale
+                tangentLength = maxTangent
+            }
+            val frontDepth = sqrt(max(distance * distance - tangentLength * tangentLength, distance * distance * 0.25f))
+            val positionX = targetX + tangentX
+            val positionY = targetY + tangentY
+            val positionZ = targetZ - frontDepth
+
+            var forwardX = targetX - positionX
+            var forwardY = targetY - positionY
+            var forwardZ = targetZ - positionZ
+            val forwardLength = sqrt(forwardX * forwardX + forwardY * forwardY + forwardZ * forwardZ).coerceAtLeast(0.0001f)
+            forwardX /= forwardLength
+            forwardY /= forwardLength
+            forwardZ /= forwardLength
+
+            var rightX = forwardZ
+            val rightY = 0f
+            var rightZ = -forwardX
+            val rightLength = sqrt(rightX * rightX + rightZ * rightZ).coerceAtLeast(0.0001f)
+            rightX /= rightLength
+            rightZ /= rightLength
+
+            var upX = forwardY * rightZ
+            var upY = forwardZ * rightX - forwardX * rightZ
+            var upZ = -forwardY * rightX
+            val upLength = sqrt(upX * upX + upY * upY + upZ * upZ).coerceAtLeast(0.0001f)
+            upX /= upLength
+            upY /= upLength
+            upZ /= upLength
+
+            GLES20.glUniform3f(GLES20.glGetUniformLocation(gaussianQuadProg, "uCameraPosition"), positionX, positionY, positionZ)
+            GLES20.glUniform3f(GLES20.glGetUniformLocation(gaussianQuadProg, "uCameraRight"), rightX, rightY, rightZ)
+            GLES20.glUniform3f(GLES20.glGetUniformLocation(gaussianQuadProg, "uCameraUp"), upX, upY, upZ)
+            GLES20.glUniform3f(GLES20.glGetUniformLocation(gaussianQuadProg, "uCameraForward"), forwardX, forwardY, forwardZ)
+        }
+
+        private fun buildGaussianCovarianceBuffer(scene: GaussianPlyLoader.GaussianScene): FloatBuffer? {
+            val rotations = scene.rotations?.duplicate()?.apply { position(0) } ?: return null
+            val scales = scene.scales.duplicate().apply { position(0) }
+            if (scales.remaining() < scene.count * 3 || rotations.remaining() < scene.count * 4) return null
+            val covariance = ByteBuffer
+                .allocateDirect(scene.count * COVARIANCE_FLOAT_COUNT * FLOAT_SIZE_BYTES)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+            repeat(scene.count) {
+                val sx = max(scales.get(), 0.0001f)
+                val sy = max(scales.get(), 0.0001f)
+                val sz = max(scales.get(), 0.0001f)
+                var qx = rotations.get()
+                var qy = rotations.get()
+                var qz = rotations.get()
+                var qw = rotations.get()
+                val quatLength = sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+                if (quatLength > 0.000001f) {
+                    qx /= quatLength
+                    qy /= quatLength
+                    qz /= quatLength
+                    qw /= quatLength
+                } else {
+                    qx = 0f
+                    qy = 0f
+                    qz = 0f
+                    qw = 1f
+                }
+
+                val x2 = qx + qx
+                val y2 = qy + qy
+                val z2 = qz + qz
+                val xx = qx * x2
+                val xy = qx * y2
+                val xz = qx * z2
+                val yy = qy * y2
+                val yz = qy * z2
+                val zz = qz * z2
+                val wx = qw * x2
+                val wy = qw * y2
+                val wz = qw * z2
+                val m0x = 1f - yy - zz
+                val m0y = xy + wz
+                val m0z = xz - wy
+                val m1x = xy - wz
+                val m1y = 1f - xx - zz
+                val m1z = yz + wx
+                val m2x = xz + wy
+                val m2y = yz - wx
+                val m2z = 1f - xx - yy
+                val sx2 = sx * sx
+                val sy2 = sy * sy
+                val sz2 = sz * sz
+                covariance.put(m0x * m0x * sx2 + m1x * m1x * sy2 + m2x * m2x * sz2)
+                covariance.put(m0x * m0y * sx2 + m1x * m1y * sy2 + m2x * m2y * sz2)
+                covariance.put(m0x * m0z * sx2 + m1x * m1z * sy2 + m2x * m2z * sz2)
+                covariance.put(m0y * m0y * sx2 + m1y * m1y * sy2 + m2y * m2y * sz2)
+                covariance.put(m0y * m0z * sx2 + m1y * m1z * sy2 + m2y * m2z * sz2)
+                covariance.put(m0z * m0z * sx2 + m1z * m1z * sy2 + m2z * m2z * sz2)
+            }
+            covariance.position(0)
+            return covariance
+        }
+
         private fun uploadGaussianBuffers(scene: GaussianPlyLoader.GaussianScene): GaussianPlyLoader.GaussianScene {
             drainGlErrors("before gaussian VBO upload")
-            val rotations = scene.rotations
-            if (rotations == null) {
+            val covariance = buildGaussianCovarianceBuffer(scene)
+            if (covariance == null) {
                 Log.w(TAG, "gaussian quad renderer requires rotation buffer")
                 gaussianVboSet = null
                 return scene
             }
-            val ids = IntArray(4)
+            val ids = IntArray(3)
             GLES20.glGenBuffers(ids.size, ids, 0)
             if (ids.any { it == 0 }) {
                 Log.w(TAG, "glGenBuffers failed for gaussian scene")
@@ -1034,26 +1102,28 @@ class DepthGLRenderer : NativeGaussianRenderer {
             val uploaded =
                 uploadFloatBuffer(ids[0], scene.positions, scene.count * 3 * FLOAT_SIZE_BYTES, "positions") &&
                     uploadFloatBuffer(ids[1], scene.colors, scene.count * 4 * FLOAT_SIZE_BYTES, "colors") &&
-                    uploadFloatBuffer(ids[2], scene.scales, scene.count * 3 * FLOAT_SIZE_BYTES, "scales") &&
-                    uploadFloatBuffer(ids[3], rotations, scene.count * 4 * FLOAT_SIZE_BYTES, "rotations")
+                    uploadFloatBuffer(ids[2], covariance, scene.count * COVARIANCE_FLOAT_COUNT * FLOAT_SIZE_BYTES, "covariance")
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
             scene.positions.position(0)
             scene.colors.position(0)
             scene.scales.position(0)
-            rotations.position(0)
+            scene.rotations?.position(0)
             if (!uploaded) {
                 GLES20.glDeleteBuffers(ids.size, ids, 0)
                 gaussianVboSet = null
                 Log.w(TAG, "gaussian VBO upload failed; quad renderer will not draw without VBO")
                 return scene
             }
-            val retainedScene = if (gaussianParams.useLayerCache) scene else scene.withoutCpuSplatBuffers()
+            val retainedScene = if (ENABLE_GAUSSIAN_LAYER_CACHE && gaussianParams.useLayerCache) {
+                scene
+            } else {
+                scene.withoutCpuSplatBuffers()
+            }
             gaussianVboSet = GaussianVboSet(
                 scene = retainedScene,
                 positionBuffer = ids[0],
                 colorBuffer = ids[1],
-                scaleBuffer = ids[2],
-                rotationBuffer = ids[3],
+                covarianceBuffer = ids[2],
                 count = retainedScene.count
             )
             Log.d(TAG, "uploaded gaussian VBO count=${scene.count}")
@@ -1092,8 +1162,6 @@ class DepthGLRenderer : NativeGaussianRenderer {
                 -1f, -1f,
                 1f, -1f,
                 -1f, 1f,
-                -1f, 1f,
-                1f, -1f,
                 1f, 1f
             )
             val buffer = ByteBuffer.allocateDirect(data.size * FLOAT_SIZE_BYTES)
@@ -1116,18 +1184,18 @@ class DepthGLRenderer : NativeGaussianRenderer {
             val aCorner = GLES20.glGetAttribLocation(gaussianQuadProg, "aCorner")
             val aPos = GLES20.glGetAttribLocation(gaussianQuadProg, "aPos")
             val aColor = GLES20.glGetAttribLocation(gaussianQuadProg, "aColor")
-            val aScale = GLES20.glGetAttribLocation(gaussianQuadProg, "aScale")
-            val aRotation = GLES20.glGetAttribLocation(gaussianQuadProg, "aRotation")
-            if (aCorner < 0 || aPos < 0 || aColor < 0 || aScale < 0 || aRotation < 0) {
-                Log.w(TAG, "missing gaussian quad attribute corner=$aCorner pos=$aPos color=$aColor scale=$aScale rotation=$aRotation")
+            val aCovarianceA = GLES20.glGetAttribLocation(gaussianQuadProg, "aCovarianceA")
+            val aCovarianceB = GLES20.glGetAttribLocation(gaussianQuadProg, "aCovarianceB")
+            if (aCorner < 0 || aPos < 0 || aColor < 0 || aCovarianceA < 0 || aCovarianceB < 0) {
+                Log.w(TAG, "missing gaussian quad attribute corner=$aCorner pos=$aPos color=$aColor covariance=($aCovarianceA,$aCovarianceB)")
                 return false
             }
 
             GLES20.glEnableVertexAttribArray(aCorner)
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glEnableVertexAttribArray(aColor)
-            GLES20.glEnableVertexAttribArray(aScale)
-            GLES20.glEnableVertexAttribArray(aRotation)
+            GLES20.glEnableVertexAttribArray(aCovarianceA)
+            GLES20.glEnableVertexAttribArray(aCovarianceB)
 
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, gaussianQuadCornerBuffer)
             GLES20.glVertexAttribPointer(aCorner, 2, GLES20.GL_FLOAT, false, 0, 0)
@@ -1141,20 +1209,19 @@ class DepthGLRenderer : NativeGaussianRenderer {
             GLES20.glVertexAttribPointer(aColor, 4, GLES20.GL_FLOAT, false, 0, 0)
             GLES30.glVertexAttribDivisor(aColor, 1)
 
-            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo.scaleBuffer)
-            GLES20.glVertexAttribPointer(aScale, 3, GLES20.GL_FLOAT, false, 0, 0)
-            GLES30.glVertexAttribDivisor(aScale, 1)
-
-            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo.rotationBuffer)
-            GLES20.glVertexAttribPointer(aRotation, 4, GLES20.GL_FLOAT, false, 0, 0)
-            GLES30.glVertexAttribDivisor(aRotation, 1)
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo.covarianceBuffer)
+            val covarianceStride = COVARIANCE_FLOAT_COUNT * FLOAT_SIZE_BYTES
+            GLES20.glVertexAttribPointer(aCovarianceA, 3, GLES20.GL_FLOAT, false, covarianceStride, 0)
+            GLES30.glVertexAttribDivisor(aCovarianceA, 1)
+            GLES20.glVertexAttribPointer(aCovarianceB, 3, GLES20.GL_FLOAT, false, covarianceStride, 3 * FLOAT_SIZE_BYTES)
+            GLES30.glVertexAttribDivisor(aCovarianceB, 1)
 
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
             return true
         }
 
         private fun disableGaussianQuadVertexAttributes() {
-            listOf("aCorner", "aPos", "aColor", "aScale", "aRotation").forEach { name ->
+            listOf("aCorner", "aPos", "aColor", "aCovarianceA", "aCovarianceB").forEach { name ->
                 val location = GLES20.glGetAttribLocation(gaussianQuadProg, name)
                 if (location >= 0) {
                     GLES30.glVertexAttribDivisor(location, 0)
@@ -1179,18 +1246,6 @@ class DepthGLRenderer : NativeGaussianRenderer {
             GLES20.glEnableVertexAttribArray(aPos)
             GLES20.glEnableVertexAttribArray(aColor)
             GLES20.glEnableVertexAttribArray(aScale)
-
-            val vbo = gaussianVboSet?.takeIf { it.scene === scene && it.count == scene.count }
-            if (vbo != null) {
-                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo.positionBuffer)
-                GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, 0)
-                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo.colorBuffer)
-                GLES20.glVertexAttribPointer(aColor, 4, GLES20.GL_FLOAT, false, 0, 0)
-                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo.scaleBuffer)
-                GLES20.glVertexAttribPointer(aScale, 3, GLES20.GL_FLOAT, false, 0, 0)
-                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
-                return true
-            }
 
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
             scene.positions.position(start * 3)
@@ -1292,7 +1347,7 @@ class DepthGLRenderer : NativeGaussianRenderer {
 
         private fun deleteGaussianBuffers() {
             gaussianVboSet?.let { vbo ->
-                val ids = intArrayOf(vbo.positionBuffer, vbo.colorBuffer, vbo.scaleBuffer, vbo.rotationBuffer)
+                val ids = intArrayOf(vbo.positionBuffer, vbo.colorBuffer, vbo.covarianceBuffer)
                 GLES20.glDeleteBuffers(ids.size, ids, 0)
             }
             gaussianVboSet = null
@@ -1390,7 +1445,8 @@ class DepthGLRenderer : NativeGaussianRenderer {
         private const val TWO_PI = 6.2831855f
         private const val GAUSSIAN_SPLAT_SCALE = 1.0f
         private const val GAUSSIAN_QUAD_EXTENT = 1.0f
-        private const val GAUSSIAN_QUAD_VERTEX_COUNT = 6
+        private const val GAUSSIAN_QUAD_VERTEX_COUNT = 4
+        private const val COVARIANCE_FLOAT_COUNT = 6
         private const val GAUSSIAN_LAYER_TEXTURE_MAX_SIZE = 768
         private const val GAUSSIAN_TAN_HALF_FOV = 0.57735026f
         private const val FLOAT_SIZE_BYTES = 4
@@ -1513,91 +1569,25 @@ class DepthGLRenderer : NativeGaussianRenderer {
             attribute vec2 aCorner;
             attribute vec3 aPos;
             attribute vec4 aColor;
-            attribute vec3 aScale;
-            attribute vec4 aRotation;
-            uniform float uFocal;
-            uniform vec2 uImageSize;
+            attribute vec3 aCovarianceA;
+            attribute vec3 aCovarianceB;
             uniform vec2 uSurfaceSize;
-            uniform vec2 uFillScale;
-            uniform vec2 uTilt;
-            uniform float uStrength;
-            uniform float uFocusDepth;
-            uniform float uFarDepth;
-            uniform vec3 uSceneCenter;
-            uniform float uSceneRadius;
-            uniform float uDefaultCameraDistance;
+            uniform vec3 uCameraPosition;
+            uniform vec3 uCameraRight;
+            uniform vec3 uCameraUp;
+            uniform vec3 uCameraForward;
             uniform float uTanHalfFov;
-            uniform float uCameraZoom;
-            uniform vec2 uCenterOffset;
-            uniform float uFocusDepthOffset;
             uniform float uPointScale;
             uniform float uQuadExtent;
             varying vec4 vColor;
             varying vec2 vLocal;
             varying float vAaFactor;
 
-            struct CameraFrame {
-                vec3 position;
-                vec3 right;
-                vec3 up;
-                vec3 forward;
-            };
-
-            mat3 quatToMat3(vec4 q) {
-                float x2 = q.x + q.x;
-                float y2 = q.y + q.y;
-                float z2 = q.z + q.z;
-                float xx = q.x * x2;
-                float xy = q.x * y2;
-                float xz = q.x * z2;
-                float yy = q.y * y2;
-                float yz = q.y * z2;
-                float zz = q.z * z2;
-                float wx = q.w * x2;
-                float wy = q.w * y2;
-                float wz = q.w * z2;
-                return mat3(
-                    1.0 - yy - zz, xy + wz, xz - wy,
-                    xy - wz, 1.0 - xx - zz, yz + wx,
-                    xz + wy, yz - wx, 1.0 - xx - yy
-                );
-            }
-
-            CameraFrame wallpaperCamera() {
-                float radius = max(uSceneRadius, 0.001);
-                vec3 target = vec3(
-                    uSceneCenter.x + uCenterOffset.x * radius,
-                    uSceneCenter.y + uCenterOffset.y * radius,
-                    uSceneCenter.z + radius * uFocusDepthOffset
-                );
-                float frameDistance = max(uDefaultCameraDistance, radius * 0.02);
-                float distance = max(frameDistance / max(uCameraZoom, 0.6), radius * 0.02);
-                vec2 tangent = vec2(uTilt.x, -uTilt.y) * frameDistance * max(uStrength, 0.02) * 2.4;
-                float maxTangent = distance * 0.75;
-                float tangentLength = length(tangent);
-                if (tangentLength > maxTangent && tangentLength > 0.0001) {
-                    tangent *= maxTangent / tangentLength;
-                    tangentLength = maxTangent;
-                }
-                float frontDepth = sqrt(max(distance * distance - tangentLength * tangentLength, distance * distance * 0.25));
-                vec3 position = target + vec3(tangent.x, tangent.y, -frontDepth);
-                vec3 forward = normalize(target - position);
-                vec3 right = normalize(vec3(forward.z, 0.0, -forward.x));
-                vec3 up = normalize(cross(forward, right));
-                CameraFrame frame;
-                frame.position = position;
-                frame.right = right;
-                frame.up = up;
-                frame.forward = forward;
-                return frame;
-            }
-
             void main() {
-                CameraFrame camera = wallpaperCamera();
-                vec3 rel = aPos - camera.position;
-                float viewX = dot(rel, camera.right);
-                float viewY = dot(rel, camera.up);
-                float rawZ = dot(rel, camera.forward);
+                vec3 rel = aPos - uCameraPosition;
+                float viewX = dot(rel, uCameraRight);
+                float viewY = dot(rel, uCameraUp);
+                float rawZ = dot(rel, uCameraForward);
                 float z = max(rawZ, 0.02);
                 float focalPixels = 0.5 * uSurfaceSize.y / max(uTanHalfFov, 0.001);
                 vec2 center = vec2(
@@ -1605,16 +1595,18 @@ class DepthGLRenderer : NativeGaussianRenderer {
                     -(viewY / z) * (2.0 * focalPixels / uSurfaceSize.y)
                 );
 
-                vec3 scale = max(aScale, vec3(0.0001));
-                mat3 rot = quatToMat3(normalize(aRotation));
-                vec3 m0 = rot[0] * scale.x;
-                vec3 m1 = rot[1] * scale.y;
-                vec3 m2 = rot[2] * scale.z;
-
-                vec3 jx = (camera.right * z - camera.forward * viewX) * (focalPixels / (z * z));
-                vec3 jy = -(camera.up * z - camera.forward * viewY) * (focalPixels / (z * z));
-                vec3 covJx = m0 * dot(m0, jx) + m1 * dot(m1, jx) + m2 * dot(m2, jx);
-                vec3 covJy = m0 * dot(m0, jy) + m1 * dot(m1, jy) + m2 * dot(m2, jy);
+                vec3 jx = (uCameraRight * z - uCameraForward * viewX) * (focalPixels / (z * z));
+                vec3 jy = -(uCameraUp * z - uCameraForward * viewY) * (focalPixels / (z * z));
+                vec3 covJx = vec3(
+                    dot(aCovarianceA, jx),
+                    aCovarianceA.y * jx.x + aCovarianceB.x * jx.y + aCovarianceB.y * jx.z,
+                    aCovarianceA.z * jx.x + aCovarianceB.y * jx.y + aCovarianceB.z * jx.z
+                );
+                vec3 covJy = vec3(
+                    dot(aCovarianceA, jy),
+                    aCovarianceA.y * jy.x + aCovarianceB.x * jy.y + aCovarianceB.y * jy.z,
+                    aCovarianceA.z * jy.x + aCovarianceB.y * jy.y + aCovarianceB.z * jy.z
+                );
                 float pointScale2 = uPointScale * uPointScale;
                 float rawCovXX = dot(jx, covJx) * pointScale2;
                 float rawCovXY = dot(jx, covJy) * pointScale2;

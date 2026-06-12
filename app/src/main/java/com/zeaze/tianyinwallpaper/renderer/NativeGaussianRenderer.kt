@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import android.view.Surface
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
+import com.zeaze.tianyinwallpaper.utils.GaussianSogLoader
 
 interface NativeGaussianRenderer {
     fun start(surface: Surface)
@@ -11,6 +12,8 @@ interface NativeGaussianRenderer {
     fun stopAndWait(timeoutMs: Long = 500)
     fun resize(width: Int, height: Int)
     fun loadGaussians(scene: GaussianPlyLoader.GaussianScene)
+    fun loadSogGaussians(scenes: List<GaussianSogLoader.SogGpuScene>): Boolean = false
+    fun loadSogGaussians(scene: GaussianSogLoader.SogGpuScene): Boolean = loadSogGaussians(listOf(scene))
     fun updateTilt(x: Float, y: Float)
     fun updateParams(parallaxStrength: Float, blurStrength: Float)
     fun updateGaussianParams(params: DepthGLRenderer.GaussianRenderParams)

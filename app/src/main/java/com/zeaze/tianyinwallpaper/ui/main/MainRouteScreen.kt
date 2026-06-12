@@ -777,8 +777,6 @@ fun MainRouteScreen(
         updateDepthPreview(model)
         persistDepthWallpapers()
         DepthPrefs.setActiveWallpaperId(pref, model.id)
-        runCatching { WallpaperManager.getInstance(hostActivity).clear() }
-            .onFailure { Log.w("MainRouteScreen", "Clear wallpaper failed before applying depth wallpaper", it) }
         val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
             putExtra(
                 WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,

@@ -3,95 +3,31 @@
 layout(location = 0) in vec2 inCorner;
 layout(location = 1) in vec3 inPosition;
 layout(location = 2) in vec4 inColor;
-layout(location = 3) in vec3 inScale;
-layout(location = 4) in vec4 inRotation;
+layout(location = 3) in vec3 inCovarianceA;
+layout(location = 4) in vec3 inCovarianceB;
 
 layout(push_constant) uniform PushConstants {
-    vec2 surfaceSize;
-    vec2 fillScale;
-    vec2 tilt;
-    vec2 centerOffset;
-    float strength;
-    float focusDepth;
-    float farDepth;
-    float sceneCenterX;
-    float sceneCenterY;
-    float sceneCenterZ;
-    float sceneRadius;
-    float defaultCameraDistance;
+    vec4 surfaceSize;
+    vec4 cameraPosition;
+    vec4 cameraRight;
+    vec4 cameraUp;
+    vec4 cameraForward;
     float tanHalfFov;
-    float cameraZoom;
-    float focusDepthOffset;
     float pointScale;
     float quadExtent;
+    float opacity;
+    float alphaFalloff;
 } pc;
 
 layout(location = 0) out vec4 vColor;
 layout(location = 1) out vec2 vLocal;
 layout(location = 2) out float vAaFactor;
 
-struct CameraFrame {
-    vec3 position;
-    vec3 right;
-    vec3 up;
-    vec3 forward;
-};
-
-mat3 quatToMat3(vec4 q) {
-    float x2 = q.x + q.x;
-    float y2 = q.y + q.y;
-    float z2 = q.z + q.z;
-    float xx = q.x * x2;
-    float xy = q.x * y2;
-    float xz = q.x * z2;
-    float yy = q.y * y2;
-    float yz = q.y * z2;
-    float zz = q.z * z2;
-    float wx = q.w * x2;
-    float wy = q.w * y2;
-    float wz = q.w * z2;
-    return mat3(
-        1.0 - yy - zz, xy + wz, xz - wy,
-        xy - wz, 1.0 - xx - zz, yz + wx,
-        xz + wy, yz - wx, 1.0 - xx - yy
-    );
-}
-
-CameraFrame wallpaperCamera() {
-    float radius = max(pc.sceneRadius, 0.001);
-    vec3 target = vec3(
-        pc.sceneCenterX + pc.centerOffset.x * radius,
-        pc.sceneCenterY + pc.centerOffset.y * radius,
-        pc.sceneCenterZ + radius * pc.focusDepthOffset
-    );
-    float frameDistance = max(pc.defaultCameraDistance, radius * 0.02);
-    float distance = max(frameDistance / max(pc.cameraZoom, 0.6), radius * 0.02);
-    vec2 tangent = vec2(pc.tilt.x, -pc.tilt.y) * frameDistance * max(pc.strength, 0.02) * 2.4;
-    float maxTangent = distance * 0.75;
-    float tangentLength = length(tangent);
-    if (tangentLength > maxTangent && tangentLength > 0.0001) {
-        tangent *= maxTangent / tangentLength;
-        tangentLength = maxTangent;
-    }
-    float frontDepth = sqrt(max(distance * distance - tangentLength * tangentLength, distance * distance * 0.25));
-    vec3 position = target + vec3(tangent.x, tangent.y, -frontDepth);
-    vec3 forward = normalize(target - position);
-    vec3 right = normalize(vec3(forward.z, 0.0, -forward.x));
-    vec3 up = normalize(cross(forward, right));
-    CameraFrame frame;
-    frame.position = position;
-    frame.right = right;
-    frame.up = up;
-    frame.forward = forward;
-    return frame;
-}
-
 void main() {
-    CameraFrame camera = wallpaperCamera();
-    vec3 rel = inPosition - camera.position;
-    float viewX = dot(rel, camera.right);
-    float viewY = dot(rel, camera.up);
-    float rawZ = dot(rel, camera.forward);
+    vec3 rel = inPosition - pc.cameraPosition.xyz;
+    float viewX = dot(rel, pc.cameraRight.xyz);
+    float viewY = dot(rel, pc.cameraUp.xyz);
+    float rawZ = dot(rel, pc.cameraForward.xyz);
     float z = max(rawZ, 0.02);
     float focalPixels = 0.5 * pc.surfaceSize.y / max(pc.tanHalfFov, 0.001);
     vec2 center = vec2(
@@ -99,16 +35,18 @@ void main() {
         -(viewY / z) * (2.0 * focalPixels / pc.surfaceSize.y)
     );
 
-    vec3 scale = max(inScale, vec3(0.0001));
-    mat3 rot = quatToMat3(normalize(inRotation));
-    vec3 m0 = rot[0] * scale.x;
-    vec3 m1 = rot[1] * scale.y;
-    vec3 m2 = rot[2] * scale.z;
-
-    vec3 jx = (camera.right * z - camera.forward * viewX) * (focalPixels / (z * z));
-    vec3 jy = -(camera.up * z - camera.forward * viewY) * (focalPixels / (z * z));
-    vec3 covJx = m0 * dot(m0, jx) + m1 * dot(m1, jx) + m2 * dot(m2, jx);
-    vec3 covJy = m0 * dot(m0, jy) + m1 * dot(m1, jy) + m2 * dot(m2, jy);
+    vec3 jx = (pc.cameraRight.xyz * z - pc.cameraForward.xyz * viewX) * (focalPixels / (z * z));
+    vec3 jy = -(pc.cameraUp.xyz * z - pc.cameraForward.xyz * viewY) * (focalPixels / (z * z));
+    vec3 covJx = vec3(
+        dot(inCovarianceA, jx),
+        inCovarianceA.y * jx.x + inCovarianceB.x * jx.y + inCovarianceB.y * jx.z,
+        inCovarianceA.z * jx.x + inCovarianceB.y * jx.y + inCovarianceB.z * jx.z
+    );
+    vec3 covJy = vec3(
+        dot(inCovarianceA, jy),
+        inCovarianceA.y * jy.x + inCovarianceB.x * jy.y + inCovarianceB.y * jy.z,
+        inCovarianceA.z * jy.x + inCovarianceB.y * jy.y + inCovarianceB.z * jy.z
+    );
     float pointScale2 = pc.pointScale * pc.pointScale;
     float rawCovXX = dot(jx, covJx) * pointScale2;
     float rawCovXY = dot(jx, covJy) * pointScale2;

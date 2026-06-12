@@ -6,21 +6,12 @@ layout(location = 2) in float vAaFactor;
 layout(location = 0) out vec4 outColor;
 
 layout(push_constant) uniform PushConstants {
-    vec2 surfaceSize;
-    vec2 fillScale;
-    vec2 tilt;
-    vec2 centerOffset;
-    float strength;
-    float focusDepth;
-    float farDepth;
-    float sceneCenterX;
-    float sceneCenterY;
-    float sceneCenterZ;
-    float sceneRadius;
-    float defaultCameraDistance;
+    vec4 surfaceSize;
+    vec4 cameraPosition;
+    vec4 cameraRight;
+    vec4 cameraUp;
+    vec4 cameraForward;
     float tanHalfFov;
-    float cameraZoom;
-    float focusDepthOffset;
     float pointScale;
     float quadExtent;
     float opacity;

@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
+import com.zeaze.tianyinwallpaper.utils.GaussianSogLoader
 import java.nio.Buffer
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -25,6 +26,7 @@ class VulkanGaussianRenderer(
     private val renderHandler = Handler(renderThread.looper)
     private val budgetHandler = renderHandler
     private val renderTaskQueued = AtomicBoolean(false)
+    private val tiltTaskQueued = AtomicBoolean(false)
 
     private var nativeHandle = 0L
     private var currentSurface: Surface? = null
@@ -35,14 +37,21 @@ class VulkanGaussianRenderer(
     private var renderingEnabled = true
     private var loadingVisible = false
     private var latestScene: GaussianPlyLoader.GaussianScene? = null
+    private var latestSogScenes: List<GaussianSogLoader.SogGpuScene>? = null
     private var latestTiltX = 0f
     private var latestTiltY = 0f
+    @Volatile private var pendingTiltX = 0f
+    @Volatile private var pendingTiltY = 0f
     private var latestParallaxStrength = 0f
     private var latestBlurStrength = 0f
     private var latestGaussianParams = DepthGLRenderer.GaussianRenderParams()
     private var targetSplatBudget = 0
     private var currentSplatBudget = 0
+    private var adaptiveSplatBudget = 0
     private var lastSplatBudgetStepMs = 0L
+    private var lastCameraChangeMs = 0L
+    private var slowRenderFrames = 0
+    private var fastRenderFrames = 0
     private var renderPerfFrames = 0
     private var renderPerfTotalMs = 0L
     private var renderPerfMaxMs = 0L
@@ -59,12 +68,26 @@ class VulkanGaussianRenderer(
     override fun start(surface: Surface) {
         runOnRenderThread {
             synchronized(lock) {
+                if (currentSurface === surface && surface.isValid && activeBackend != Backend.Stopped) {
+                    when (activeBackend) {
+                        Backend.Vulkan -> if (hasVulkanSceneLocked()) renderVulkanSceneLocked() else renderVulkanLoadingLocked()
+                        Backend.Gles -> fallback.requestRender()
+                        Backend.Stopped -> Unit
+                    }
+                    return@synchronized
+                }
                 currentSurface = surface
                 if (!tryStartVulkanLocked(surface)) {
                     startFallbackLocked("Vulkan start failed")
                     return@synchronized
                 }
-                latestScene?.let {
+                latestSogScenes?.let {
+                    if (uploadSogScenesToVulkanLocked(it)) {
+                        renderVulkanSceneLocked()
+                    } else {
+                        startFallbackLocked("Vulkan pending SOG scene upload failed")
+                    }
+                } ?: latestScene?.let {
                     if (uploadSceneToVulkanLocked(it)) {
                         renderVulkanSceneLocked()
                     } else {
@@ -81,6 +104,7 @@ class VulkanGaussianRenderer(
                 stopVulkanLocked()
                 budgetHandler.removeCallbacks(splatBudgetRunnable)
                 renderTaskQueued.set(false)
+                tiltTaskQueued.set(false)
                 fallback.stop()
                 currentSurface = null
                 activeBackend = Backend.Stopped
@@ -94,6 +118,7 @@ class VulkanGaussianRenderer(
                 stopVulkanLocked()
                 budgetHandler.removeCallbacks(splatBudgetRunnable)
                 renderTaskQueued.set(false)
+                tiltTaskQueued.set(false)
                 fallback.stopAndWait(timeoutMs)
                 currentSurface = null
                 activeBackend = Backend.Stopped
@@ -125,6 +150,7 @@ class VulkanGaussianRenderer(
         runOnRenderThread {
             synchronized(lock) {
                 latestScene = scene
+                latestSogScenes = null
                 if (activeBackend == Backend.Vulkan) {
                     if (uploadSceneToVulkanLocked(scene)) {
                         renderVulkanSceneLocked()
@@ -138,13 +164,46 @@ class VulkanGaussianRenderer(
         }
     }
 
-    override fun updateTilt(x: Float, y: Float) {
-        runOnRenderThread {
+    override fun loadSogGaussians(scenes: List<GaussianSogLoader.SogGpuScene>): Boolean {
+        if (scenes.isEmpty()) return false
+        var uploaded = false
+        runOnRenderThreadAndWait(UPLOAD_WAIT_TIMEOUT_MS) {
             synchronized(lock) {
-                latestTiltX = x
-                latestTiltY = y
+                when (activeBackend) {
+                    Backend.Vulkan -> {
+                        uploaded = uploadSogScenesToVulkanLocked(scenes)
+                        if (uploaded) {
+                            latestSogScenes = scenes
+                            latestScene = null
+                            renderVulkanSceneLocked()
+                        }
+                    }
+                    Backend.Stopped -> {
+                        latestSogScenes = scenes
+                        latestScene = null
+                        uploaded = true
+                    }
+                    Backend.Gles -> {
+                        uploaded = false
+                    }
+                }
+            }
+        }
+        return uploaded
+    }
+
+    override fun updateTilt(x: Float, y: Float) {
+        pendingTiltX = x
+        pendingTiltY = y
+        if (tiltTaskQueued.getAndSet(true)) return
+        renderHandler.post {
+            synchronized(lock) {
+                tiltTaskQueued.set(false)
+                latestTiltX = pendingTiltX
+                latestTiltY = pendingTiltY
+                lastCameraChangeMs = SystemClock.elapsedRealtime()
                 if (activeBackend == Backend.Gles) {
-                    fallback.updateTilt(x, y)
+                    fallback.updateTilt(latestTiltX, latestTiltY)
                 } else if (activeBackend == Backend.Vulkan) {
                     queueVulkanRenderLocked()
                 }
@@ -157,6 +216,7 @@ class VulkanGaussianRenderer(
             synchronized(lock) {
                 latestParallaxStrength = parallaxStrength
                 latestBlurStrength = blurStrength
+                lastCameraChangeMs = SystemClock.elapsedRealtime()
                 if (activeBackend == Backend.Gles) {
                     fallback.updateParams(parallaxStrength, blurStrength)
                 } else if (activeBackend == Backend.Vulkan) {
@@ -170,6 +230,7 @@ class VulkanGaussianRenderer(
         runOnRenderThread {
             synchronized(lock) {
                 latestGaussianParams = params
+                lastCameraChangeMs = SystemClock.elapsedRealtime()
                 if (activeBackend == Backend.Gles) {
                     fallback.updateGaussianParams(params)
                 } else if (activeBackend == Backend.Vulkan) {
@@ -184,6 +245,9 @@ class VulkanGaussianRenderer(
             synchronized(lock) {
                 latestTiltX = 0f
                 latestTiltY = 0f
+                pendingTiltX = 0f
+                pendingTiltY = 0f
+                lastCameraChangeMs = SystemClock.elapsedRealtime()
                 if (activeBackend == Backend.Gles) {
                     fallback.resetCamera()
                 } else if (activeBackend == Backend.Vulkan) {
@@ -348,6 +412,69 @@ class VulkanGaussianRenderer(
         return uploaded
     }
 
+    private fun uploadSogScenesToVulkanLocked(scenes: List<GaussianSogLoader.SogGpuScene>): Boolean {
+        if (nativeHandle == 0L) return false
+        if (scenes.isEmpty()) return false
+        syncVulkanRenderStateLocked()
+        val totalCount = scenes.sumOf { it.count }
+        val countWeight = totalCount.toFloat().coerceAtLeast(1f)
+        fun weighted(value: (GaussianSogLoader.SogGpuScene) -> Float): Float {
+            return scenes.sumOf { (value(it) * it.count).toDouble() }.toFloat() / countWeight
+        }
+        val uploadStartMs = SystemClock.elapsedRealtime()
+        val uploaded = runCatching {
+            nativeUploadSogScene(
+                nativeHandle,
+                Array<Buffer>(scenes.size) { scenes[it].meansL.duplicate().apply { position(0) } },
+                Array<Buffer>(scenes.size) { scenes[it].meansU.duplicate().apply { position(0) } },
+                Array<Buffer>(scenes.size) { scenes[it].scales.duplicate().apply { position(0) } },
+                Array<Buffer>(scenes.size) { scenes[it].sh0.duplicate().apply { position(0) } },
+                Array<Buffer>(scenes.size) { scenes[it].quats.duplicate().apply { position(0) } },
+                Array<Buffer>(scenes.size) { scenes[it].scaleCodebook.duplicate().apply { position(0) } },
+                Array<Buffer>(scenes.size) { scenes[it].sh0Codebook.duplicate().apply { position(0) } },
+                Array<Buffer>(scenes.size) { scenes[it].meansMinMax.duplicate().apply { position(0) } },
+                IntArray(scenes.size) { scenes[it].count },
+                FloatArray(scenes.size * 4) { index ->
+                    val scene = scenes[index / 4]
+                    when (index % 4) {
+                        0 -> scene.chunkCenterX
+                        1 -> scene.chunkCenterY
+                        2 -> scene.chunkCenterZ
+                        else -> scene.chunkRadius
+                    }
+                },
+                scenes.maxOf { it.imageWidth },
+                scenes.maxOf { it.imageHeight },
+                weighted { it.focusDepth },
+                weighted { it.parallaxAnchorDepth },
+                weighted { it.backgroundR },
+                weighted { it.backgroundG },
+                weighted { it.backgroundB },
+                weighted { it.sceneCenterX },
+                weighted { it.sceneCenterY },
+                weighted { it.sceneCenterZ },
+                scenes.maxOf { it.sceneRadius },
+                scenes.maxOf { it.defaultCameraDistance }
+            )
+        }.onFailure {
+            Log.w(TAG, "native Vulkan SOG scene upload failed", it)
+        }.getOrDefault(false)
+        val uploadElapsedMs = SystemClock.elapsedRealtime() - uploadStartMs
+        Log.d(
+            TAG,
+            "native Vulkan SOG scene upload uploaded=$uploaded chunks=${scenes.size} " +
+                "count=$totalCount elapsedMs=$uploadElapsedMs"
+        )
+        if (uploaded) {
+            resetSplatBudgetLocked(totalCount, totalCount)
+        }
+        return uploaded
+    }
+
+    private fun hasVulkanSceneLocked(): Boolean {
+        return latestScene != null || latestSogScenes != null
+    }
+
     private fun syncVulkanRenderStateLocked() {
         if (nativeHandle == 0L) return
         nativeUpdateRenderState(
@@ -366,12 +493,19 @@ class VulkanGaussianRenderer(
     }
 
     private fun renderVulkanSceneLocked() {
-        if (latestScene == null) {
+        if (!hasVulkanSceneLocked()) {
             renderVulkanLoadingLocked()
             return
         }
         if (!renderingEnabled || nativeHandle == 0L) return
-        val drawCount = currentSplatBudget.coerceIn(0, latestScene?.count ?: 0)
+        val sceneCount = latestSogScenes?.sumOf { it.count } ?: latestScene?.count ?: 0
+        val drawCount = if (latestSogScenes != null) {
+            sceneCount
+        } else {
+            currentSplatBudget
+                .coerceAtMost(effectiveTargetSplatBudgetLocked())
+                .coerceIn(0, sceneCount)
+        }
         if (drawCount <= 0) return
         val renderStartMs = SystemClock.elapsedRealtime()
         val ok = runCatching { nativeRenderScene(nativeHandle, drawCount) }
@@ -387,6 +521,7 @@ class VulkanGaussianRenderer(
     }
 
     private fun recordRenderPerfLocked(drawCount: Int, elapsedMs: Long) {
+        updateAdaptiveBudgetLocked(drawCount, elapsedMs)
         renderPerfFrames += 1
         renderPerfTotalMs += elapsedMs
         renderPerfMaxMs = maxOf(renderPerfMaxMs, elapsedMs)
@@ -396,6 +531,7 @@ class VulkanGaussianRenderer(
         Log.d(
             TAG,
             "Vulkan perf drawCount=$drawCount budget=$currentSplatBudget/$targetSplatBudget " +
+                "adaptive=${if (adaptiveSplatBudget > 0) adaptiveSplatBudget else targetSplatBudget} " +
                 "frames=$renderPerfFrames avgMs=${String.format("%.2f", avgMs)} maxMs=$renderPerfMaxMs"
         )
         renderPerfFrames = 0
@@ -404,12 +540,64 @@ class VulkanGaussianRenderer(
         lastRenderPerfLogMs = now
     }
 
+    private fun updateAdaptiveBudgetLocked(drawCount: Int, elapsedMs: Long) {
+        if (latestSogScenes != null) return
+        if (targetSplatBudget <= ADAPTIVE_MIN_SPLAT_BUDGET) return
+        when {
+            elapsedMs >= ADAPTIVE_SLOW_FRAME_MS && drawCount > ADAPTIVE_MIN_SPLAT_BUDGET -> {
+                slowRenderFrames += 1
+                fastRenderFrames = 0
+                if (slowRenderFrames >= ADAPTIVE_SLOW_FRAME_COUNT) {
+                    val nextBudget = (drawCount - ADAPTIVE_SPLAT_STEP)
+                        .coerceAtLeast(ADAPTIVE_MIN_SPLAT_BUDGET)
+                        .coerceAtMost(targetSplatBudget)
+                    if (adaptiveSplatBudget == 0 || nextBudget < adaptiveSplatBudget) {
+                        adaptiveSplatBudget = nextBudget
+                        currentSplatBudget = currentSplatBudget.coerceAtMost(adaptiveSplatBudget)
+                        budgetHandler.removeCallbacks(splatBudgetRunnable)
+                        Log.d(
+                            TAG,
+                            "Vulkan adaptive budget down elapsedMs=$elapsedMs budget=$adaptiveSplatBudget/$targetSplatBudget"
+                        )
+                    }
+                    slowRenderFrames = 0
+                }
+            }
+            elapsedMs <= ADAPTIVE_FAST_FRAME_MS -> {
+                fastRenderFrames += 1
+                slowRenderFrames = 0
+                if (adaptiveSplatBudget > 0 && fastRenderFrames >= ADAPTIVE_FAST_FRAME_COUNT) {
+                    adaptiveSplatBudget = (adaptiveSplatBudget + ADAPTIVE_SPLAT_STEP)
+                        .coerceAtMost(targetSplatBudget)
+                    if (adaptiveSplatBudget >= targetSplatBudget) {
+                        adaptiveSplatBudget = 0
+                    }
+                    fastRenderFrames = 0
+                    Log.d(
+                        TAG,
+                        "Vulkan adaptive budget up elapsedMs=$elapsedMs budget=${effectiveTargetSplatBudgetLocked()}/$targetSplatBudget"
+                    )
+                    scheduleSplatBudgetStepLocked()
+                }
+            }
+            else -> {
+                slowRenderFrames = 0
+                fastRenderFrames = 0
+            }
+        }
+    }
+
     private fun resetSplatBudgetLocked(scene: GaussianPlyLoader.GaussianScene) {
-        targetSplatBudget = scene.count.coerceAtLeast(0)
+        resetSplatBudgetLocked(scene.count)
+    }
+
+    private fun resetSplatBudgetLocked(count: Int, minimumInitialCount: Int = 0) {
+        targetSplatBudget = count.coerceAtLeast(0)
+        adaptiveSplatBudget = 0
         currentSplatBudget = if (targetSplatBudget <= SPLAT_BUDGET_INITIAL) {
             targetSplatBudget
         } else {
-            SPLAT_BUDGET_INITIAL
+            maxOf(SPLAT_BUDGET_INITIAL, minimumInitialCount).coerceAtMost(targetSplatBudget)
         }
         lastSplatBudgetStepMs = SystemClock.elapsedRealtime()
         budgetHandler.removeCallbacks(splatBudgetRunnable)
@@ -417,26 +605,42 @@ class VulkanGaussianRenderer(
         renderPerfTotalMs = 0L
         renderPerfMaxMs = 0L
         lastRenderPerfLogMs = 0L
+        slowRenderFrames = 0
+        fastRenderFrames = 0
+    }
+
+    private fun effectiveTargetSplatBudgetLocked(): Int {
+        val adaptive = adaptiveSplatBudget.takeIf { it > 0 } ?: targetSplatBudget
+        return adaptive.coerceIn(0, targetSplatBudget)
     }
 
     private fun advanceSplatBudgetLocked(): Boolean {
-        if (currentSplatBudget >= targetSplatBudget) return false
+        val effectiveTarget = effectiveTargetSplatBudgetLocked()
+        if (currentSplatBudget >= effectiveTarget) return false
         val now = SystemClock.elapsedRealtime()
+        val idleDelayMs = lastCameraChangeMs + SPLAT_BUDGET_IDLE_DELAY_MS - now
+        if (idleDelayMs > 0L) return false
         if (now - lastSplatBudgetStepMs < SPLAT_BUDGET_STEP_INTERVAL_MS) return false
-        currentSplatBudget = (currentSplatBudget + SPLAT_BUDGET_STEP).coerceAtMost(targetSplatBudget)
+        currentSplatBudget = (currentSplatBudget + SPLAT_BUDGET_STEP).coerceAtMost(effectiveTarget)
         lastSplatBudgetStepMs = now
         Log.d(
             TAG,
-            "Vulkan splat budget step ready=${currentSplatBudget >= targetSplatBudget} " +
-                "loading=${targetSplatBudget - currentSplatBudget} budget=$currentSplatBudget/$targetSplatBudget"
+            "Vulkan splat budget step ready=${currentSplatBudget >= effectiveTarget} " +
+                "loading=${effectiveTarget - currentSplatBudget} budget=$currentSplatBudget/$targetSplatBudget " +
+                "adaptive=$effectiveTarget"
         )
         return true
     }
 
     private fun scheduleSplatBudgetStepLocked() {
-        if (activeBackend != Backend.Vulkan || currentSplatBudget >= targetSplatBudget) return
+        val effectiveTarget = effectiveTargetSplatBudgetLocked()
+        if (activeBackend != Backend.Vulkan || currentSplatBudget >= effectiveTarget) return
         val now = SystemClock.elapsedRealtime()
-        val delay = (lastSplatBudgetStepMs + SPLAT_BUDGET_STEP_INTERVAL_MS - now).coerceAtLeast(0L)
+        val delay = maxOf(
+            lastSplatBudgetStepMs + SPLAT_BUDGET_STEP_INTERVAL_MS - now,
+            lastCameraChangeMs + SPLAT_BUDGET_IDLE_DELAY_MS - now,
+            0L
+        )
         budgetHandler.removeCallbacks(splatBudgetRunnable)
         budgetHandler.postDelayed(splatBudgetRunnable, delay)
     }
@@ -517,12 +721,46 @@ class VulkanGaussianRenderer(
         defaultCameraDistance: Float
     ): Boolean
 
+    private external fun nativeUploadSogScene(
+        handle: Long,
+        meansL: Array<Buffer>,
+        meansU: Array<Buffer>,
+        scales: Array<Buffer>,
+        sh0: Array<Buffer>,
+        quats: Array<Buffer>,
+        scaleCodebook: Array<Buffer>,
+        sh0Codebook: Array<Buffer>,
+        meansMinMax: Array<Buffer>,
+        counts: IntArray,
+        chunkBounds: FloatArray,
+        imageWidth: Int,
+        imageHeight: Int,
+        focusDepth: Float,
+        farDepth: Float,
+        backgroundR: Float,
+        backgroundG: Float,
+        backgroundB: Float,
+        sceneCenterX: Float,
+        sceneCenterY: Float,
+        sceneCenterZ: Float,
+        sceneRadius: Float,
+        defaultCameraDistance: Float
+    ): Boolean
+
     companion object {
         private const val TAG = "VulkanGaussianRenderer"
         private const val LIB_NAME = "tianyin_gaussian_vulkan"
-        private const val SPLAT_BUDGET_INITIAL = 500_000
-        private const val SPLAT_BUDGET_STEP = 250_000
-        private const val SPLAT_BUDGET_STEP_INTERVAL_MS = 120L
+        private const val SPLAT_BUDGET_INITIAL = 250_000
+        private const val SPLAT_BUDGET_STEP = 100_000
+        private const val SPLAT_BUDGET_STEP_INTERVAL_MS = 180L
+        private const val SPLAT_BUDGET_IDLE_DELAY_MS = 700L
+        private const val ADAPTIVE_MIN_SPLAT_BUDGET = 200_000
+        private const val ADAPTIVE_SPLAT_STEP = 100_000
+        private const val ADAPTIVE_SLOW_FRAME_MS = 34L
+        private const val ADAPTIVE_FAST_FRAME_MS = 20L
+        private const val ADAPTIVE_SLOW_FRAME_COUNT = 2
+        private const val ADAPTIVE_FAST_FRAME_COUNT = 12
+        private const val UPLOAD_WAIT_TIMEOUT_MS = 5_000L
         private const val PERF_LOG_INTERVAL_MS = 3_000L
 
         @Volatile private var nativeLibraryLoaded = false
