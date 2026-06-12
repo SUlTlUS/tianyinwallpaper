@@ -282,7 +282,6 @@ fun SettingRouteScreen(
     } else {
         Color(0xFF1C1C20).copy(alpha = 0.94f)
     }
-
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
@@ -561,22 +560,7 @@ fun SettingRouteScreen(
                     }
                 }
                 
-                // Keep the Check Update button separate and styled as before
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(Capsule())
-                        .background(accentColor)
-                        .clickable { 
-                            shouldCheckUpdate = true
-                            updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
-                        }
-                        .height(48.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    BasicText("检查更新", style = TextStyle(Color.White, 16.sp, fontWeight = FontWeight.Bold))
-                }
+                Spacer(modifier = Modifier.height(110.dp))
             }
         }
 
@@ -1155,6 +1139,7 @@ fun AppInfoRouteScreen(
     } else {
         Color(0xFF1C1C20).copy(alpha = 0.94f)
     }
+    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
 
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
@@ -1168,6 +1153,8 @@ fun AppInfoRouteScreen(
     var versionTapCount by remember { mutableStateOf(0) }
     var lastTapTime by remember { mutableStateOf(0L) }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var updateDialogState by remember { mutableStateOf(UpdateDialogState()) }
+    var shouldCheckUpdate by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -1274,6 +1261,25 @@ fun AppInfoRouteScreen(
                     }
                     .padding(vertical = 4.dp)
             )
+            Row(
+                Modifier
+                    .padding(top = 8.dp)
+                    .width(160.dp)
+                    .clip(Capsule())
+                    .background(accentColor)
+                    .clickable {
+                        shouldCheckUpdate = true
+                        updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
+                    }
+                    .height(44.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BasicText(
+                    "\u68c0\u67e5\u66f4\u65b0",
+                    style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Bold)
+                )
+            }
             Spacer(modifier = Modifier.height(32.dp))
 
             // Main Info Block
@@ -1334,6 +1340,93 @@ fun AppInfoRouteScreen(
             }
             
             Spacer(modifier = Modifier.height(48.dp))
+        }
+
+        UpdateDialog(
+            state = updateDialogState,
+            parentBackdrop = liquidBackdrop,
+            onDismiss = {
+                updateDialogState = UpdateDialogState(isVisible = false)
+                shouldCheckUpdate = false
+            },
+            onConfirm = {
+                val info = updateDialogState.updateInfo
+                if (info != null) {
+                    updateDialogState = updateDialogState.copy(
+                        isDownloading = true,
+                        downloadProgress = 0
+                    )
+                    AppUpdateManager.downloadApk(context, info, object : AppUpdateManager.DownloadCallback {
+                        override fun onProgress(progress: Int) {
+                            updateDialogState = updateDialogState.copy(downloadProgress = progress)
+                        }
+
+                        override fun onSuccess(file: java.io.File) {
+                            updateDialogState = updateDialogState.copy(isDownloading = false)
+                            val md5 = AppUpdateManager.calculateMD5(file)
+                            val apkVersionCode = AppUpdateManager.getApkVersionCode(context, file)
+                            if (apkVersionCode != info.code.toLong()) {
+                                Toast.makeText(
+                                    context,
+                                    "\u4e0b\u8f7d\u7684\u5b89\u88c5\u5305\u7248\u672c\u4e0d\u5339\u914d\uff0c\u8bf7\u91cd\u65b0\u68c0\u67e5\u66f4\u65b0",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else if (md5 != null && md5.equals(info.md5, ignoreCase = true)) {
+                                AppUpdateManager.installApk(context, file)
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "\u6587\u4ef6\u6821\u9a8c\u5931\u8d25\uff0c\u8bf7\u91cd\u65b0\u4e0b\u8f7d",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+
+                        override fun onError(message: String) {
+                            updateDialogState = updateDialogState.copy(
+                                isDownloading = false,
+                                errorMessage = message
+                            )
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
+                    })
+                } else if (updateDialogState.isLatestVersion) {
+                    updateDialogState = UpdateDialogState(isVisible = false)
+                    shouldCheckUpdate = false
+                } else {
+                    shouldCheckUpdate = true
+                    updateDialogState = UpdateDialogState(isVisible = true, isChecking = true)
+                }
+            },
+            isLightTheme = isLightTheme
+        )
+
+        androidx.compose.runtime.LaunchedEffect(shouldCheckUpdate) {
+            if (shouldCheckUpdate) {
+                when (val result = AppUpdateManager.checkUpdate()) {
+                    is AppUpdateManager.CheckResult.HasUpdate -> {
+                        updateDialogState = UpdateDialogState(
+                            isVisible = true,
+                            isChecking = false,
+                            updateInfo = result.updateInfo
+                        )
+                    }
+                    is AppUpdateManager.CheckResult.NoUpdate -> {
+                        updateDialogState = UpdateDialogState(
+                            isVisible = true,
+                            isChecking = false,
+                            isLatestVersion = true
+                        )
+                    }
+                    is AppUpdateManager.CheckResult.Error -> {
+                        updateDialogState = UpdateDialogState(
+                            isVisible = true,
+                            isChecking = false,
+                            errorMessage = result.message
+                        )
+                    }
+                }
+            }
         }
     }
 }
