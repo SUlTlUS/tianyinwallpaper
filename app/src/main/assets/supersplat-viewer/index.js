@@ -86755,6 +86755,13 @@ const main = async (canvas, settingsJson, config) => {
         controlsHidden: false,
         gamingControls: localStorage.getItem('gamingControls') === 'true'
     });
+    window.tianyinSetPerformanceMode = (enabled) => {
+        const next = Boolean(enabled);
+        if (state.performanceMode !== next) {
+            state.performanceMode = next;
+            console.info(`[Tianyin] performanceMode=${next}`);
+        }
+    };
     const global = {
         app,
         settings: importSettings(settingsJson),

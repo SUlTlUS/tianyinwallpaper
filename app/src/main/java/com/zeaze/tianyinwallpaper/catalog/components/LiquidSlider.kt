@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -57,9 +59,7 @@ fun LiquidSlider(
     onValueChangeFinished: (() -> Unit)? = null,
     dragWholeTrack: Boolean = false
 ) {
-    val accentColor =
-        if (isLightTheme) Color(0xFF0088FF)
-        else Color(0xFF0091FF)
+    val accentColor = MaterialTheme.colors.primary
     val trackColor =
         if (isLightTheme) Color(0xFF787878).copy(0.2f)
         else Color(0xFF787880).copy(0.36f)
@@ -83,6 +83,9 @@ fun LiquidSlider(
         }
 
         val animationScope = rememberCoroutineScope()
+        val currentValue by rememberUpdatedState(value)
+        val currentOnValueChange by rememberUpdatedState(onValueChange)
+        val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
         var didDrag by remember { mutableStateOf(false) }
         val dampedDragAnimation = remember(animationScope) {
             DampedDragAnimation(
@@ -95,8 +98,8 @@ fun LiquidSlider(
                 onDragStarted = {},
                 onDragStopped = {
                     if (didDrag) {
-                        onValueChange(targetValue)
-                        onValueChangeFinished?.invoke()
+                        currentOnValueChange(targetValue)
+                        currentOnValueChangeFinished?.invoke()
                     }
                 },
                 onDrag = { _, dragAmount ->
@@ -104,7 +107,7 @@ fun LiquidSlider(
                         didDrag = dragAmount.x != 0f
                     }
                     val delta = (valueRange.endInclusive - valueRange.start) * (dragAmount.x / trackWidth)
-                    onValueChange(
+                    currentOnValueChange(
                         if (isLtr) (targetValue + delta).coerceIn(valueRange)
                         else (targetValue - delta).coerceIn(valueRange)
                     )
@@ -112,7 +115,7 @@ fun LiquidSlider(
             )
         }
         LaunchedEffect(dampedDragAnimation) {
-            snapshotFlow { value() }
+            snapshotFlow { currentValue() }
                 .collectLatest { value ->
                     if (dampedDragAnimation.targetValue != value) {
                         dampedDragAnimation.updateValue(value)
@@ -133,8 +136,8 @@ fun LiquidSlider(
                                 else valueRange.endInclusive - delta)
                                     .coerceIn(valueRange)
                             dampedDragAnimation.animateToValue(targetValue)
-                            onValueChange(targetValue)
-                            onValueChangeFinished?.invoke()
+                            currentOnValueChange(targetValue)
+                            currentOnValueChangeFinished?.invoke()
                         }
                     }
                     .height(6f.dp)
@@ -234,14 +237,14 @@ fun LiquidSlider(
                                 dampedDragAnimation.press()
                                 val targetValue = valueForPositionX(down.position.x)
                                 dampedDragAnimation.updateValue(targetValue)
-                                onValueChange(targetValue)
+                                currentOnValueChange(targetValue)
                             },
                             onDragEnd = {
-                                onValueChangeFinished?.invoke()
+                                currentOnValueChangeFinished?.invoke()
                                 dampedDragAnimation.release()
                             },
                             onDragCancel = {
-                                onValueChangeFinished?.invoke()
+                                currentOnValueChangeFinished?.invoke()
                                 dampedDragAnimation.release()
                             }
                         ) { change, _ ->
@@ -249,7 +252,7 @@ fun LiquidSlider(
                             change.consume()
                             val targetValue = valueForPositionX(change.position.x)
                             dampedDragAnimation.updateValue(targetValue)
-                            onValueChange(targetValue)
+                            currentOnValueChange(targetValue)
                         }
                     }
             )

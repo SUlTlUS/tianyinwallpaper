@@ -594,6 +594,10 @@
                 let centerOffsetX = 0;
                 let centerOffsetY = 0;
                 let focusDepth = 0.25;
+                let cameraFov = 60;
+                let backgroundRed = 0;
+                let backgroundGreen = 0;
+                let backgroundBlue = 0;
                 let lastTiltX = 0;
                 let lastTiltY = 0;
                 let suppressParamApply = false;
@@ -672,7 +676,7 @@
                                 position: target.clone().add(cameraDefaults.frontDirection.clone().mulScalar(cameraDefaults.defaultDistance)),
                                 defaultDistance: cameraDefaults.defaultDistance,
                                 radius: cameraDefaults.radius,
-                                fov: cameraDefaults.fov
+                                fov: cameraFov
                             };
                         }
                         const target = frameCamera.sceneTarget.clone()
@@ -779,13 +783,39 @@
                     }
                 };
 
-                window.tianyinSetParams = (parallax, zoom, centerX, centerY, depth, resetCamera) => {
+                window.tianyinSetCameraFov = (value) => {
+                    const next = Number(value);
+                    if (Number.isFinite(next)) {
+                        cameraFov = Math.max(35, Math.min(80, next));
+                        if (frameCamera) frameCamera.fov = cameraFov;
+                        if (baseCamera) baseCamera.fov = cameraFov;
+                        applyParamsIfReady();
+                    }
+                };
+
+                window.tianyinSetBackgroundColor = (red, green, blue) => {
+                    backgroundRed = Math.max(0, Math.min(1, Number(red) || 0));
+                    backgroundGreen = Math.max(0, Math.min(1, Number(green) || 0));
+                    backgroundBlue = Math.max(0, Math.min(1, Number(blue) || 0));
+                    const clearColor = viewer.global.camera?.camera?.clearColor;
+                    clearColor?.set(backgroundRed, backgroundGreen, backgroundBlue, 1);
+                    const cssColor = `rgb(${Math.round(backgroundRed * 255)}, ${Math.round(backgroundGreen * 255)}, ${Math.round(backgroundBlue * 255)})`;
+                    document.documentElement.style.backgroundColor = cssColor;
+                    document.body.style.backgroundColor = cssColor;
+                    canvas.style.backgroundColor = cssColor;
+                    requestFrame();
+                };
+
+                window.tianyinSetParams = (parallax, zoom, centerX, centerY, depth, fov, performanceMode, backgroundR, backgroundG, backgroundB, resetCamera) => {
                     suppressParamApply = true;
                     try {
                         window.tianyinSetParallax(parallax);
                         window.tianyinSetCameraZoom(zoom);
                         window.tianyinSetCenterOffset(centerX, centerY);
                         window.tianyinSetFocusDepth(depth);
+                        window.tianyinSetCameraFov(fov);
+                        window.tianyinSetPerformanceMode?.(performanceMode);
+                        window.tianyinSetBackgroundColor(backgroundR, backgroundG, backgroundB);
                     } finally {
                         suppressParamApply = false;
                     }

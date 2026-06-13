@@ -25,12 +25,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
@@ -43,9 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -185,7 +183,11 @@ fun VideoRasterPreviewView(
                         contentDescription = null,
                         modifier = Modifier
                             .fillMaxSize()
-                            .blur(32.dp),
+                            .blur(24.dp)
+                            .graphicsLayer {
+                                scaleX = 1.08f
+                                scaleY = 1.08f
+                            },
                         contentScale = ContentScale.Crop
                     )
                 } else {
@@ -193,20 +195,16 @@ fun VideoRasterPreviewView(
                 }
 
                 // 半透明遮罩
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)))
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.18f)))
 
                 // 中间提示
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.Black.copy(alpha = 0.5f))
-                        .padding(horizontal = 32.dp, vertical = 24.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     CircularProgressIndicator(
                         color = Color.White,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(32.dp)
+                        strokeWidth = 2.dp
                     )
                     val progressText = if (transcodingProgress in 0f..1f) {
                         "正在加载 ${(transcodingProgress * 100).toInt()}%"
@@ -216,11 +214,10 @@ fun VideoRasterPreviewView(
                     Text(
                         text = progressText,
                         style = TextStyle(
-                            color = Color.White,
+                            color = Color.White.copy(alpha = 0.82f),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium
-                        ),
-                        modifier = Modifier.padding(top = 12.dp)
+                        )
                     )
                 }
             }

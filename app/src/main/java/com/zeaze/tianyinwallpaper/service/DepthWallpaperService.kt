@@ -3,13 +3,11 @@ package com.zeaze.tianyinwallpaper.service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -17,19 +15,17 @@ import android.service.wallpaper.WallpaperService
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
-import android.view.View
 import android.view.WindowManager
-import android.webkit.WebView
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
+import com.zeaze.tianyinwallpaper.renderer.NativeGaussianBackendMode
 import com.zeaze.tianyinwallpaper.renderer.NativeGaussianRenderer
 import com.zeaze.tianyinwallpaper.renderer.NativeGaussianRendererFactory
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSogLoader
-import com.zeaze.tianyinwallpaper.utils.SuperSplatWebController
 import com.zeaze.tianyinwallpaper.utils.SuperSplatWebParams
 import kotlin.math.exp
 import kotlin.math.abs
@@ -48,8 +44,7 @@ class DepthWallpaperService : WallpaperService() {
 
     inner class DepthWallpaperEngine : Engine() {
         private var renderer: NativeGaussianRenderer? = null
-        private var webSplatController: SuperSplatWebController? = null
-        private var webSplatView: WebView? = null
+        private var rendererBackendMode: NativeGaussianBackendMode? = null
         private var sensorManager: SensorManager? = null
         private var motionSensor: Sensor? = null
         private var motionSensorPreference = 0
@@ -63,8 +58,6 @@ class DepthWallpaperService : WallpaperService() {
         private var surfaceHolderRef: SurfaceHolder? = null
         private var surfaceWidth = 1
         private var surfaceHeight = 1
-        private var gaussianWebActive = false
-        private var webDrawScheduled = false
 
         private var loadVersion = 0
         private var loadedImageKey: String? = null
@@ -100,26 +93,12 @@ class DepthWallpaperService : WallpaperService() {
             if (key == DepthPrefs.PREF_DEPTH_WALLPAPERS || key == DepthPrefs.PREF_DEPTH_ACTIVE_ID) {
                 loadActiveModel()
                 model?.let {
-                    if (it.isGaussian() && gaussianWebActive) {
-                        updateWebSplatParams(it)
-                    } else {
-                        renderer?.updateParams(it.renderParallaxStrength(), 0f)
-                        if (it.isGaussian()) renderer?.updateGaussianParams(it.nativeGaussianParams())
-                    }
+                    if (it.isGaussian()) ensureNativeRendererFor(it)
+                    applyRendererParams(it)
                 }
                 if (isVisible && surfaceReady && !hasLoadedOrLoadingContent()) {
                     loadContent()
                 }
-            }
-        }
-
-        private val webDrawRunnable = object : Runnable {
-            override fun run() {
-                webDrawScheduled = false
-                if (!gaussianWebActive || !isVisible || !surfaceReady) return
-                drawWebSplatFrame()
-                mainHandler.postDelayed(this, WEBVIEW_FRAME_INTERVAL_MS)
-                webDrawScheduled = true
             }
         }
 
@@ -155,8 +134,8 @@ class DepthWallpaperService : WallpaperService() {
             sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
             motionSensor = findMotionSensor()
             windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            renderer = NativeGaussianRendererFactory.create(this@DepthWallpaperService).also { it.setRenderingEnabled(false) }
             loadActiveModel()
+            ensureNativeRendererFor(model)
             Log.d(TAG, "onCreate sensor=${motionSensor?.name ?: "none"} model=${model?.id} gaussian=${model?.isGaussian()}")
         }
 
@@ -167,12 +146,6 @@ class DepthWallpaperService : WallpaperService() {
             surfaceWidth = width.coerceAtLeast(1)
             surfaceHeight = height.coerceAtLeast(1)
             Log.d(TAG, "onSurfaceChanged ${surfaceWidth}x$surfaceHeight visible=$isVisible")
-            val wasWebSplatActive = gaussianWebActive
-            stopWebSplatMode(destroy = true)
-            if (wasWebSplatActive) {
-                loadedImageKey = null
-                loadingImageKey = null
-            }
             ensureRendererStarted()
             if (isVisible) {
                 if (!hasLoadedOrLoadingContent()) loadContent()
@@ -188,7 +161,6 @@ class DepthWallpaperService : WallpaperService() {
             loadingImageKey = null
             Log.d(TAG, "onSurfaceDestroyed visible=$isVisible loadVersion=$loadVersion")
             unregisterSensor()
-            stopWebSplatMode(destroy = true)
             renderer?.stopAndWait(500)
         }
 
@@ -203,52 +175,32 @@ class DepthWallpaperService : WallpaperService() {
             if (visible) {
                 loadActiveModel()
                 model?.let {
-                    if (it.isGaussian() && it.useWebGaussianRenderer()) {
-                        renderer?.setRenderingEnabled(false)
-                    } else {
-                        stopWebSplatMode(destroy = true)
-                        ensureRendererStarted()
-                        renderer?.setRenderingEnabled(true)
-                        renderer?.updateParams(it.renderParallaxStrength(), 0f)
-                        if (it.isGaussian()) renderer?.updateGaussianParams(it.nativeGaussianParams())
-                    }
+                    if (it.isGaussian()) ensureNativeRendererFor(it)
+                    ensureRendererStarted()
+                    renderer?.setRenderingEnabled(true)
+                    applyRendererParams(it)
                 }
                 registerSensor(resetCamera = loadedImageKey == null)
                 resumeMotionRendering()
                 if (surfaceReady && !hasLoadedOrLoadingContent()) {
                     loadContent()
                 } else {
-                    if (model?.isGaussian() == true && gaussianWebActive) {
-                        startWebDrawLoop()
-                    } else {
-                        renderer?.requestRender()
-                    }
+                    renderer?.requestRender()
                 }
             } else {
                 unregisterSensor()
                 renderer?.setRenderingEnabled(false)
-                stopWebDrawLoop()
             }
         }
 
         private fun resumeMotionRendering() {
             if (!isVisible || !surfaceReady) return
-            if (model?.isGaussian() == true && gaussianWebActive) {
-                webSplatController?.setTilt(0f, 0f)
-                startWebDrawLoop()
-            } else {
-                renderer?.setRenderingEnabled(true)
-                renderer?.requestRender()
-            }
+            renderer?.setRenderingEnabled(true)
+            renderer?.requestRender()
             mainHandler.postDelayed({
                 if (!isVisible || !surfaceReady) return@postDelayed
-                if (model?.isGaussian() == true && gaussianWebActive) {
-                    webSplatController?.setTilt(0f, 0f)
-                    startWebDrawLoop()
-                } else {
-                    renderer?.setRenderingEnabled(true)
-                    renderer?.requestRender()
-                }
+                renderer?.setRenderingEnabled(true)
+                renderer?.requestRender()
             }, RESUME_RENDER_KICK_MS)
         }
 
@@ -259,10 +211,10 @@ class DepthWallpaperService : WallpaperService() {
             loadingImageKey = null
             Log.d(TAG, "onDestroy loadVersion=$loadVersion")
             unregisterSensor()
-            stopWebSplatMode(destroy = true)
             pref?.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
             renderer?.stop()
             renderer = null
+            rendererBackendMode = null
         }
 
         fun reload() {
@@ -291,7 +243,6 @@ class DepthWallpaperService : WallpaperService() {
                 loadVersion++
                 loadedImageKey = null
                 loadingImageKey = null
-                stopWebSplatMode(destroy = true)
                 renderer?.showLoading(false)
                 renderer?.setRenderingEnabled(false)
                 Log.d(TAG, "loadContent skipped: no active depth wallpaper")
@@ -314,7 +265,6 @@ class DepthWallpaperService : WallpaperService() {
                 }
                 return
             }
-            stopWebSplatMode(destroy = true)
             renderer?.setRenderingEnabled(false)
             loadedImageKey = null
             loadingImageKey = null
@@ -326,40 +276,35 @@ class DepthWallpaperService : WallpaperService() {
             targetKey: String,
             currentVersion: Int
         ) {
-            mainHandler.post {
-                if (currentVersion != loadVersion || !isVisible || !surfaceReady) {
-                    Log.w(
-                        TAG,
-                        "loadContent web gaussian skipped current=$currentVersion loadVersion=$loadVersion " +
-                            "visible=$isVisible surfaceReady=$surfaceReady"
-                    )
-                    return@post
-                }
-                activateWebSplatMode()
-                val controller = webSplatController ?: return@post
+            ensureNativeRendererFor(target)
+            ensureRendererStarted()
+            renderer?.setRenderingEnabled(isVisible)
+            renderer?.showLoading(true)
+            resetSensorState()
+            val accepted = renderer?.loadWebGaussians(target.gaussianUri, target.webSplatParams()) == true
+            if (currentVersion != loadVersion || !isVisible || !surfaceReady || model?.contentKey() != targetKey) {
+                Log.w(
+                    TAG,
+                    "loadContent web gaussian skipped current=$currentVersion loadVersion=$loadVersion " +
+                        "visible=$isVisible surfaceReady=$surfaceReady"
+                )
+                return
+            }
+            if (accepted) {
                 loadedImageKey = targetKey
                 loadingImageKey = null
-                controller.modelUri = Uri.parse(target.gaussianUri)
-                controller.pendingParams = target.webSplatParams()
-                controller.loadModelIfNeeded(target.gaussianUri)
-                controller.setParams(target.webSplatParams())
-                startWebDrawLoop()
-                mainHandler.postDelayed({
-                    if (
-                        currentVersion == loadVersion &&
-                        isVisible &&
-                        surfaceReady &&
-                        webSplatController?.pageReady != true
-                    ) {
-                        Log.w(TAG, "web gaussian not ready; keep waiting for WebView renderer")
-                        startWebDrawLoop()
-                    }
-                }, WEBVIEW_READY_TIMEOUT_MS)
+                renderer?.showLoading(false)
                 Log.d(
                     TAG,
-                    "loadContent web gaussian loaded uri=${target.gaussianUri} " +
+                    "loadContent web gaussian accepted uri=${target.gaussianUri} " +
                         "surface=${surfaceWidth}x$surfaceHeight"
                 )
+            } else {
+                loadedImageKey = null
+                loadingImageKey = null
+                renderer?.showLoading(false)
+                renderer?.setRenderingEnabled(false)
+                Log.w(TAG, "loadContent web gaussian rejected uri=${target.gaussianUri}")
             }
         }
 
@@ -369,7 +314,7 @@ class DepthWallpaperService : WallpaperService() {
             currentVersion: Int,
             reason: String
         ) {
-            stopWebSplatMode(destroy = true)
+            ensureNativeRendererFor(target)
             ensureRendererStarted()
             renderer?.setRenderingEnabled(isVisible)
             renderer?.updateParams(target.renderParallaxStrength(), 0f)
@@ -433,7 +378,7 @@ class DepthWallpaperService : WallpaperService() {
                     )
                     if (currentVersion == loadVersion && isVisible && surfaceReady) {
                         renderer?.showLoading(false)
-                        fallbackNativeGaussianToWeb(target, targetKey, currentVersion, "fast-load-failed", fastResult.error)
+                        failNativeGaussianLoad(targetKey, currentVersion, "fast-load-failed", fastResult.error)
                     }
                     return@Thread
                 }
@@ -472,8 +417,7 @@ class DepthWallpaperService : WallpaperService() {
             }.also { it.name = "DepthGaussianFallbackLoader" }.start()
         }
 
-        private fun fallbackNativeGaussianToWeb(
-            target: DepthWallpaperModel,
+        private fun failNativeGaussianLoad(
             targetKey: String,
             currentVersion: Int,
             reason: String,
@@ -483,13 +427,16 @@ class DepthWallpaperService : WallpaperService() {
                 if (currentVersion != loadVersion || !isVisible || !surfaceReady || model?.contentKey() != targetKey) {
                     Log.w(
                         TAG,
-                        "native gaussian web fallback skipped reason=$reason current=$currentVersion " +
+                        "native gaussian failure skipped reason=$reason current=$currentVersion " +
                             "loadVersion=$loadVersion visible=$isVisible surfaceReady=$surfaceReady error=$error"
                     )
                     return@post
                 }
-                Log.w(TAG, "native gaussian fallback to WebView reason=$reason error=$error uri=${target.gaussianUri}")
-                loadGaussianWebContent(target, targetKey, currentVersion)
+                loadedImageKey = null
+                loadingImageKey = null
+                renderer?.showLoading(false)
+                renderer?.setRenderingEnabled(isVisible)
+                Log.w(TAG, "native gaussian load failed; no wallpaper fallback reason=$reason error=$error")
             }
         }
 
@@ -534,85 +481,36 @@ class DepthWallpaperService : WallpaperService() {
             )
         }
 
-        private fun activateWebSplatMode() {
-            gaussianWebActive = true
-            renderer?.setRenderingEnabled(false)
-            renderer?.stopAndWait(500)
-            val controller = webSplatController ?: SuperSplatWebController(applicationContext).also {
-                it.onRenderRequested = { startWebDrawLoop() }
-                webSplatController = it
-            }
-            if (webSplatView == null) {
-                webSplatView = controller.createWebView(this@DepthWallpaperService).apply {
-                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                }
-            }
-            layoutWebSplatView()
-        }
-
-        private fun stopWebSplatMode(destroy: Boolean) {
-            gaussianWebActive = false
-            stopWebDrawLoop()
-            if (destroy) {
-                webSplatController?.destroy()
-                webSplatController = null
-                webSplatView = null
-            }
-        }
-
-        private fun layoutWebSplatView() {
-            val view = webSplatView ?: return
-            val widthSpec = View.MeasureSpec.makeMeasureSpec(surfaceWidth.coerceAtLeast(1), View.MeasureSpec.EXACTLY)
-            val heightSpec = View.MeasureSpec.makeMeasureSpec(surfaceHeight.coerceAtLeast(1), View.MeasureSpec.EXACTLY)
-            view.measure(widthSpec, heightSpec)
-            view.layout(0, 0, surfaceWidth.coerceAtLeast(1), surfaceHeight.coerceAtLeast(1))
-        }
-
-        private fun updateWebSplatParams(target: DepthWallpaperModel) {
-            webSplatController?.setParams(target.webSplatParams())
-        }
-
-        private fun startWebDrawLoop() {
-            if (!gaussianWebActive || !isVisible || !surfaceReady || webDrawScheduled) return
-            webDrawScheduled = true
-            mainHandler.post(webDrawRunnable)
-        }
-
-        private fun stopWebDrawLoop() {
-            webDrawScheduled = false
-            mainHandler.removeCallbacks(webDrawRunnable)
-        }
-
-        private fun drawWebSplatFrame() {
-            val holder = surfaceHolderRef ?: return
-            val view = webSplatView ?: return
-            try {
-                var hardwareCanvas = false
-                val canvas = runCatching {
-                    holder.surface.lockHardwareCanvas().also {
-                        hardwareCanvas = true
-                    }
-                }.getOrNull() ?: holder.lockCanvas() ?: return
-                try {
-                    canvas.drawColor(Color.BLACK)
-                    view.draw(canvas)
-                } finally {
-                    if (hardwareCanvas) {
-                        holder.surface.unlockCanvasAndPost(canvas)
-                    } else {
-                        holder.unlockCanvasAndPost(canvas)
-                    }
-                }
-            } catch (error: Throwable) {
-                Log.w(TAG, "draw web gaussian failed", error)
-            }
-        }
-
         private fun ensureRendererStarted() {
             val holder = surfaceHolderRef ?: return
             if (!surfaceReady) return
             renderer?.start(holder.surface)
             renderer?.resize(surfaceWidth, surfaceHeight)
+        }
+
+        private fun ensureNativeRendererFor(target: DepthWallpaperModel?) {
+            val backendMode = target?.nativeBackendMode() ?: NativeGaussianBackendMode.GLES
+            if (renderer != null && rendererBackendMode == backendMode) return
+            val previousMode = rendererBackendMode
+            if (previousMode != null && previousMode != backendMode) {
+                loadedImageKey = null
+                loadingImageKey = null
+            }
+            renderer?.stopAndWait(500)
+            renderer = NativeGaussianRendererFactory
+                .create(this@DepthWallpaperService, backendMode)
+                .also { it.setRenderingEnabled(false) }
+            rendererBackendMode = backendMode
+            Log.d(TAG, "gaussian renderer backend=$backendMode previous=$previousMode")
+        }
+
+        private fun applyRendererParams(target: DepthWallpaperModel) {
+            if (target.isGaussian() && target.useWebGaussianRenderer()) {
+                renderer?.loadWebGaussians(target.gaussianUri, target.webSplatParams())
+                return
+            }
+            renderer?.updateParams(target.renderParallaxStrength(), 0f)
+            if (target.isGaussian()) renderer?.updateGaussianParams(target.nativeGaussianParams())
         }
 
         private fun DepthWallpaperModel.webSplatParams(): SuperSplatWebParams {
@@ -621,7 +519,9 @@ class DepthWallpaperService : WallpaperService() {
                 cameraZoom = cameraZoom,
                 centerOffsetX = centerOffsetX,
                 centerOffsetY = centerOffsetY,
-                focusDepth = focusDepth
+                focusDepth = focusDepth,
+                cameraFov = cameraFov,
+                performanceMode = webPerformanceMode
             )
         }
 
@@ -650,7 +550,28 @@ class DepthWallpaperService : WallpaperService() {
         }
 
         private fun DepthWallpaperModel.contentKey(): String {
-            return "$id|$gaussianUri|$gaussianRenderMode|${renderGaussianMaxSplats()}|gaussian-v15"
+            val renderMode = serviceRenderModeKey()
+            return if (renderMode == "web") {
+                "$id|$gaussianUri|web|$webPerformanceMode|web-v2"
+            } else {
+                "$id|$gaussianUri|$renderMode|${renderGaussianMaxSplats()}|gaussian-v16"
+            }
+        }
+
+        private fun DepthWallpaperModel.serviceRenderModeKey(): String {
+            return when {
+                useWebGaussianRenderer() -> "web"
+                useVulkanGaussianRenderer() -> "vulkan"
+                else -> "native"
+            }
+        }
+
+        private fun DepthWallpaperModel.nativeBackendMode(): NativeGaussianBackendMode {
+            return when {
+                useWebGaussianRenderer() -> NativeGaussianBackendMode.WEB
+                useVulkanGaussianRenderer() -> NativeGaussianBackendMode.VULKAN
+                else -> NativeGaussianBackendMode.GLES
+            }
         }
 
         private fun DepthWallpaperModel.renderParallaxStrength(): Float {
@@ -759,12 +680,7 @@ class DepthWallpaperService : WallpaperService() {
             lastSensorRegisterMs = 0L
             hasGravity = false
             gravity.fill(0f)
-            if (model?.isGaussian() == true && gaussianWebActive) {
-                webSplatController?.resetSensorBaseline = true
-                if (resetCamera) webSplatController?.setTilt(0f, 0f)
-            } else {
-                if (resetCamera) renderer?.resetCamera()
-            }
+            if (resetCamera) renderer?.resetCamera()
         }
 
         private val sensorListener = object : SensorEventListener {
@@ -843,8 +759,7 @@ class DepthWallpaperService : WallpaperService() {
 
         private fun handleGyroscope(event: SensorEvent) {
             val now = event.timestamp
-            val controller = webSplatController
-            if (controller?.resetSensorBaseline == true || !gyroFilterInitialized) {
+            if (!gyroFilterInitialized) {
                 gyroTiltX = 0f
                 gyroTiltY = 0f
                 gyroFilteredTiltX = 0f
@@ -852,7 +767,6 @@ class DepthWallpaperService : WallpaperService() {
                 gyroLastTimestamp = now
                 gyroLastFilterTimestamp = now
                 gyroFilterInitialized = true
-                controller?.resetSensorBaseline = false
                 return
             }
 
@@ -938,13 +852,7 @@ class DepthWallpaperService : WallpaperService() {
         }
 
         private fun dispatchDepthTilt(tiltX: Float, tiltY: Float) {
-            when {
-                model?.isGaussian() == true && gaussianWebActive -> {
-                    webSplatController?.setTilt(tiltX, tiltY)
-                    startWebDrawLoop()
-                }
-                else -> renderer?.updateTilt(tiltX, tiltY)
-            }
+            renderer?.updateTilt(tiltX, tiltY)
         }
 
         private fun currentDispatchIntervalNs(): Long {
@@ -1010,8 +918,22 @@ class DepthWallpaperService : WallpaperService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_RELOAD) {
-            activeEngine?.reload()
+        when (intent?.action) {
+            ACTION_RELOAD -> activeEngine?.reload()
+            TianYinWallpaperService.ACTION_PREV_WALLPAPER -> {
+                MixedWallpaperPlaylist.switchRelative(
+                    applicationContext,
+                    getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
+                    -1
+                )
+            }
+            TianYinWallpaperService.ACTION_NEXT_WALLPAPER -> {
+                MixedWallpaperPlaylist.switchRelative(
+                    applicationContext,
+                    getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
+                    1
+                )
+            }
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -1030,8 +952,6 @@ class DepthWallpaperService : WallpaperService() {
         private const val SENSOR_STALE_TIMEOUT_MS = 2_500L
         private const val SENSOR_LOG_INTERVAL_MS = 1_000L
         private const val DISPATCH_LOG_INTERVAL_MS = 1_000L
-        private const val WEBVIEW_FRAME_INTERVAL_MS = 16L
-        private const val WEBVIEW_READY_TIMEOUT_MS = 4_000L
         private const val RESUME_RENDER_KICK_MS = 250L
         private const val SERVICE_MIN_GAUSSIAN_SPLATS = 100_000
         private const val SERVICE_FAST_GAUSSIAN_SPLATS = 500_000

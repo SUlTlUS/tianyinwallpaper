@@ -34,6 +34,8 @@ fun SuperSplatWebView(
     centerOffsetX: Float,
     centerOffsetY: Float,
     focusDepth: Float,
+    cameraFov: Float = 60f,
+    performanceMode: Boolean = true,
     previewFps: Int,
     onCenterOffsetChange: (Float, Float) -> Unit,
     onLoadingChanged: (Boolean) -> Unit = {},
@@ -48,7 +50,9 @@ fun SuperSplatWebView(
         cameraZoom = cameraZoom,
         centerOffsetX = centerOffsetX,
         centerOffsetY = centerOffsetY,
-        focusDepth = focusDepth
+        focusDepth = focusDepth,
+        cameraFov = cameraFov,
+        performanceMode = performanceMode
     )
 
     DisposableEffect(Unit) {

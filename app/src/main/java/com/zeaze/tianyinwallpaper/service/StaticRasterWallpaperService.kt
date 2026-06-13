@@ -233,6 +233,20 @@ class StaticRasterWallpaperService : WallpaperService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_RELOAD -> activeEngine?.reload()
+            TianYinWallpaperService.ACTION_PREV_WALLPAPER -> {
+                MixedWallpaperPlaylist.switchRelative(
+                    applicationContext,
+                    getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
+                    -1
+                )
+            }
+            TianYinWallpaperService.ACTION_NEXT_WALLPAPER -> {
+                MixedWallpaperPlaylist.switchRelative(
+                    applicationContext,
+                    getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
+                    1
+                )
+            }
         }
         return super.onStartCommand(intent, flags, startId)
     }

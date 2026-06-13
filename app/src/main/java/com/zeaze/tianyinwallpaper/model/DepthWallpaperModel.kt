@@ -5,7 +5,7 @@ import com.alibaba.fastjson.annotation.JSONField
 data class DepthWallpaperModel(
     var id: String = "",
     var gaussianUri: String = "",
-    var gaussianRenderMode: String = "native",
+    var gaussianRenderMode: String = "web",
     var displayName: String = "",
     var createdAt: Long = 0L,
     var sensorSensitivity: Float = 4.5f,
@@ -14,6 +14,8 @@ data class DepthWallpaperModel(
     var centerOffsetX: Float = 0f,
     var centerOffsetY: Float = 0f,
     var focusDepth: Float = 0.25f,
+    var cameraFov: Float = 60f,
+    var webPerformanceMode: Boolean = true,
     var gaussianMaxSplats: Int = 800_000,
     var blurStrength: Float = 0f
 ) {
@@ -21,5 +23,8 @@ data class DepthWallpaperModel(
     fun isGaussian(): Boolean = gaussianUri.isNotBlank()
 
     @JSONField(serialize = false, deserialize = false)
-    fun useWebGaussianRenderer(): Boolean = gaussianRenderMode == "web"
+    fun useWebGaussianRenderer(): Boolean = !useVulkanGaussianRenderer()
+
+    @JSONField(serialize = false, deserialize = false)
+    fun useVulkanGaussianRenderer(): Boolean = gaussianRenderMode == "vulkan"
 }

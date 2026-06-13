@@ -123,14 +123,13 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 
 @Composable
 internal fun MainPreviewOverlayHost(
     visible: Boolean,
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
@@ -171,12 +170,8 @@ internal fun MainPreviewOverlayHost(
             }
         }
 
-        Dialog(
-            onDismissRequest = onClose,
-            properties = DialogProperties(
-                usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false
-            )
+        Box(
+            modifier = modifier
         ) {
             LiveSyncPreview(
                 wallpaperList = wallpaperList,

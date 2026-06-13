@@ -130,6 +130,7 @@ import com.zeaze.tianyinwallpaper.update.AppUpdateManager
 import com.zeaze.tianyinwallpaper.update.UpdateDialog
 import com.zeaze.tianyinwallpaper.update.UpdateDialogState
 import com.zeaze.tianyinwallpaper.utils.FileUtil
+import com.zeaze.tianyinwallpaper.utils.AppAccentColors
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -187,7 +188,6 @@ class MainActivity : BaseActivity() {
         const val THEME_MODE_DARK = 2
         private const val PREF_MAIN_WALLPAPER_SORT_MODE = "main_wallpaper_sort_mode"
         private const val PREF_MAIN_WALLPAPER_SORT_DIRECTION = "main_wallpaper_sort_direction"
-        private val BOTTOM_BAR_SELECTED_COLOR = Color(0xFF2A83FF)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -217,11 +217,15 @@ class MainActivity : BaseActivity() {
     private fun MainActivityScreen() {
         val pref = remember(this) { getSharedPreferences(App.TIANYIN, MODE_PRIVATE) }
         var themeMode by remember { mutableStateOf(pref.getInt(PREF_THEME_MODE, THEME_MODE_FOLLOW_SYSTEM)) }
+        var accentColorKey by remember {
+            mutableStateOf(pref.getString(AppAccentColors.PREF_KEY, AppAccentColors.DEFAULT_KEY) ?: AppAccentColors.DEFAULT_KEY)
+        }
         val useDarkTheme = when (themeMode) {
             THEME_MODE_DARK -> true
             THEME_MODE_LIGHT -> false
             else -> isSystemInDarkTheme()
         }
+        val accentColor = AppAccentColors.resolve(accentColorKey, useDarkTheme)
 
         val view = LocalView.current
         SideEffect {
@@ -247,7 +251,13 @@ class MainActivity : BaseActivity() {
             }
         }
 
-        MaterialTheme(colors = if (useDarkTheme) darkColors() else lightColors()) {
+        MaterialTheme(
+            colors = if (useDarkTheme) {
+                darkColors(primary = accentColor, secondary = accentColor)
+            } else {
+                lightColors(primary = accentColor, secondary = accentColor)
+            }
+        ) {
             val themeBackgroundColor = if (useDarkTheme) Color(0xFF0A0A0C) else MaterialTheme.colors.background
             val enableLiquidGlass = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
             val navController = rememberNavController()
@@ -652,6 +662,8 @@ class MainActivity : BaseActivity() {
                                 2 -> SettingRouteScreen(
                                     useDarkTheme = useDarkTheme,
                                     onThemeModeChange = { mode -> themeMode = mode },
+                                    accentColorKey = accentColorKey,
+                                    onAccentColorChange = { key -> accentColorKey = key },
                                     onOpenAppInfo = {
                                         showMoreMenu = false
                                         showSortMenu = false
@@ -714,7 +726,9 @@ class MainActivity : BaseActivity() {
                     val bottomGroupGap = 8.dp
                     val bottomGroupHeight = 64.dp
                     val bottomActionSize = 64.dp
-                    val bottomTabsStyle = LiquidBottomTabsStyle.default(isLightTheme = !useDarkTheme)
+                    val bottomTabsStyle = LiquidBottomTabsStyle.default(isLightTheme = !useDarkTheme).copy(
+                        accentColor = accentColor
+                    )
                     val bottomAddButtonStyle = LiquidButtonStyle(
                         height = bottomTabsStyle.trackHeight,
                         horizontalPadding = 0.dp,
@@ -748,7 +762,7 @@ class MainActivity : BaseActivity() {
                             bottomTabs.forEachIndexed { index, tab ->
                                 LiquidBottomTab({ selectRoot(index) }) {
                                     val selected = selectedRootIndex == index
-                                    val tabColor = if (selected) BOTTOM_BAR_SELECTED_COLOR else MaterialTheme.colors.onSurface
+                                    val tabColor = if (selected) accentColor else MaterialTheme.colors.onSurface
                                     Column(
                                         modifier = Modifier.fillMaxSize(),
                                         horizontalAlignment = Alignment.CenterHorizontally,

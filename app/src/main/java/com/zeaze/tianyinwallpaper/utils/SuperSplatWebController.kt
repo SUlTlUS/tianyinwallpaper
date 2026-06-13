@@ -25,7 +25,12 @@ data class SuperSplatWebParams(
     val cameraZoom: Float,
     val centerOffsetX: Float,
     val centerOffsetY: Float,
-    val focusDepth: Float
+    val focusDepth: Float,
+    val cameraFov: Float,
+    val performanceMode: Boolean,
+    val backgroundRed: Float = 0f,
+    val backgroundGreen: Float = 0f,
+    val backgroundBlue: Float = 0f
 ) {
     fun toJs(resetCamera: Boolean): String {
         return "window.tianyinSetParams && window.tianyinSetParams(" +
@@ -34,6 +39,11 @@ data class SuperSplatWebParams(
             "${centerOffsetX.toJsFloat()}, " +
             "${centerOffsetY.toJsFloat()}, " +
             "${focusDepth.toJsFloat()}, " +
+            "${cameraFov.toJsFloat()}, " +
+            "${if (performanceMode) "true" else "false"}, " +
+            "${backgroundRed.toJsFloat()}, " +
+            "${backgroundGreen.toJsFloat()}, " +
+            "${backgroundBlue.toJsFloat()}, " +
             "${if (resetCamera) "true" else "false"}" +
             ");"
     }
@@ -201,6 +211,7 @@ class SuperSplatWebController(
                 controller.onFirstFrame()
             }
         }
+
     }
 
     private class SuperSplatWebViewClient(

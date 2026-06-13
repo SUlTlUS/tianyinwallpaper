@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -67,6 +68,10 @@ fun LiquidToggle(
     val dragWidth = with(density) { 20f.dp.toPx() }
     val animationScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+    val currentSelected by rememberUpdatedState(selected)
+    val currentOnSelect by rememberUpdatedState(onSelect)
+    val currentOnDragStarted by rememberUpdatedState(onDragStarted)
+    val currentOnDragFinished by rememberUpdatedState(onDragFinished)
     var didDrag by remember { mutableStateOf(false) }
     var fraction by remember { mutableFloatStateOf(if (selected()) 1f else 0f) }
     val dampedDragAnimation = remember(animationScope) {
@@ -86,19 +91,19 @@ fun LiquidToggle(
                     if (wasSelected != isSelected) {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) // Or any other suitable feedback
                     }
-                    onSelect(isSelected)
+                    currentOnSelect(isSelected)
                     didDrag = false
-                    onDragFinished()
+                    currentOnDragFinished()
                 } else {
-                    fraction = if (selected()) 0f else 1f
+                    fraction = if (currentSelected()) 0f else 1f
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress) // Using LongPress for a strong click feel, or TextHandleMove
-                    onSelect(fraction == 1f)
+                    currentOnSelect(fraction == 1f)
                 }
             },
             onDrag = { _, dragAmount ->
                 if (!didDrag) {
                     didDrag = dragAmount.x != 0f
-                    if (didDrag) onDragStarted()
+                    if (didDrag) currentOnDragStarted()
                 }
                 val oldFraction = fraction
                 val delta = dragAmount.x / dragWidth
@@ -119,8 +124,8 @@ fun LiquidToggle(
                 dampedDragAnimation.updateValue(fraction)
             }
     }
-    LaunchedEffect(selected) {
-        snapshotFlow { selected() }
+    LaunchedEffect(Unit) {
+        snapshotFlow { currentSelected() }
             .collectLatest { isSelected ->
                 val target = if (isSelected) 1f else 0f
                 if (target != fraction) {

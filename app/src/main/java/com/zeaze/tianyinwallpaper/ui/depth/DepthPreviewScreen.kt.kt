@@ -1,38 +1,22 @@
 package com.zeaze.tianyinwallpaper.ui.depth
 
-import android.app.Activity
-import android.app.WallpaperManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.net.Uri
-import android.os.Build
-import android.provider.OpenableColumns
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,7 +25,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -51,36 +34,30 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.Icon
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Slider
+import androidx.compose.material.Switch
+import androidx.compose.material.SwitchDefaults
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur as composeBlur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -90,24 +67,17 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
-import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.backdrop.Backdrop
-import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.drawBackdrop
@@ -115,47 +85,22 @@ import com.zeaze.tianyinwallpaper.backdrop.effects.blur
 import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
 import com.zeaze.tianyinwallpaper.backdrop.effects.lens
 import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
-import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
-import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
-import com.zeaze.tianyinwallpaper.service.DepthWallpaperService
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimationMode
-import com.zeaze.tianyinwallpaper.ui.main.SelectionBarState
-import com.zeaze.tianyinwallpaper.utils.DepthPrefs
-import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
-import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
-import com.zeaze.tianyinwallpaper.utils.GradioMcpSogGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyGridState
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.UUID
 import kotlin.math.roundToInt
 
-private const val GAUSSIAN_MIN_SPLAT_BUDGET = 100_000
-private const val GAUSSIAN_FULL_SPLAT_BUDGET = 1_500_000
-private const val GAUSSIAN_SPLAT_BUDGET_STEP = 100_000
-
-private fun formatSplatBudget(value: Int): String {
-    return String.format("%.1fM", value / 1_000_000f)
-}
-
-private fun Int.roundToNearest(step: Int): Int {
-    if (step <= 0) return this
-    return ((this + step / 2) / step) * step
-}
+private const val DEPTH_LOADING_FADE_DURATION_MS = 300
+private const val DEPTH_LOADING_COMPLETED_HOLD_MS = 400
 
 @Composable
 fun DepthPreviewOverlay(
@@ -170,10 +115,41 @@ fun DepthPreviewOverlay(
     onModelChange: (DepthWallpaperModel) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val density = LocalDensity.current
     val isLightTheme = MaterialTheme.colors.isLight
     val pillBackground = if (MaterialTheme.colors.isLight) Color(0x22FFFFFF) else Color(0x55222222)
-    val detailBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val shouldCaptureWebBackdrop = enableLiquidGlass && model.isGaussian() && model.useWebGaussianRenderer()
+    var webBackdropFrame by remember(model.id, model.gaussianUri, model.gaussianRenderMode) {
+        mutableStateOf<ImageBitmap?>(null)
+    }
+    val currentWebBackdropFrame = rememberUpdatedState(webBackdropFrame)
+    val currentShouldCaptureWebBackdrop = rememberUpdatedState(shouldCaptureWebBackdrop)
+    val detailBackdrop = if (enableLiquidGlass) {
+        rememberLayerBackdrop(
+            onDraw = remember {
+                {
+                    drawContent()
+                    if (currentShouldCaptureWebBackdrop.value) {
+                        val frame = currentWebBackdropFrame.value
+                        if (frame != null) {
+                            drawImage(
+                                image = frame,
+                                dstSize = IntSize(
+                                    size.width.roundToInt().coerceAtLeast(1),
+                                    size.height.roundToInt().coerceAtLeast(1)
+                                )
+                            )
+                        } else {
+                            drawRect(Color.Black)
+                        }
+                    }
+                }
+            }
+        )
+    } else {
+        null
+    }
     val coroutineScope = rememberCoroutineScope()
     val animatedOffset = remember { Animatable(0f) }
     val dismissThreshold = with(density) { 200.dp.toPx() }
@@ -183,6 +159,43 @@ fun DepthPreviewOverlay(
         with(density) { WindowInsets.navigationBars.getBottom(this).toDp() } + 16.dp
     var previewLoading by remember(model.id, model.gaussianUri, model.gaussianRenderMode, model.gaussianMaxSplats) {
         mutableStateOf(true)
+    }
+    val cachedLoadingThumbnail = remember(model.id, model.gaussianUri) {
+        gaussianThumbnailCacheFile(context.applicationContext, model)
+            ?.takeIf { it.exists() }
+            ?.let { file ->
+                BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                })
+            }
+    }
+    val loadingThumbnail by produceState<Bitmap?>(
+        initialValue = cachedLoadingThumbnail,
+        model.id,
+        model.gaussianUri
+    ) {
+        if (cachedLoadingThumbnail != null) return@produceState
+        value = withContext(Dispatchers.IO) {
+            loadOrGenerateGaussianThumbnail(
+                context = context.applicationContext,
+                model = model,
+                width = THUMBNAIL_WIDTH,
+                height = THUMBNAIL_HEIGHT
+            )
+        }
+    }
+    var loadingOverlayVisible by remember(model.id, model.gaussianUri) { mutableStateOf(true) }
+    var sensorInputEnabled by remember(model.id, model.gaussianUri) { mutableStateOf(false) }
+    LaunchedEffect(previewLoading) {
+        if (previewLoading) {
+            loadingOverlayVisible = true
+            sensorInputEnabled = false
+        } else {
+            delay(DEPTH_LOADING_COMPLETED_HOLD_MS.toLong())
+            loadingOverlayVisible = false
+            delay(DEPTH_LOADING_FADE_DURATION_MS.toLong())
+            sensorInputEnabled = true
+        }
     }
     var showParamPanel by remember(model.id) { mutableStateOf(false) }
 
@@ -247,23 +260,53 @@ fun DepthPreviewOverlay(
                 model = model,
                 onModelChange = onModelChange,
                 onLoadingChanged = { previewLoading = it },
+                webBackdropCaptureEnabled = shouldCaptureWebBackdrop,
+                onWebBackdropFrame = { webBackdropFrame = it },
+                sensorInputEnabled = sensorInputEnabled,
                 modifier = Modifier.fillMaxSize()
             )
-        }
-
-        if (previewLoading) {
-            Column(
-                modifier = Modifier.align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            AnimatedVisibility(
+                visible = loadingOverlayVisible,
+                enter = EnterTransition.None,
+                exit = fadeOut(animationSpec = tween(DEPTH_LOADING_FADE_DURATION_MS)),
+                modifier = Modifier.fillMaxSize()
             ) {
-                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
-                Text(
-                    text = "正在加载",
-                    color = Color.White.copy(alpha = 0.82f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    loadingThumbnail?.let { thumbnail ->
+                        Image(
+                            bitmap = thumbnail.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .composeBlur(24.dp)
+                                .graphicsLayer {
+                                    scaleX = 1.08f
+                                    scaleY = 1.08f
+                                }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.18f))
+                        )
+                    }
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+                        Text(
+                            text = "正在加载",
+                            color = Color.White.copy(alpha = 0.82f),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
 
@@ -375,7 +418,10 @@ fun DepthPreviewOverlay(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clickable { closeParamPanel() }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { closeParamPanel() }
             )
         }
 
@@ -454,7 +500,9 @@ private fun DepthParamPanel(
     modifier: Modifier = Modifier
 ) {
     var isSliderInteracting by remember { mutableStateOf(false) }
+    val defaultParams = remember { DepthWallpaperModel() }
     val scrollState = rememberScrollState()
+    val controlBackdrop = if (backdrop != null) rememberLayerBackdrop() else null
     val disableScrollConnection = remember(isSliderInteracting) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -482,6 +530,7 @@ private fun DepthParamPanel(
                             lens(16f.dp.toPx(), 32f.dp.toPx(), depthEffect = true)
                         },
                         highlight = { Highlight.Plain },
+                        exportedBackdrop = controlBackdrop,
                         onDrawSurface = { drawRect(containerColor) }
                     )
                 } else {
@@ -517,7 +566,7 @@ private fun DepthParamPanel(
         }
         Spacer(Modifier.height(4.dp))
         BasicText(
-            "参数调节",
+            "景深",
             style = TextStyle(contentColor, 18.sp, fontWeight = FontWeight.Bold),
             modifier = Modifier.fillMaxWidth().wrapContentSize(Alignment.Center)
         )
@@ -537,7 +586,7 @@ private fun DepthParamPanel(
                 valueText = String.format("%.1f", model.sensorSensitivity),
                 range = 1f..9f,
                 onValueChange = { onModelChange(model.copy(sensorSensitivity = it)) },
-                backdrop = backdrop,
+                backdrop = controlBackdrop,
                 isLightTheme = isLightTheme,
                 contentColor = contentColor,
                 visibilityThreshold = 0.1f,
@@ -549,58 +598,48 @@ private fun DepthParamPanel(
                 valueText = String.format("%.3f", model.parallaxStrength),
                 range = 0.001f..0.075f,
                 onValueChange = { onModelChange(model.copy(parallaxStrength = it)) },
-                backdrop = backdrop,
+                backdrop = controlBackdrop,
                 isLightTheme = isLightTheme,
                 contentColor = contentColor,
                 visibilityThreshold = 0.001f,
                 onInteractionChange = { isSliderInteracting = it }
             )
             if (model.isGaussian()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    DepthPreviewModePill(
-                        text = "Native",
-                        selected = !model.useWebGaussianRenderer(),
-                        onClick = { onModelChange(model.copy(gaussianRenderMode = "native")) },
-                        modifier = Modifier.weight(1f)
-                    )
-                    DepthPreviewModePill(
-                        text = "WebView",
-                        selected = model.useWebGaussianRenderer(),
-                        onClick = { onModelChange(model.copy(gaussianRenderMode = "web")) },
-                        modifier = Modifier.weight(1f)
+                if (model.useWebGaussianRenderer()) {
+                    DepthParamToggle(
+                        label = "性能模式",
+                        checked = model.webPerformanceMode,
+                        onCheckedChange = {
+                            onModelChange(model.copy(webPerformanceMode = it))
+                        },
+                        backdrop = controlBackdrop,
+                        isLightTheme = isLightTheme,
+                        accentColor = accentColor,
+                        contentColor = contentColor
                     )
                 }
-                DepthParamSlider(
-                    label = "清晰度",
-                    value = model.gaussianMaxSplats.toFloat(),
-                    valueText = formatSplatBudget(model.gaussianMaxSplats),
-                    range = GAUSSIAN_MIN_SPLAT_BUDGET.toFloat()..GAUSSIAN_FULL_SPLAT_BUDGET.toFloat(),
-                    onValueChange = {
-                        val budget = it.toInt()
-                            .roundToNearest(GAUSSIAN_SPLAT_BUDGET_STEP)
-                            .coerceIn(GAUSSIAN_MIN_SPLAT_BUDGET, GAUSSIAN_FULL_SPLAT_BUDGET)
-                        onModelChange(model.copy(gaussianMaxSplats = budget))
-                    },
-                    backdrop = backdrop,
-                    isLightTheme = isLightTheme,
-                    contentColor = contentColor,
-                    visibilityThreshold = GAUSSIAN_SPLAT_BUDGET_STEP.toFloat(),
-                    onInteractionChange = { isSliderInteracting = it }
-                )
                 DepthParamSlider(
                     label = "距离",
                     value = model.cameraZoom,
                     valueText = String.format("%.2f", model.cameraZoom),
                     range = 0.6f..10f,
                     onValueChange = { onModelChange(model.copy(cameraZoom = it)) },
-                    backdrop = backdrop,
+                    backdrop = controlBackdrop,
                     isLightTheme = isLightTheme,
                     contentColor = contentColor,
                     visibilityThreshold = 0.01f,
+                    onInteractionChange = { isSliderInteracting = it }
+                )
+                DepthParamSlider(
+                    label = "视角",
+                    value = model.cameraFov,
+                    valueText = "${model.cameraFov.roundToInt()}°",
+                    range = 35f..80f,
+                    onValueChange = { onModelChange(model.copy(cameraFov = it)) },
+                    backdrop = controlBackdrop,
+                    isLightTheme = isLightTheme,
+                    contentColor = contentColor,
+                    visibilityThreshold = 1f,
                     onInteractionChange = { isSliderInteracting = it }
                 )
                 DepthParamSlider(
@@ -609,31 +648,38 @@ private fun DepthParamPanel(
                     valueText = String.format("%.2f", model.focusDepth),
                     range = -1f..1f,
                     onValueChange = { onModelChange(model.copy(focusDepth = it)) },
-                    backdrop = backdrop,
+                    backdrop = controlBackdrop,
                     isLightTheme = isLightTheme,
                     contentColor = contentColor,
                     visibilityThreshold = 0.01f,
                     onInteractionChange = { isSliderInteracting = it }
                 )
-                Text(
-                    text = "重置注视点",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                Spacer(Modifier.height(12.dp))
+                Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0x332A83FF))
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clip(Capsule())
+                        .background(containerColor.copy(alpha = 0.2f))
                         .clickable {
                             onModelChange(
                                 model.copy(
-                                    centerOffsetX = 0f,
-                                    centerOffsetY = 0f,
-                                    focusDepth = 0.25f
+                                    sensorSensitivity = defaultParams.sensorSensitivity,
+                                    parallaxStrength = defaultParams.parallaxStrength,
+                                    cameraZoom = defaultParams.cameraZoom,
+                                    centerOffsetX = defaultParams.centerOffsetX,
+                                    centerOffsetY = defaultParams.centerOffsetY,
+                                    focusDepth = defaultParams.focusDepth,
+                                    cameraFov = defaultParams.cameraFov,
+                                    webPerformanceMode = defaultParams.webPerformanceMode
                                 )
                             )
-                        }
-                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                )
+                        },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BasicText("重置", style = TextStyle(contentColor, 16.sp))
+                }
             }
         }
     }
@@ -641,26 +687,40 @@ private fun DepthParamPanel(
 
 
 @Composable
-private fun DepthPreviewModePill(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+private fun DepthParamToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    backdrop: Backdrop?,
+    isLightTheme: Boolean,
+    accentColor: Color,
+    contentColor: Color
 ) {
-    Box(
-        modifier = modifier
-            .height(34.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (selected) Color(0xAA2A83FF) else Color(0x33000000))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = text,
-            color = Color.White,
-            fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-        )
+        BasicText(label, style = TextStyle(contentColor, 14.sp, fontWeight = FontWeight.Medium))
+        if (backdrop != null) {
+            LiquidToggle(
+                selected = { checked },
+                onSelect = onCheckedChange,
+                backdrop = backdrop,
+                isLightTheme = isLightTheme
+            )
+        } else {
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = accentColor,
+                    checkedTrackColor = accentColor.copy(alpha = 0.5f)
+                )
+            )
+        }
     }
 }
 

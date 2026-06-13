@@ -651,6 +651,20 @@ class TianYinWallpaperService : WallpaperService() {
         fun prev() = prevWallpaper(ignoreMinInterval = true, loadContentNow = true)
 
         private fun nextWallpaper(ignoreMinInterval: Boolean = false, loadContentNow: Boolean = true) {
+            val pref = this.pref
+            if (pref != null && (index != -1 || initialLoadCompleted.get())) {
+                val mixedItems = MixedWallpaperPlaylist.load(pref)
+                if (mixedItems.size > 1) {
+                    if (!ignoreMinInterval && !canSwitchByMinInterval()) {
+                        Log.d(TAG, "nextWallpaper blocked by minTime")
+                        return
+                    }
+                    if (MixedWallpaperPlaylist.switchRelative(applicationContext, pref, 1)) {
+                        markSwitchTimestamp()
+                        return
+                    }
+                }
+            }
             val list = this.list ?: return
             if (list.isEmpty()) return
 
@@ -781,6 +795,20 @@ class TianYinWallpaperService : WallpaperService() {
         }
 
         private fun prevWallpaper(ignoreMinInterval: Boolean = false, loadContentNow: Boolean = true) {
+            val pref = this.pref
+            if (pref != null && (index != -1 || initialLoadCompleted.get())) {
+                val mixedItems = MixedWallpaperPlaylist.load(pref)
+                if (mixedItems.size > 1) {
+                    if (!ignoreMinInterval && !canSwitchByMinInterval()) {
+                        Log.d(TAG, "prevWallpaper blocked by minTime")
+                        return
+                    }
+                    if (MixedWallpaperPlaylist.switchRelative(applicationContext, pref, -1)) {
+                        markSwitchTimestamp()
+                        return
+                    }
+                }
+            }
             val list = this.list ?: return
             if (list.isEmpty()) return
 
@@ -991,8 +1019,30 @@ class TianYinWallpaperService : WallpaperService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_PREV_WALLPAPER -> activeEngine?.prev()
-            ACTION_NEXT_WALLPAPER -> activeEngine?.next()
+            ACTION_PREV_WALLPAPER -> {
+                val engine = activeEngine
+                if (engine != null) {
+                    engine.prev()
+                } else {
+                    MixedWallpaperPlaylist.switchRelative(
+                        applicationContext,
+                        getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
+                        -1
+                    )
+                }
+            }
+            ACTION_NEXT_WALLPAPER -> {
+                val engine = activeEngine
+                if (engine != null) {
+                    engine.next()
+                } else {
+                    MixedWallpaperPlaylist.switchRelative(
+                        applicationContext,
+                        getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
+                        1
+                    )
+                }
+            }
             ACTION_REFRESH_CURRENT -> activeEngine?.refreshCurrentFromStorage()
             ACTION_SYNC_PLAYLIST -> activeEngine?.syncPlaylistFromStorageKeepCurrent()
             ACTION_UPDATE_TRANSFORM -> {

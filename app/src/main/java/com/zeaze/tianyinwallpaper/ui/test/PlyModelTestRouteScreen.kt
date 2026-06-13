@@ -34,6 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +50,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kyant.shapes.Capsule
 import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
+import com.zeaze.tianyinwallpaper.renderer.NativeGaussianBackendMode
+import com.zeaze.tianyinwallpaper.renderer.NativeGaussianRendererFactory
+import com.zeaze.tianyinwallpaper.ui.depth.SuperSplatWebView
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSogLoader
@@ -75,6 +79,7 @@ fun PlyModelTestRouteScreen(
     var errorText by remember { mutableStateOf<String?>(null) }
     var maxSplats by remember { mutableStateOf(GaussianSogLoader.DEFAULT_MAX_SPLATS) }
     var maxSplatsSlider by remember { mutableStateOf(GaussianSogLoader.DEFAULT_MAX_SPLATS.toFloat()) }
+    var rendererMode by remember { mutableStateOf(SogTestRendererMode.WEB) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -170,6 +175,13 @@ fun PlyModelTestRouteScreen(
                 }
             )
 
+            RendererModeCard(
+                selectedMode = rendererMode,
+                panelColor = panelColor,
+                contentColor = contentColor,
+                onModeChange = { rendererMode = it }
+            )
+
             if (isLoading) {
                 LoadingCard(panelColor, contentColor, accentColor)
             }
@@ -190,6 +202,8 @@ fun PlyModelTestRouteScreen(
             gaussianScene?.let { loadedScene ->
                 GaussianPreviewCard(
                     scene = loadedScene,
+                    uriString = selectedUri?.toString().orEmpty(),
+                    rendererMode = rendererMode,
                     panelColor = panelColor,
                     contentColor = contentColor
                 )
@@ -249,6 +263,77 @@ private fun SplatLimitCard(
 }
 
 @Composable
+private fun RendererModeCard(
+    selectedMode: SogTestRendererMode,
+    panelColor: Color,
+    contentColor: Color,
+    onModeChange: (SogTestRendererMode) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(panelColor)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("Renderer", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SogRendererModePill(
+                text = SogTestRendererMode.GLES.label,
+                selected = selectedMode == SogTestRendererMode.GLES,
+                contentColor = contentColor,
+                onClick = { onModeChange(SogTestRendererMode.GLES) },
+                modifier = Modifier.weight(1f)
+            )
+            SogRendererModePill(
+                text = SogTestRendererMode.VULKAN.label,
+                selected = selectedMode == SogTestRendererMode.VULKAN,
+                contentColor = contentColor,
+                onClick = { onModeChange(SogTestRendererMode.VULKAN) },
+                modifier = Modifier.weight(1f)
+            )
+            SogRendererModePill(
+                text = SogTestRendererMode.WEB.label,
+                selected = selectedMode == SogTestRendererMode.WEB,
+                contentColor = contentColor,
+                onClick = { onModeChange(SogTestRendererMode.WEB) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SogRendererModePill(
+    text: String,
+    selected: Boolean,
+    contentColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (selected) Color(0xAA2A83FF) else Color(0x22000000))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (selected) Color.White else contentColor.copy(alpha = 0.76f),
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+        )
+    }
+}
+
+@Composable
 private fun LoadingCard(
     panelColor: Color,
     contentColor: Color,
@@ -271,16 +356,60 @@ private fun LoadingCard(
 @Composable
 private fun GaussianPreviewCard(
     scene: GaussianPlyLoader.GaussianScene,
+    uriString: String,
+    rendererMode: SogTestRendererMode,
     panelColor: Color,
     contentColor: Color
 ) {
-    val renderer = remember { DepthGLRenderer() }
-    val previewTilt = remember { FloatArray(2) }
-    var splatScale by remember { mutableStateOf(1.0f) }
-    var globalOpacity by remember { mutableStateOf(1.0f) }
-    var alphaFalloff by remember { mutableStateOf(1.0f) }
-    var minPointSize by remember { mutableStateOf(0.5f) }
-    var maxPointSize by remember { mutableStateOf(120f) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(panelColor)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Gaussian SOG Preview", color = contentColor, fontWeight = FontWeight.SemiBold)
+            Text(rendererMode.label, color = contentColor.copy(alpha = 0.55f), fontSize = 12.sp)
+        }
+
+        if (rendererMode == SogTestRendererMode.WEB) {
+            WebGaussianPreview(
+                uriString = uriString,
+                contentColor = contentColor
+            )
+        } else {
+            NativeGaussianPreview(
+                scene = scene,
+                rendererMode = rendererMode,
+                contentColor = contentColor
+            )
+        }
+    }
+}
+
+@Composable
+private fun NativeGaussianPreview(
+    scene: GaussianPlyLoader.GaussianScene,
+    rendererMode: SogTestRendererMode,
+    contentColor: Color
+) {
+    val appContext = LocalContext.current.applicationContext
+    val backendMode = rendererMode.nativeBackendMode()
+    val renderer = remember(appContext, backendMode) {
+        NativeGaussianRendererFactory.create(appContext, backendMode)
+    }
+    val previewTilt = remember(renderer) { FloatArray(2) }
+    var splatScale by remember(renderer) { mutableStateOf(1.0f) }
+    var globalOpacity by remember(renderer) { mutableStateOf(1.0f) }
+    var alphaFalloff by remember(renderer) { mutableStateOf(1.0f) }
+    var minPointSize by remember(renderer) { mutableStateOf(0.5f) }
+    var maxPointSize by remember(renderer) { mutableStateOf(120f) }
 
     fun currentGaussianParams(): DepthGLRenderer.GaussianRenderParams {
         return DepthGLRenderer.GaussianRenderParams(
@@ -297,36 +426,20 @@ private fun GaussianPreviewCard(
         renderer.updateGaussianParams(currentGaussianParams())
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(renderer) {
         onDispose {
             renderer.stopAndWait(300)
         }
     }
 
-    LaunchedEffect(scene) {
+    LaunchedEffect(scene, renderer) {
         renderer.loadGaussians(scene)
         renderer.updateParams(0.075f, 0f)
         applyGaussianParams()
         renderer.updateTilt(previewTilt[0], previewTilt[1])
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(panelColor)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Gaussian SOG 预览", color = contentColor, fontWeight = FontWeight.SemiBold)
-            Text("拖动预览测试视差", color = contentColor.copy(alpha = 0.55f), fontSize = 12.sp)
-        }
-
+    key(renderer) {
         AndroidView(
             factory = { viewContext ->
                 SurfaceView(viewContext).apply {
@@ -374,44 +487,84 @@ private fun GaussianPreviewCard(
                     }
                 }
         )
+    }
 
-        Column(
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(contentColor.copy(alpha = 0.07f))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        GaussianParamSlider("Splat scale", splatScale, 0.35f..3.0f, contentColor, { splatScale = it }, { applyGaussianParams() })
+        GaussianParamSlider("Global opacity", globalOpacity, 0.2f..3.0f, contentColor, { globalOpacity = it }, { applyGaussianParams() })
+        GaussianParamSlider("Alpha falloff", alphaFalloff, 0.2f..4.0f, contentColor, { alphaFalloff = it }, { applyGaussianParams() })
+        GaussianParamSlider("Min point size", minPointSize, 0.5f..8.0f, contentColor, { minPointSize = it.coerceAtMost(maxPointSize) }, { applyGaussianParams() })
+        GaussianParamSlider("Max point size", maxPointSize, 24f..160f, contentColor, { maxPointSize = it.coerceAtLeast(minPointSize) }, { applyGaussianParams() })
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(42.dp)
+            .clip(Capsule())
+            .background(contentColor.copy(alpha = 0.10f))
+            .clickable {
+                previewTilt[0] = 0f
+                previewTilt[1] = 0f
+                splatScale = 1.0f
+                globalOpacity = 1.0f
+                alphaFalloff = 1.0f
+                minPointSize = 0.5f
+                maxPointSize = 120f
+                applyGaussianParams()
+                renderer.updateTilt(0f, 0f)
+            },
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("Reset preview params", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun WebGaussianPreview(
+    uriString: String,
+    contentColor: Color
+) {
+    if (uriString.isBlank()) {
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(contentColor.copy(alpha = 0.07f))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .aspectRatio(SOG_PREVIEW_ASPECT)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
         ) {
-            GaussianParamSlider("Splat scale", splatScale, 0.35f..3.0f, contentColor, { splatScale = it }, { applyGaussianParams() })
-            GaussianParamSlider("Global opacity", globalOpacity, 0.2f..3.0f, contentColor, { globalOpacity = it }, { applyGaussianParams() })
-            GaussianParamSlider("Alpha falloff", alphaFalloff, 0.2f..4.0f, contentColor, { alphaFalloff = it }, { applyGaussianParams() })
-            GaussianParamSlider("Min point size", minPointSize, 0.5f..8.0f, contentColor, { minPointSize = it.coerceAtMost(maxPointSize) }, { applyGaussianParams() })
-            GaussianParamSlider("Max point size", maxPointSize, 24f..160f, contentColor, { maxPointSize = it.coerceAtLeast(minPointSize) }, { applyGaussianParams() })
+            Text("No SOG URI", color = contentColor.copy(alpha = 0.62f), fontSize = 13.sp)
         }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(42.dp)
-                .clip(Capsule())
-                .background(contentColor.copy(alpha = 0.10f))
-                .clickable {
-                    previewTilt[0] = 0f
-                    previewTilt[1] = 0f
-                    splatScale = 1.0f
-                    globalOpacity = 1.0f
-                    alphaFalloff = 1.0f
-                    minPointSize = 0.5f
-                    maxPointSize = 120f
-                    applyGaussianParams()
-                    renderer.updateTilt(0f, 0f)
-                },
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("重置预览参数", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        }
+        return
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(SOG_PREVIEW_ASPECT)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.Black)
+    ) {
+        SuperSplatWebView(
+            uriString = uriString,
+            sensorSensitivity = 4.5f,
+            parallaxStrength = 0.075f,
+            cameraZoom = 1f,
+            centerOffsetX = 0f,
+            centerOffsetY = 0f,
+            focusDepth = 0.25f,
+            previewFps = 60,
+            onCenterOffsetChange = { _, _ -> },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 
@@ -525,6 +678,19 @@ private fun queryDisplayName(context: Context, uri: Uri): String? {
             }
         }
     }.getOrNull() ?: uri.lastPathSegment
+}
+
+private enum class SogTestRendererMode(val label: String) {
+    GLES("GLES"),
+    VULKAN("Vulkan"),
+    WEB("WebView")
+}
+
+private fun SogTestRendererMode.nativeBackendMode(): NativeGaussianBackendMode {
+    return when (this) {
+        SogTestRendererMode.VULKAN -> NativeGaussianBackendMode.VULKAN
+        else -> NativeGaussianBackendMode.GLES
+    }
 }
 
 private const val MIN_TEST_SPLATS = 60_000

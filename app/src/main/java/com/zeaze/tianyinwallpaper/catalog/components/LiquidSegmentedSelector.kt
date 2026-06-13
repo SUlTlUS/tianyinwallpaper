@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -84,7 +85,7 @@ fun <T> LiquidSegmentedSelector(
     if (options.isEmpty()) return
 
     val tabsCount = options.size
-    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+    val accentColor = MaterialTheme.colors.primary
     val selectedTextColor = if (isLightTheme) Color(0xFF1A1A1F) else Color(0xFFF5F5FA)
     val unselectedTextColor = if (isLightTheme) Color(0xFF2A2A33).copy(alpha = 0.7f) else Color(0xFFF5F5FA).copy(alpha = 0.72f)
     val trackColor = if (isLightTheme) Color(0xFFF7F8FA) else Color(0xFF2A2A2E)

@@ -24,21 +24,25 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
@@ -67,6 +71,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -92,6 +98,8 @@ import com.zeaze.tianyinwallpaper.update.AppUpdateManager
 import com.zeaze.tianyinwallpaper.update.UpdateDialog
 import com.zeaze.tianyinwallpaper.update.UpdateDialogState
 import com.zeaze.tianyinwallpaper.utils.RasterPrefs
+import com.zeaze.tianyinwallpaper.utils.AppAccentColor
+import com.zeaze.tianyinwallpaper.utils.AppAccentColors
 import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
 import kotlinx.coroutines.launch
 
@@ -107,6 +115,8 @@ private sealed class SettingsDialogState {
 fun SettingRouteScreen(
     useDarkTheme: Boolean,
     onThemeModeChange: (Int) -> Unit = {},
+    accentColorKey: String = AppAccentColors.DEFAULT_KEY,
+    onAccentColorChange: (String) -> Unit = {},
     onOpenAppInfo: () -> Unit = {},
     onOpenCorrugatedTest: () -> Unit = {},
     onOpenPlyModelTest: () -> Unit = {}
@@ -280,7 +290,7 @@ fun SettingRouteScreen(
             LiquidSegmentedOption(WallpaperClockColorMode.DARK_CLOCK, "深色时钟")
         )
     }
-    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+    val accentColor = AppAccentColors.resolve(accentColorKey, useDarkTheme)
     val containerColor = if (isLightTheme) {
         Color(0xFFF2F3F7).copy(alpha = 0.78f)
     } else {
@@ -294,6 +304,10 @@ fun SettingRouteScreen(
     }
     val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
     val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val scrollState = rememberScrollState()
+    val collapsedTitleProgress = (scrollState.value / 56f).coerceIn(0f, 1f)
+    val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+    val collapsedTitleBarHeight = statusBarTopDp + 56.dp
 
     Box(modifier = Modifier.fillMaxSize()) {
         // Capture layer: Move settings content inside to allow dialog backdrop sampling
@@ -311,20 +325,12 @@ fun SettingRouteScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .statusBarsPadding()
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text(
-                    text = "设置",
-                    style = TextStyle(
-                        color = contentColor,
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
+                Spacer(modifier = Modifier.height(48.dp))
 
                 // Settings Group 1: General
                 Column(
@@ -389,6 +395,30 @@ fun SettingRouteScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp)
+                            .padding(bottom = 16.dp)
+                    )
+                    Text(
+                        text = "强调色",
+                        style = TextStyle(
+                            color = contentColor,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    )
+                    AccentColorPicker(
+                        selectedKey = accentColorKey,
+                        useDarkTheme = useDarkTheme,
+                        contentColor = contentColor,
+                        onSelected = { option ->
+                            editor.putString(AppAccentColors.PREF_KEY, option.key).apply()
+                            onAccentColorChange(option.key)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
                             .padding(bottom = 16.dp)
                     )
                     Text(
@@ -572,6 +602,62 @@ fun SettingRouteScreen(
                 
                 Spacer(modifier = Modifier.height(110.dp))
             }
+        }
+
+        if (collapsedTitleProgress > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .graphicsLayer { alpha = collapsedTitleProgress }
+                    .height(collapsedTitleBarHeight)
+                    .then(
+                        if (enableLiquidGlass && liquidBackdrop != null) {
+                            Modifier.drawBackdrop(
+                                backdrop = liquidBackdrop,
+                                shape = { RoundedRectangle(0.dp) },
+                                effects = {
+                                    colorControls(
+                                        brightness = if (isLightTheme) 0.16f else 0f,
+                                        saturation = 1.35f
+                                    )
+                                    blur(if (isLightTheme) 18f.dp.toPx() else 10f.dp.toPx())
+                                    lens(0f, 18f.dp.toPx(), depthEffect = true)
+                                },
+                                highlight = { Highlight.Plain },
+                                onDrawSurface = { drawRect(containerColor) }
+                            )
+                        } else {
+                            Modifier.background(containerColor)
+                        }
+                    )
+            )
+        }
+
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(collapsedTitleBarHeight)
+                .align(Alignment.TopCenter)
+        ) {
+            Text(
+                text = "设置",
+                style = TextStyle(
+                    color = contentColor,
+                    fontSize = (32f + (17f - 32f) * collapsedTitleProgress).sp,
+                    fontWeight = if (collapsedTitleProgress > 0.6f) FontWeight.SemiBold else FontWeight.Bold
+                ),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .graphicsLayer {
+                        val startX = with(density) { 16.dp.toPx() }
+                        val endX = with(density) { (maxWidth / 2f - 18.dp).toPx() }
+                        val startY = with(density) { (statusBarTopDp + 16.dp).toPx() }
+                        val endY = with(density) { (statusBarTopDp + 17.dp).toPx() }
+                        translationX = startX + (endX - startX) * collapsedTitleProgress
+                        translationY = startY + (endY - startY) * collapsedTitleProgress
+                    }
+            )
         }
 
         if (renderAppInfoPage || showAppInfoPage) {
@@ -1440,6 +1526,57 @@ fun AppInfoRouteScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AccentColorPicker(
+    selectedKey: String,
+    useDarkTheme: Boolean,
+    contentColor: Color,
+    onSelected: (AppAccentColor) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val selected = AppAccentColors.find(selectedKey)
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AppAccentColors.presets.forEach { option ->
+                val isSelected = option.key == selected.key
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .border(
+                            width = 2.dp,
+                            color = if (isSelected) contentColor else Color.Transparent,
+                            shape = CircleShape
+                        )
+                        .padding(4.dp)
+                        .background(option.resolve(useDarkTheme), CircleShape)
+                        .clickable { onSelected(option) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color.White, CircleShape)
+                        )
+                    }
+                }
+            }
+        }
+        BasicText(
+            selected.label,
+            style = TextStyle(contentColor.copy(alpha = 0.62f), 13.sp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp)
+                .wrapContentHeight(Alignment.CenterVertically)
+        )
     }
 }
 

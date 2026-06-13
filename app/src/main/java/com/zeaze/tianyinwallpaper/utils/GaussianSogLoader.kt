@@ -18,6 +18,7 @@ import java.nio.IntBuffer
 import java.nio.charset.StandardCharsets
 import java.util.Arrays
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
@@ -35,6 +36,13 @@ object GaussianSogLoader {
     private const val MIN_SPLAT_LIMIT = 10_000
     private const val MAX_SPLAT_LIMIT = 1_500_000
     private const val DEPTH_SIGN_SAMPLE_COUNT = 4096
+    private val backgroundColorCache = ConcurrentHashMap<String, SogBackgroundColor>()
+
+    data class SogBackgroundColor(
+        val red: Float,
+        val green: Float,
+        val blue: Float
+    )
 
     private data class ImageData(
         val width: Int,
@@ -451,6 +459,80 @@ object GaussianSogLoader {
             readBundledFiles(context, input)
         } ?: error("Cannot open SOG uri: $uriString")
         return parseGpuScene(files, maxSplats, viewportAspect)
+    }
+
+    fun loadBackgroundColorOrThrow(context: Context, uriString: String): SogBackgroundColor {
+        backgroundColorCache[uriString]?.let { return it }
+        if (uriString.isBlank()) error("Empty SOG uri")
+        val color = context.contentResolver.openInputStream(Uri.parse(uriString))?.use { input ->
+            loadBackgroundColorFromInput(context, input, 0)
+        } ?: error("Cannot open SOG uri: $uriString")
+        backgroundColorCache[uriString] = color
+        return color
+    }
+
+    private fun loadBackgroundColorFromInput(
+        context: Context,
+        input: InputStream,
+        depth: Int
+    ): SogBackgroundColor {
+        require(depth <= 2) { "SOG nesting is too deep" }
+        return withBundledZip(context, input) { zip, zipIndex ->
+            val metaEntry = zipIndex.findEntry("meta.json", allowBaseName = true)
+            if (metaEntry != null) {
+                return@withBundledZip parseBackgroundColor(readBundledFiles(zip, zipIndex))
+            }
+            val nested = zipIndex.entries.firstOrNull { entry ->
+                entryBaseName(entry.name).lowercase(Locale.US).endsWith(".sog")
+            } ?: error("SOG background source has no meta.json or nested SOG")
+            val bytes = zip.getInputStream(nested).use { it.readBytes() }
+            loadBackgroundColorFromInput(context, ByteArrayInputStream(bytes), depth + 1)
+        }
+    }
+
+    private fun parseBackgroundColor(files: Map<String, ByteArray>): SogBackgroundColor {
+        val metaBytes = files.findEntry("meta.json") ?: error("SOG missing meta.json")
+        val meta = JSON.parseObject(String(metaBytes, StandardCharsets.UTF_8))
+        require(meta.getIntValue("version") == 2) { "Unsupported SOG version" }
+        val count = meta.getIntValue("count")
+        require(count > 0) { "SOG has no splats" }
+
+        val meansMeta = meta.getJSONObject("means") ?: error("SOG missing means metadata")
+        val meansFiles = meansMeta.requiredFiles("means", 2)
+        val meansL = files.decodeImage(meansFiles[0])
+        val meansU = files.decodeImage(meansFiles[1])
+        requireSameImageShape("means", meansL, meansU)
+        val mins = meansMeta.requiredFloatArray("means.mins", "mins", 3)
+        val maxs = meansMeta.requiredFloatArray("means.maxs", "maxs", 3)
+        val flipZ = shouldFlipDepth(count, meansL, meansU, mins, maxs)
+
+        val sh0Meta = meta.getJSONObject("sh0") ?: error("SOG missing sh0 metadata")
+        val sh0Image = files.decodeImage(sh0Meta.requiredFiles("sh0", 1)[0])
+        val sh0Codebook = sh0Meta.requiredCodebook("sh0")
+        require(count <= min(min(meansL.count, meansU.count), sh0Image.count)) {
+            "SOG count exceeds background source image size"
+        }
+
+        var red = 0f
+        var green = 0f
+        var blue = 0f
+        var weight = 0f
+        repeat(count) { index ->
+            val z = decodePosition(index, 2, meansL, meansU, mins, maxs)
+                .let { if (flipZ) -it else it }
+            val alpha = sh0Image.channel(index, 3) / 255f
+            if (!z.isFinite() || z <= 0.001f || alpha < 0.015f) return@repeat
+            red += shToColor(sh0Codebook[sh0Image.channel(index, 0)]) * alpha
+            green += shToColor(sh0Codebook[sh0Image.channel(index, 1)]) * alpha
+            blue += shToColor(sh0Codebook[sh0Image.channel(index, 2)]) * alpha
+            weight += alpha
+        }
+        val safeWeight = weight.coerceAtLeast(0.0001f)
+        return SogBackgroundColor(
+            red = (red / safeWeight).coerceIn(0f, 1f),
+            green = (green / safeWeight).coerceIn(0f, 1f),
+            blue = (blue / safeWeight).coerceIn(0f, 1f)
+        )
     }
 
     fun loadGpuSceneStagesOrThrow(
