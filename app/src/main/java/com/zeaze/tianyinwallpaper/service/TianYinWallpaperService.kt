@@ -651,20 +651,6 @@ class TianYinWallpaperService : WallpaperService() {
         fun prev() = prevWallpaper(ignoreMinInterval = true, loadContentNow = true)
 
         private fun nextWallpaper(ignoreMinInterval: Boolean = false, loadContentNow: Boolean = true) {
-            val pref = this.pref
-            if (pref != null && (index != -1 || initialLoadCompleted.get())) {
-                val mixedItems = MixedWallpaperPlaylist.load(pref)
-                if (mixedItems.size > 1) {
-                    if (!ignoreMinInterval && !canSwitchByMinInterval()) {
-                        Log.d(TAG, "nextWallpaper blocked by minTime")
-                        return
-                    }
-                    if (MixedWallpaperPlaylist.switchRelative(applicationContext, pref, 1)) {
-                        markSwitchTimestamp()
-                        return
-                    }
-                }
-            }
             val list = this.list ?: return
             if (list.isEmpty()) return
 
@@ -786,29 +772,7 @@ class TianYinWallpaperService : WallpaperService() {
             mediaPlayer?.setVolume(volume, volume)
         }
 
-        fun updateCurrentClockColorMode(mode: Int) {
-            val currentList = list
-            if (currentList != null && index in currentList.indices) {
-                currentList[index].clockColorMode = mode
-                updateCurrentWallpaperColors(currentList[index])
-            }
-        }
-
         private fun prevWallpaper(ignoreMinInterval: Boolean = false, loadContentNow: Boolean = true) {
-            val pref = this.pref
-            if (pref != null && (index != -1 || initialLoadCompleted.get())) {
-                val mixedItems = MixedWallpaperPlaylist.load(pref)
-                if (mixedItems.size > 1) {
-                    if (!ignoreMinInterval && !canSwitchByMinInterval()) {
-                        Log.d(TAG, "prevWallpaper blocked by minTime")
-                        return
-                    }
-                    if (MixedWallpaperPlaylist.switchRelative(applicationContext, pref, -1)) {
-                        markSwitchTimestamp()
-                        return
-                    }
-                }
-            }
             val list = this.list ?: return
             if (list.isEmpty()) return
 
@@ -984,7 +948,7 @@ class TianYinWallpaperService : WallpaperService() {
             )?.takeIf { !it.isRecycled }?.copy(Bitmap.Config.ARGB_8888, false)
         }
 
-        private fun updateCurrentWallpaperColors() {
+        fun updateCurrentWallpaperColors() {
             list?.getOrNull(index)?.let { updateCurrentWallpaperColors(it) }
         }
 
@@ -992,7 +956,7 @@ class TianYinWallpaperService : WallpaperService() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
             currentWallpaperColors = WallpaperClockColorMode.wallpaperColorsFor(
                 applicationContext,
-                model.clockColorMode
+                WallpaperClockColorMode.FOLLOW_GLOBAL
             )
             Handler(mainLooper).post { notifyColorsChanged() }
         }
@@ -1024,11 +988,7 @@ class TianYinWallpaperService : WallpaperService() {
                 if (engine != null) {
                     engine.prev()
                 } else {
-                    MixedWallpaperPlaylist.switchRelative(
-                        applicationContext,
-                        getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
-                        -1
-                    )
+                    switchRegularWallpaperIndex(-1)
                 }
             }
             ACTION_NEXT_WALLPAPER -> {
@@ -1036,11 +996,7 @@ class TianYinWallpaperService : WallpaperService() {
                 if (engine != null) {
                     engine.next()
                 } else {
-                    MixedWallpaperPlaylist.switchRelative(
-                        applicationContext,
-                        getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
-                        1
-                    )
+                    switchRegularWallpaperIndex(1)
                 }
             }
             ACTION_REFRESH_CURRENT -> activeEngine?.refreshCurrentFromStorage()
@@ -1061,11 +1017,7 @@ class TianYinWallpaperService : WallpaperService() {
                 activeEngine?.updateCurrentVolume(volume)
             }
             ACTION_UPDATE_CLOCK_COLOR_MODE -> {
-                val mode = intent.getIntExtra(
-                    EXTRA_CLOCK_COLOR_MODE,
-                    WallpaperClockColorMode.FOLLOW_GLOBAL
-                )
-                activeEngine?.updateCurrentClockColorMode(mode)
+                activeEngine?.updateCurrentWallpaperColors()
             }
             ACTION_UPDATE_INDEX -> {
                 val idx = intent.getIntExtra(EXTRA_INDEX, -1)
@@ -1073,6 +1025,21 @@ class TianYinWallpaperService : WallpaperService() {
             }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    private fun switchRegularWallpaperIndex(delta: Int): Boolean {
+        val pref = getSharedPreferences(App.TIANYIN, MODE_PRIVATE)
+        val items = runCatching {
+            JSON.parseArray(
+                FileUtil.loadData(applicationContext, FileUtil.wallpaperPath),
+                TianYinWallpaperModel::class.java
+            ) ?: emptyList()
+        }.getOrDefault(emptyList())
+        if (items.isEmpty()) return false
+        val current = pref.getInt(PREF_CURRENT_INDEX, 0).coerceIn(0, items.lastIndex)
+        val next = (current + delta).mod(items.size)
+        pref.edit().putInt(PREF_CURRENT_INDEX, next).apply()
+        return true
     }
 
     companion object {
@@ -1088,7 +1055,6 @@ class TianYinWallpaperService : WallpaperService() {
         const val EXTRA_INDEX = "extra_index"
         const val EXTRA_BRIGHTNESS = "extra_brightness"
         const val EXTRA_VOLUME = "extra_volume"
-        const val EXTRA_CLOCK_COLOR_MODE = "extra_clock_color_mode"
         const val EXTRA_SCALE = "extra_scale"
         const val EXTRA_OFFSET_X = "extra_offset_x"
         const val EXTRA_OFFSET_Y = "extra_offset_y"

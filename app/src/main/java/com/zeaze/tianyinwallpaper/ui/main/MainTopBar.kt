@@ -1,7 +1,6 @@
 package com.zeaze.tianyinwallpaper.ui.main
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +35,7 @@ import com.zeaze.tianyinwallpaper.R
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButtonGroup
+import com.zeaze.tianyinwallpaper.catalog.components.PlainFallbackStyle
 
 /**
  * 选择模式状态数据类，用于 RxBus 通信
@@ -105,8 +105,8 @@ private fun TopCircleLiquidButton(
             Surface(
                 modifier = modifier.size(size),
                 shape = CircleShape,
-                color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-                border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+                color = PlainFallbackStyle.surface(isLightTheme = !isDark),
+                border = PlainFallbackStyle.border(isLightTheme = !isDark)
             ) {
                 Box(
                     modifier = Modifier
@@ -155,8 +155,7 @@ private fun TopCapsuleLiquidButton(
     if (visible) {
         val fallbackColor = when {
             isDestructive -> Color(0xFFFF4D4F)
-            isDark -> Color(0x33000000)
-            else -> Color(0xAAFFFFFF)
+            else -> PlainFallbackStyle.surface(isLightTheme = !isDark)
         }
         val fallbackTextColor = if (isDestructive) Color.White else textColor
 
@@ -185,10 +184,7 @@ private fun TopCapsuleLiquidButton(
                     .clickable(onClick = onClick),
                 shape = Capsule(),
                 color = fallbackColor,
-                border = if (isDestructive) null else BorderStroke(
-                    1.dp,
-                    if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF)
-                )
+                border = if (isDestructive) null else PlainFallbackStyle.border(isLightTheme = !isDark)
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -243,8 +239,8 @@ private fun TopSortFilterLiquidGroup(
                 .height(IosTopButtonHeight)
                 .width(IosTopButtonHeight * buttonCount),
             shape = Capsule(),
-            color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-            border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+            color = PlainFallbackStyle.surface(isLightTheme = !isDark),
+            border = PlainFallbackStyle.border(isLightTheme = !isDark)
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),

@@ -224,31 +224,45 @@ class StaticRasterWallpaperService : WallpaperService() {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
             currentWallpaperColors = WallpaperClockColorMode.wallpaperColorsFor(
                 applicationContext,
-                group.clockColorMode
+                WallpaperClockColorMode.FOLLOW_GLOBAL
             )
             Handler(mainLooper).post { notifyColorsChanged() }
+        }
+
+        fun refreshCurrentWallpaperColors() {
+            group?.let { updateCurrentWallpaperColors(it) }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_RELOAD -> activeEngine?.reload()
+            TianYinWallpaperService.ACTION_UPDATE_CLOCK_COLOR_MODE -> {
+                activeEngine?.refreshCurrentWallpaperColors()
+            }
             TianYinWallpaperService.ACTION_PREV_WALLPAPER -> {
-                MixedWallpaperPlaylist.switchRelative(
-                    applicationContext,
-                    getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
-                    -1
-                )
+                switchToRegularWallpaper(TianYinWallpaperService.ACTION_PREV_WALLPAPER)
             }
             TianYinWallpaperService.ACTION_NEXT_WALLPAPER -> {
-                MixedWallpaperPlaylist.switchRelative(
-                    applicationContext,
-                    getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
-                    1
-                )
+                switchToRegularWallpaper(TianYinWallpaperService.ACTION_NEXT_WALLPAPER)
             }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    private fun switchToRegularWallpaper(action: String) {
+        startService(Intent(applicationContext, TianYinWallpaperService::class.java).apply {
+            this.action = action
+        })
+        runCatching {
+            val manager = android.app.WallpaperManager.getInstance(applicationContext)
+            val component = android.content.ComponentName(applicationContext, TianYinWallpaperService::class.java)
+            val method = manager.javaClass.getMethod(
+                "setWallpaperComponent",
+                android.content.ComponentName::class.java
+            )
+            method.invoke(manager, component)
+        }
     }
 
     companion object {

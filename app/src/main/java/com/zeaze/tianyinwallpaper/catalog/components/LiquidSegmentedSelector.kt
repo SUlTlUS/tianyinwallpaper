@@ -27,10 +27,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -86,7 +89,7 @@ fun <T> LiquidSegmentedSelector(
 
     val tabsCount = options.size
     val accentColor = MaterialTheme.colors.primary
-    val selectedTextColor = if (isLightTheme) Color(0xFF1A1A1F) else Color(0xFFF5F5FA)
+    val selectedTextColor = accentColor
     val unselectedTextColor = if (isLightTheme) Color(0xFF2A2A33).copy(alpha = 0.7f) else Color(0xFFF5F5FA).copy(alpha = 0.72f)
     val trackColor = if (isLightTheme) Color(0xFFF7F8FA) else Color(0xFF2A2A2E)
     val trackShape = RoundedCornerShape(21.dp)
@@ -106,6 +109,7 @@ fun <T> LiquidSegmentedSelector(
         val tabWidth = (availableWidth / tabsCount).coerceAtLeast(0f)
         val maxX = (availableWidth - tabWidth).coerceAtLeast(0f)
         val animationScope = rememberCoroutineScope()
+        val haptic = LocalHapticFeedback.current
 
         var currentIndex by remember {
             mutableIntStateOf(options.indexOfFirst { it.value == selectedValue() }.coerceAtLeast(0))
@@ -148,6 +152,7 @@ fun <T> LiquidSegmentedSelector(
             snapshotFlow { currentIndex }
                 .drop(1)
                 .collectLatest { index ->
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     dampedDragAnimation.animateToValue(index.toFloat())
                     onValueSelected(options[index].value)
                 }
@@ -202,6 +207,7 @@ fun <T> LiquidSegmentedSelector(
                         SegmentedTab(
                             label = option.label,
                             color = if (index == currentIndex) selectedTextColor else unselectedTextColor,
+                            fontWeight = if (index == currentIndex) FontWeight.Bold else FontWeight.Normal,
                             onClick = { currentIndex = index }
                         )
                     }
@@ -224,6 +230,7 @@ fun <T> LiquidSegmentedSelector(
                         SegmentedTab(
                             label = option.label,
                             color = selectedTextColor,
+                            fontWeight = FontWeight.Bold,
                             onClick = { currentIndex = index }
                         )
                     }
@@ -258,6 +265,7 @@ fun <T> LiquidSegmentedSelector(
                     InnerShadow(radius = 8f.dp * progress, alpha = progress)
                 },
                 onDrawSurface = {
+                    drawRect(accentColor.copy(alpha = 0.1f))
                     if (isLightTheme) {
                         drawRect(Color.Black.copy(alpha = 0.05f))
                     } else {
@@ -298,12 +306,13 @@ fun <T> LiquidSegmentedSelector(
 private fun RowScope.SegmentedTab(
     label: String,
     color: Color,
+    fontWeight: FontWeight,
     onClick: () -> Unit
 ) {
     LiquidBottomTab(onClick = onClick) {
         androidx.compose.foundation.text.BasicText(
             text = label,
-            style = TextStyle(color = color, fontSize = 14.sp)
+            style = TextStyle(color = color, fontSize = 14.sp, fontWeight = fontWeight)
         )
     }
 }

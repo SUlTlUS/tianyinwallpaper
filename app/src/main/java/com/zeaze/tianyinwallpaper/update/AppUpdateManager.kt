@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit
  */
 object AppUpdateManager {
     private const val TAG = "AppUpdateManager"
+    const val PREF_CHECK_UPDATE_ON_START = "pref_check_update_on_start"
     
     // 更新信息 JSON 文件的远程地址列表 (会依次尝试)
     // 主地址: GitHub raw (带时间戳防缓存)

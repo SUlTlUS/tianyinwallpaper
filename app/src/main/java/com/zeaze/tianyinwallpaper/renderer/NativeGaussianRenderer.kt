@@ -2,12 +2,24 @@ package com.zeaze.tianyinwallpaper.renderer
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.util.Log
 import android.view.MotionEvent
 import android.view.Surface
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSogLoader
 import com.zeaze.tianyinwallpaper.utils.SuperSplatWebParams
+
+data class GaussianRenderParams(
+    val splatScale: Float = 1f,
+    val globalOpacity: Float = 1f,
+    val alphaFalloff: Float = 1f,
+    val minPointSize: Float = 1f,
+    val maxPointSize: Float = 64f,
+    val cameraZoom: Float = 1f,
+    val centerOffsetX: Float = 0f,
+    val centerOffsetY: Float = 0f,
+    val focusDepthOffset: Float = 0f,
+    val useLayerCache: Boolean = true
+)
 
 interface NativeGaussianRenderer {
     fun start(surface: Surface)
@@ -21,10 +33,11 @@ interface NativeGaussianRenderer {
     fun dispatchTouchEvent(event: MotionEvent): Boolean = false
     fun setWebLoadingListener(listener: ((Boolean) -> Unit)?) = Unit
     fun setWebCenterOffsetListener(listener: ((Float, Float) -> Unit)?) = Unit
+    fun setWebCameraDefaultsListener(listener: ((Float, Float) -> Unit)?) = Unit
     fun setBackdropFrameListener(listener: ((Bitmap) -> Unit)?) = Unit
     fun updateTilt(x: Float, y: Float)
     fun updateParams(parallaxStrength: Float, blurStrength: Float)
-    fun updateGaussianParams(params: DepthGLRenderer.GaussianRenderParams)
+    fun updateGaussianParams(params: GaussianRenderParams)
     fun resetCamera()
     fun showLoading(enabled: Boolean)
     fun requestRender()
@@ -32,46 +45,16 @@ interface NativeGaussianRenderer {
 }
 
 enum class NativeGaussianBackendMode {
-    GLES,
-    VULKAN,
-    WEB,
-    AUTO
+    WEB
 }
 
 object NativeGaussianRendererFactory {
-    private const val TAG = "NativeGaussianRenderer"
-
     fun create(
         context: Context,
-        mode: NativeGaussianBackendMode = NativeGaussianBackendMode.GLES
+        mode: NativeGaussianBackendMode = NativeGaussianBackendMode.WEB
     ): NativeGaussianRenderer {
         return when (mode) {
-            NativeGaussianBackendMode.GLES -> {
-                Log.d(TAG, "using GLES Gaussian renderer mode=$mode")
-                DepthGLRenderer()
-            }
-            NativeGaussianBackendMode.VULKAN -> {
-                if (VulkanGaussianRenderer.isSupported(context)) {
-                    Log.d(TAG, "using Vulkan Gaussian renderer mode=$mode")
-                    VulkanGaussianRenderer(context.applicationContext)
-                } else {
-                    Log.w(TAG, "Vulkan requested but unsupported; using GLES Gaussian renderer")
-                    DepthGLRenderer()
-                }
-            }
-            NativeGaussianBackendMode.WEB -> {
-                Log.d(TAG, "using WebView Gaussian renderer mode=$mode")
-                WebGaussianWallpaperRenderer(context)
-            }
-            NativeGaussianBackendMode.AUTO -> {
-                if (VulkanGaussianRenderer.isSupported(context)) {
-                    Log.d(TAG, "using Vulkan Gaussian renderer mode=$mode")
-                    VulkanGaussianRenderer(context.applicationContext)
-                } else {
-                    Log.d(TAG, "using GLES Gaussian renderer mode=$mode")
-                    DepthGLRenderer()
-                }
-            }
+            NativeGaussianBackendMode.WEB -> WebGaussianWallpaperRenderer(context)
         }
     }
 }

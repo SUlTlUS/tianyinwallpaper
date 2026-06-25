@@ -6,16 +6,8 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,8 +29,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.CircularProgressIndicator
+import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
@@ -58,12 +50,22 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.shapes.Capsule
+import com.zeaze.tianyinwallpaper.App
+import com.zeaze.tianyinwallpaper.R
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
+import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.components.PlainFallbackStyle
+import com.zeaze.tianyinwallpaper.catalog.components.PlainIconButton
+import com.zeaze.tianyinwallpaper.utils.DepthPrefs
 import com.zeaze.tianyinwallpaper.utils.GradioMcpSogGenerator
+import com.zeaze.tianyinwallpaper.utils.LiquidGlassPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,8 +78,9 @@ import java.util.Locale
 fun DepthOnlineGenerateRoute(
     modifier: Modifier = Modifier,
     useDarkTheme: Boolean,
+    enableLiquidGlass: Boolean = true,
     onBack: () -> Unit,
-    onImportSog: (Uri, String?) -> Unit
+    onImportSog: (Uri, String?, String) -> Unit
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -88,6 +91,9 @@ fun DepthOnlineGenerateRoute(
     val pageBackgroundColor = if (isLight) Color.White else Color(0xFF0A0A0C)
     val groupBackgroundColor = if (isLight) Color(0xFFF2F3F7) else Color(0xFF1C1C20).copy(alpha = 0.94f)
     val subtleGroupBackground = if (isLight) Color(0xFFE8EBF2) else Color(0xFF25252A).copy(alpha = 0.88f)
+    val useLiquidGlass = enableLiquidGlass && LiquidGlassPrefs.isEnabled(context)
+    val topBackdrop = if (useLiquidGlass) rememberLayerBackdrop() else null
+    val topSurfaceColor = if (isLight) Color.White.copy(alpha = 0.3f) else Color.Black.copy(alpha = 0.3f)
     val statusBarTopPaddingDp = remember(context) {
         val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
         val px = if (id > 0) context.resources.getDimensionPixelSize(id) else 0
@@ -95,17 +101,24 @@ fun DepthOnlineGenerateRoute(
     }
 
     var history by remember { mutableStateOf<List<GradioMcpSogGenerator.SogGenerationRecord>>(emptyList()) }
-    var showTokenInput by remember { mutableStateOf(false) }
-    var apiTokenText by remember {
-        mutableStateOf(GradioMcpSogGenerator.getModelScopeToken(context.applicationContext) ?: "")
-    }
+    var importedRecordIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     val pollingRecordIds = remember { mutableStateListOf<String>() }
+    val wallpaperPrefs = remember(context) {
+        context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+    }
 
     fun refreshHistory() {
         coroutineScope.launch {
-            history = withContext(Dispatchers.IO) {
-                GradioMcpSogGenerator.getHistory(context.applicationContext)
+            val snapshot = withContext(Dispatchers.IO) {
+                val records = GradioMcpSogGenerator.getHistory(context.applicationContext)
+                val importedIds = DepthPrefs.findImportedOnlineRecordIds(
+                    wallpaperPrefs,
+                    records.associate { it.id to it.sogLocalPath }
+                )
+                records to importedIds
             }
+            history = snapshot.first
+            importedRecordIds = snapshot.second
         }
     }
 
@@ -125,9 +138,16 @@ fun DepthOnlineGenerateRoute(
     }
 
     LaunchedEffect(Unit) {
-        history = withContext(Dispatchers.IO) {
-            GradioMcpSogGenerator.getHistory(context.applicationContext)
+        val snapshot = withContext(Dispatchers.IO) {
+            val records = GradioMcpSogGenerator.getHistory(context.applicationContext)
+            val importedIds = DepthPrefs.findImportedOnlineRecordIds(
+                wallpaperPrefs,
+                records.associate { it.id to it.sogLocalPath }
+            )
+            records to importedIds
         }
+        history = snapshot.first
+        importedRecordIds = snapshot.second
         history.filter { record ->
             !record.sogDownloaded &&
                 (record.status == "generating" ||
@@ -138,30 +158,50 @@ fun DepthOnlineGenerateRoute(
         }.forEach { startRecordResume(it.id) }
     }
 
-    BackHandler(onBack = onBack)
-
-    val onlineImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            val fileName = queryOnlineDisplayName(context, uri)
-            val recordId = GradioMcpSogGenerator.createPendingRecord(context.applicationContext, uri, fileName)
-            refreshHistory()
+    val onlineImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
             coroutineScope.launch {
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        GradioMcpSogGenerator.submitTaskForRecord(context.applicationContext, recordId, uri)
-                    }
-                    history = withContext(Dispatchers.IO) {
-                        GradioMcpSogGenerator.getHistory(context.applicationContext)
-                    }
-                    startRecordResume(recordId)
-                }.onFailure {
-                    withContext(Dispatchers.IO) {
-                        GradioMcpSogGenerator.updateRecord(context.applicationContext, recordId) { rec ->
-                            rec.copy(status = "failed", errorMessage = it.message?.take(100))
+                uris.forEach { uri ->
+                    val fileName = queryOnlineDisplayName(context, uri)
+                    var recordId: String? = null
+                    runCatching {
+                        val stableUri = withContext(Dispatchers.IO) {
+                            GradioMcpSogGenerator.copyInputImageToCache(context.applicationContext, uri, fileName)
                         }
-                        history = GradioMcpSogGenerator.getHistory(context.applicationContext)
+                        val createdRecordId = GradioMcpSogGenerator.createPendingRecord(
+                            context.applicationContext,
+                            stableUri,
+                            fileName
+                        )
+                        recordId = createdRecordId
+                        refreshHistory()
+                        withContext(Dispatchers.IO) {
+                            GradioMcpSogGenerator.submitTaskForRecord(
+                                context.applicationContext,
+                                createdRecordId,
+                                stableUri
+                            )
+                        }
+                        history = withContext(Dispatchers.IO) {
+                            GradioMcpSogGenerator.getHistory(context.applicationContext)
+                        }
+                        startRecordResume(createdRecordId)
+                    }.onFailure {
+                        val failedRecordId = recordId
+                        if (failedRecordId != null) {
+                            withContext(Dispatchers.IO) {
+                                GradioMcpSogGenerator.updateRecord(context.applicationContext, failedRecordId) { rec ->
+                                    rec.copy(status = "failed", errorMessage = it.message?.take(100))
+                                }
+                                history = GradioMcpSogGenerator.getHistory(context.applicationContext)
+                            }
+                        }
+                        Toast.makeText(
+                            context,
+                            "${fileName ?: "图片"}: ${it.message ?: "Submit task failed"}",
+                            Toast.LENGTH_LONG
+                        ).show()
                     }
-                    Toast.makeText(context, it.message ?: "提交任务失败", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -178,7 +218,12 @@ fun DepthOnlineGenerateRoute(
                     GradioMcpSogGenerator.getHistory(context.applicationContext)
                 }
                 if (updated.sogDownloaded && updated.sogLocalPath != null) {
-                    onImportSog(Uri.fromFile(File(updated.sogLocalPath)), updated.inputImageLocalUri)
+                    onImportSog(
+                        Uri.fromFile(File(updated.sogLocalPath)),
+                        updated.inputImageLocalUri,
+                        updated.id
+                    )
+                    importedRecordIds = importedRecordIds + updated.id
                 }
             }.onFailure {
                 Toast.makeText(context, it.message ?: "下载失败", Toast.LENGTH_LONG).show()
@@ -190,7 +235,12 @@ fun DepthOnlineGenerateRoute(
 
     fun importRecord(record: GradioMcpSogGenerator.SogGenerationRecord) {
         if (record.sogLocalPath != null) {
-            onImportSog(Uri.fromFile(File(record.sogLocalPath)), record.inputImageLocalUri)
+            onImportSog(
+                Uri.fromFile(File(record.sogLocalPath)),
+                record.inputImageLocalUri,
+                record.id
+            )
+            importedRecordIds = importedRecordIds + record.id
         }
     }
 
@@ -224,148 +274,91 @@ fun DepthOnlineGenerateRoute(
         }
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .background(pageBackgroundColor)
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(
-            top = statusBarTopPaddingDp + 16.dp,
-            bottom = 28.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    fun clearAllRecords() {
+        coroutineScope.launch {
+            withContext(Dispatchers.IO) {
+                GradioMcpSogGenerator.clearHistory(context.applicationContext)
+            }
+            history = emptyList()
+            importedRecordIds = emptySet()
+            pollingRecordIds.clear()
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .let { base ->
+                    if (useLiquidGlass && topBackdrop != null) base.layerBackdrop(topBackdrop) else base
+                }
+        ) {
+            Box(Modifier.fillMaxSize().background(pageBackgroundColor))
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(
+                    top = statusBarTopPaddingDp + 76.dp,
+                    bottom = 28.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "‹ 返回",
-                    color = accentColor,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clip(Capsule())
-                        .clickable(onClick = onBack)
-                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                )
-                Text(
-                    text = "在线生成 SOG",
+                    text = "在线生成景深壁纸",
                     style = TextStyle(contentColor, 32.sp, fontWeight = FontWeight.Bold)
                 )
                 Text(
-                    text = "上传图片生成 Gaussian SOG；中断、失败或下载断开后可从当前阶段继续。",
+                    text = "无需后台运行",
                     color = contentColor.copy(alpha = 0.55f),
                     fontSize = 13.sp,
                     lineHeight = 18.sp
                 )
-            }
-        }
+                    }
+                }
 
-        item {
+                item {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(groupBackgroundColor)
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("生成", color = contentColor, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+
                 OnlineDialogButton(
-                    "选择图片生成 SOG",
+                    "选择图片",
                     accentColor,
                     Color.White,
-                    { onlineImagePicker.launch("image/*") },
+                    { onlineImagePicker.launch(arrayOf("image/*")) },
                     Modifier.fillMaxWidth()
                 )
-                Text(
-                    text = "图片会先压缩缩略图到缓存，SOG 生成完成后可直接导入景深壁纸。",
-                    color = contentColor.copy(alpha = 0.46f),
-                    fontSize = 12.sp
-                )
             }
         }
 
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(groupBackgroundColor)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
-                        .clickable { showTokenInput = !showTokenInput }
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("ModelScope SDK Token", color = contentColor, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                        Text(
-                            text = if (apiTokenText.isNotBlank()) "已配置，点击可修改" else "未配置，点击粘贴 ms-… token",
-                            color = if (apiTokenText.isNotBlank()) accentColor else contentColor.copy(alpha = 0.48f),
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 3.dp)
-                        )
-                    }
-                    Text(if (showTokenInput) "▲" else "▼", color = contentColor.copy(alpha = 0.45f), fontSize = 12.sp)
-                }
-
-                AnimatedVisibility(
-                    visible = showTokenInput,
-                    enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                        expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)),
-                    exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                        shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .padding(bottom = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        BasicTextField(
-                            value = apiTokenText,
-                            onValueChange = { apiTokenText = it },
-                            textStyle = TextStyle(color = contentColor, fontSize = 13.sp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(subtleGroupBackground)
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            decorationBox = { innerTextField ->
-                                if (apiTokenText.isBlank()) {
-                                    Text("粘贴 ModelScope SDK Token (ms-…)", color = contentColor.copy(alpha = 0.35f), fontSize = 13.sp)
-                                }
-                                innerTextField()
-                            }
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            Box(Modifier.width(126.dp)) {
-                                OnlineDialogButton(
-                                    "保存 Token",
-                                    accentColor.copy(alpha = 0.9f),
-                                    Color.White,
-                                    {
-                                        GradioMcpSogGenerator.setModelScopeToken(context.applicationContext, apiTokenText.trim())
-                                        GradioMcpSogGenerator.resetMcpState()
-                                        showTokenInput = false
-                                        Toast.makeText(context, "Token 已保存", Toast.LENGTH_SHORT).show()
-                                    },
-                                    Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
+                item {
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("生成记录", color = contentColor, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFF3B30).copy(alpha = if (history.isEmpty()) 0.06f else 0.12f))
+                        .clickable(
+                            enabled = history.isNotEmpty(),
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) { clearAllRecords() }
+                        .padding(8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.delete),
+                        contentDescription = "清空全部生成记录",
+                        modifier = Modifier.fillMaxSize(),
+                        tint = Color(0xFFFF3B30).copy(alpha = if (history.isEmpty()) 0.35f else 1f)
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 Text("${history.size} 条", color = contentColor.copy(alpha = 0.45f), fontSize = 13.sp)
             }
@@ -385,14 +378,15 @@ fun DepthOnlineGenerateRoute(
                 }
             }
         } else {
-            items(history, key = { it.id }) { record ->
+                items(history, key = { it.id }) { record ->
                 val isPolling = record.id in pollingRecordIds
+                val isImported = record.id in importedRecordIds
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
                         .background(groupBackgroundColor)
-                        .clickable(enabled = !isPolling) {
+                        .clickable(enabled = !isPolling && !isImported) {
                             when {
                                 record.status == "completed" && record.sogDownloaded -> importRecord(record)
                                 record.status == "completed" && !record.sogDownloaded -> downloadRecord(record)
@@ -421,7 +415,11 @@ fun DepthOnlineGenerateRoute(
                             when (record.status) {
                                 "pending" -> "${formatOnlineAbsoluteTime(record.createdAt)}  等待中…"
                                 "generating" -> "${formatOnlineAbsoluteTime(record.createdAt)}  生成中…"
-                                "completed" -> if (record.sogDownloaded) "${formatOnlineAbsoluteTime(record.createdAt)}  已下载，可导入" else "${formatOnlineAbsoluteTime(record.createdAt)}  已完成，待下载"
+                                "completed" -> when {
+                                    isImported -> "${formatOnlineAbsoluteTime(record.createdAt)}  已导入"
+                                    record.sogDownloaded -> "${formatOnlineAbsoluteTime(record.createdAt)}  已下载，可导入"
+                                    else -> "${formatOnlineAbsoluteTime(record.createdAt)}  已完成，待下载"
+                                }
                                 "downloading" -> "${formatOnlineAbsoluteTime(record.createdAt)}  下载中…"
                                 "failed" -> "${formatOnlineAbsoluteTime(record.createdAt)}  失败: ${record.errorMessage?.take(30) ?: "未知"}"
                                 else -> "${formatOnlineAbsoluteTime(record.createdAt)}  ${record.status}"
@@ -429,7 +427,7 @@ fun DepthOnlineGenerateRoute(
                             color = when (record.status) {
                                 "pending", "generating", "downloading" -> accentColor
                                 "failed" -> Color(0xFFFF4444)
-                                "completed" -> if (record.sogDownloaded) Color(0xFF4CAF50) else accentColor
+                                "completed" -> if (isImported || record.sogDownloaded) Color(0xFF4CAF50) else accentColor
                                 else -> contentColor.copy(alpha = 0.5f)
                             },
                             fontSize = 12.sp,
@@ -440,6 +438,7 @@ fun DepthOnlineGenerateRoute(
                     Spacer(Modifier.width(8.dp))
                     when {
                         isPolling -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 1.8.dp, color = accentColor)
+                        isImported -> Text("已导入", color = Color(0xFF4CAF50), fontSize = 13.sp)
                         record.status == "completed" && record.sogDownloaded -> OnlineTextAction("导入", Color(0xFF4CAF50)) { importRecord(record) }
                         record.status == "completed" && !record.sogDownloaded -> OnlineTextAction("下载", accentColor) { downloadRecord(record) }
                         record.status == "downloading" -> Text("下载中", color = accentColor, fontSize = 13.sp)
@@ -461,6 +460,37 @@ fun DepthOnlineGenerateRoute(
                     }
                 }
             }
+                }
+            }
+        }
+
+        if (useLiquidGlass && topBackdrop != null) {
+            LiquidButton(
+                onClick = onBack,
+                backdrop = topBackdrop,
+                modifier = Modifier
+                    .padding(top = statusBarTopPaddingDp + 12.dp, start = 12.dp)
+                    .size(44.dp),
+                surfaceColor = topSurfaceColor,
+                buttonHeight = 44.dp,
+                contentPadding = PaddingValues(0.dp),
+                iconRes = R.drawable.back,
+                iconContentDescription = "返回",
+                iconSize = 20.dp,
+                iconTint = contentColor
+            )
+        } else {
+            PlainIconButton(
+                onClick = onBack,
+                iconRes = R.drawable.back,
+                contentDescription = "返回",
+                modifier = Modifier.padding(top = statusBarTopPaddingDp + 12.dp, start = 12.dp),
+                size = 44.dp,
+                iconSize = 20.dp,
+                surfaceColor = PlainFallbackStyle.surface(isLightTheme = isLight),
+                contentColor = contentColor,
+                border = PlainFallbackStyle.border(isLightTheme = isLight)
+            )
         }
     }
 }

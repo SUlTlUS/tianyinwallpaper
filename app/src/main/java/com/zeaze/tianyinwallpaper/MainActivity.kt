@@ -1,6 +1,7 @@
 package com.zeaze.tianyinwallpaper
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Point
@@ -27,7 +28,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -111,11 +111,15 @@ import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabs
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidBottomTabsStyle
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButtonStyle
+import com.zeaze.tianyinwallpaper.catalog.components.PlainCircleButton
+import com.zeaze.tianyinwallpaper.catalog.components.PlainFallbackStyle
 import com.zeaze.tianyinwallpaper.catalog.utils.LiquidMorphPhysics
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberLiquidMorphController
 import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import com.zeaze.tianyinwallpaper.ui.about.AboutRouteScreen
 import com.zeaze.tianyinwallpaper.ui.commom.SaveData
+import com.zeaze.tianyinwallpaper.ui.depth.DepthOnlineGenerateRoute
+import com.zeaze.tianyinwallpaper.ui.main.DepthOnlineSogImportRequest
 import com.zeaze.tianyinwallpaper.ui.main.MainRouteScreen
 import com.zeaze.tianyinwallpaper.ui.main.MainTopBar
 import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperKindFilter
@@ -131,6 +135,7 @@ import com.zeaze.tianyinwallpaper.update.UpdateDialog
 import com.zeaze.tianyinwallpaper.update.UpdateDialogState
 import com.zeaze.tianyinwallpaper.utils.FileUtil
 import com.zeaze.tianyinwallpaper.utils.AppAccentColors
+import com.zeaze.tianyinwallpaper.utils.LiquidGlassPrefs
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -144,8 +149,13 @@ private data class LiquidMoreMenuItem(
 
 private enum class SettingsOverlayPage {
     AppInfo,
+    Usage,
+    Acknowledgements,
+    License,
+    DataStorage,
     CorrugatedTest,
-    SogTest
+    SogTest,
+    Group
 }
 
 private val MainWallpaperKindFilter.iconRes: Int
@@ -167,7 +177,6 @@ class MainActivity : BaseActivity() {
 
     private val bottomTabs: List<BottomTabItem> = listOf(
         BottomTabItem(ROUTE_MAIN, "壁纸", R.drawable.wallpaper, R.drawable.wallpaper_filled),
-        BottomTabItem(ROUTE_ABOUT, "分组", R.drawable.list, R.drawable.list_filled),
         BottomTabItem(ROUTE_SETTING, "设置", R.drawable.setting, R.drawable.setting_filled)
     )
 
@@ -178,7 +187,6 @@ class MainActivity : BaseActivity() {
         private const val PERMISSION_REQUEST_CODE = 1
         private const val REQUEST_CODE_SET_WALLPAPER = 0x001
         private const val ROUTE_MAIN = "main"
-        private const val ROUTE_ABOUT = "about"
         private const val ROUTE_SETTING = "setting"
         private const val ROUTE_CORRUGATED_TEST = "corrugated_test"
         private const val ROUTE_PLY_MODEL_TEST = "ply_model_test"
@@ -188,6 +196,9 @@ class MainActivity : BaseActivity() {
         const val THEME_MODE_DARK = 2
         private const val PREF_MAIN_WALLPAPER_SORT_MODE = "main_wallpaper_sort_mode"
         private const val PREF_MAIN_WALLPAPER_SORT_DIRECTION = "main_wallpaper_sort_direction"
+        private const val PREF_GROUP_WALLPAPER_SORT_MODE = "group_wallpaper_sort_mode"
+        private const val PREF_GROUP_WALLPAPER_SORT_DIRECTION = "group_wallpaper_sort_direction"
+        private const val PREF_GROUP_WALLPAPER_KIND_FILTERS = "group_wallpaper_kind_filters"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -219,6 +230,9 @@ class MainActivity : BaseActivity() {
         var themeMode by remember { mutableStateOf(pref.getInt(PREF_THEME_MODE, THEME_MODE_FOLLOW_SYSTEM)) }
         var accentColorKey by remember {
             mutableStateOf(pref.getString(AppAccentColors.PREF_KEY, AppAccentColors.DEFAULT_KEY) ?: AppAccentColors.DEFAULT_KEY)
+        }
+        var liquidGlassEnabled by remember {
+            mutableStateOf(LiquidGlassPrefs.isSwitchEnabled(this))
         }
         val useDarkTheme = when (themeMode) {
             THEME_MODE_DARK -> true
@@ -259,7 +273,7 @@ class MainActivity : BaseActivity() {
             }
         ) {
             val themeBackgroundColor = if (useDarkTheme) Color(0xFF0A0A0C) else MaterialTheme.colors.background
-            val enableLiquidGlass = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            val enableLiquidGlass = LiquidGlassPrefs.isSupported && liquidGlassEnabled
             val navController = rememberNavController()
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStackEntry?.destination?.route ?: ROUTE_MAIN
@@ -283,6 +297,9 @@ class MainActivity : BaseActivity() {
             var showMoreMenu by remember { mutableStateOf(false) }
             var showSortMenu by remember { mutableStateOf(false) }
             var showFilterMenu by remember { mutableStateOf(false) }
+            var showGroupSortMenu by remember { mutableStateOf(false) }
+            var showGroupFilterMenu by remember { mutableStateOf(false) }
+            var groupSelectionMode by remember { mutableStateOf(false) }
             var selectedSortMode by remember {
                 mutableStateOf(
                     runCatching {
@@ -315,6 +332,38 @@ class MainActivity : BaseActivity() {
                         .toSet()
                 )
             }
+            var groupSelectedSortMode by remember {
+                mutableStateOf(
+                    runCatching {
+                        MainWallpaperSortMode.valueOf(
+                            pref.getString(PREF_GROUP_WALLPAPER_SORT_MODE, MainWallpaperSortMode.Custom.name)
+                                ?: MainWallpaperSortMode.Custom.name
+                        )
+                    }.getOrDefault(MainWallpaperSortMode.Custom)
+                )
+            }
+            var groupSelectedSortDirection by remember {
+                mutableStateOf(
+                    runCatching {
+                        MainWallpaperSortDirection.valueOf(
+                            pref.getString(PREF_GROUP_WALLPAPER_SORT_DIRECTION, MainWallpaperSortDirection.Descending.name)
+                                ?: MainWallpaperSortDirection.Descending.name
+                        )
+                    }.getOrDefault(MainWallpaperSortDirection.Descending)
+                )
+            }
+            var groupSelectedKindFilters by remember {
+                mutableStateOf(
+                    pref.getString(PREF_GROUP_WALLPAPER_KIND_FILTERS, "").orEmpty()
+                        .split(',')
+                        .mapNotNull { name ->
+                            name.takeIf { it.isNotBlank() }?.let {
+                                runCatching { MainWallpaperKindFilter.valueOf(it) }.getOrNull()
+                            }
+                        }
+                        .toSet()
+                )
+            }
             fun persistKindFilters(filters: Set<MainWallpaperKindFilter>) {
                 selectedKindFilters = filters
                 pref.edit()
@@ -323,11 +372,25 @@ class MainActivity : BaseActivity() {
             }
             fun persistSortMode(mode: MainWallpaperSortMode) {
                 selectedSortMode = mode
-                pref.edit().putString(PREF_MAIN_WALLPAPER_SORT_MODE, mode.name).apply()
+                pref.edit().putString(PREF_MAIN_WALLPAPER_SORT_MODE, mode.name).commit()
             }
             fun persistSortDirection(direction: MainWallpaperSortDirection) {
                 selectedSortDirection = direction
                 pref.edit().putString(PREF_MAIN_WALLPAPER_SORT_DIRECTION, direction.name).apply()
+            }
+            fun persistGroupKindFilters(filters: Set<MainWallpaperKindFilter>) {
+                groupSelectedKindFilters = filters
+                pref.edit()
+                    .putString(PREF_GROUP_WALLPAPER_KIND_FILTERS, filters.joinToString(",") { it.name })
+                    .apply()
+            }
+            fun persistGroupSortMode(mode: MainWallpaperSortMode) {
+                groupSelectedSortMode = mode
+                pref.edit().putString(PREF_GROUP_WALLPAPER_SORT_MODE, mode.name).apply()
+            }
+            fun persistGroupSortDirection(direction: MainWallpaperSortDirection) {
+                groupSelectedSortDirection = direction
+                pref.edit().putString(PREF_GROUP_WALLPAPER_SORT_DIRECTION, direction.name).apply()
             }
             var wallpaperSelectionState by remember { mutableStateOf(SelectionBarState(false, false)) }
 
@@ -337,7 +400,6 @@ class MainActivity : BaseActivity() {
                     drawContent()
                 }
             } else null
-
             val appInfoScope = rememberCoroutineScope()
             var settingsOverlayPage by remember { mutableStateOf<SettingsOverlayPage?>(null) }
             var showAppInfoPage by remember { mutableStateOf(false) }
@@ -348,10 +410,21 @@ class MainActivity : BaseActivity() {
             val appInfoPageOffset = remember { Animatable(appInfoPageWidthPx) }
             var appInfoBackDragOffsetPx by remember { mutableStateOf(0f) }
             var appInfoBackGestureActive by remember { mutableStateOf(false) }
-            val appInfoBackEdgePx = with(density) { 40.dp.toPx() }
+            val depthOnlineScope = rememberCoroutineScope()
+            var showDepthOnlinePage by remember { mutableStateOf(false) }
+            var renderDepthOnlinePage by remember { mutableStateOf(false) }
+            val depthOnlinePageWidthPx = remember(this) {
+                resources.displayMetrics.widthPixels.toFloat().coerceAtLeast(1f)
+            }
+            val depthOnlinePageOffset = remember { Animatable(depthOnlinePageWidthPx) }
+            var depthOnlineBackDragOffsetPx by remember { mutableStateOf(0f) }
+            var depthOnlineBackGestureActive by remember { mutableStateOf(false) }
 
             fun closeAppInfoPage() {
                 if (!renderAppInfoPage && !showAppInfoPage) return
+                showGroupSortMenu = false
+                showGroupFilterMenu = false
+                groupSelectionMode = false
                 appInfoScope.launch {
                     val startOffset = (appInfoPageOffset.value + appInfoBackDragOffsetPx)
                         .coerceIn(0f, appInfoPageWidthPx)
@@ -359,6 +432,18 @@ class MainActivity : BaseActivity() {
                     appInfoBackGestureActive = false
                     appInfoPageOffset.snapTo(startOffset)
                     showAppInfoPage = false
+                }
+            }
+
+            fun closeDepthOnlinePage() {
+                if (!renderDepthOnlinePage && !showDepthOnlinePage) return
+                depthOnlineScope.launch {
+                    val startOffset = (depthOnlinePageOffset.value + depthOnlineBackDragOffsetPx)
+                        .coerceIn(0f, depthOnlinePageWidthPx)
+                    depthOnlineBackDragOffsetPx = 0f
+                    depthOnlineBackGestureActive = false
+                    depthOnlinePageOffset.snapTo(startOffset)
+                    showDepthOnlinePage = false
                 }
             }
 
@@ -391,7 +476,37 @@ class MainActivity : BaseActivity() {
                 }
             }
 
-            PredictiveBackHandler(enabled = showAppInfoPage) { progress ->
+            LaunchedEffect(showDepthOnlinePage, depthOnlinePageWidthPx) {
+                if (showDepthOnlinePage) {
+                    renderDepthOnlinePage = true
+                    depthOnlineBackDragOffsetPx = 0f
+                    depthOnlineBackGestureActive = false
+                    depthOnlinePageOffset.snapTo(depthOnlinePageWidthPx)
+                    depthOnlinePageOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                } else if (renderDepthOnlinePage) {
+                    depthOnlineBackDragOffsetPx = 0f
+                    depthOnlineBackGestureActive = false
+                    depthOnlinePageOffset.animateTo(
+                        targetValue = depthOnlinePageWidthPx,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                    renderDepthOnlinePage = false
+                    depthOnlinePageOffset.snapTo(depthOnlinePageWidthPx)
+                }
+            }
+
+            PredictiveBackHandler(
+                enabled = showAppInfoPage && !(settingsOverlayPage == SettingsOverlayPage.Group && groupSelectionMode)
+            ) { progress ->
                 try {
                     progress.collect { backEvent ->
                         appInfoBackGestureActive = true
@@ -408,6 +523,34 @@ class MainActivity : BaseActivity() {
                     appInfoBackGestureActive = false
                     appInfoBackDragOffsetPx = 0f
                     appInfoPageOffset.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                }
+            }
+
+            PredictiveBackHandler(
+                enabled = showDepthOnlinePage && !showAppInfoPage
+            ) { progress ->
+                try {
+                    progress.collect { backEvent ->
+                        depthOnlineBackGestureActive = true
+                        depthOnlineBackDragOffsetPx = (depthOnlinePageWidthPx * backEvent.progress)
+                            .coerceIn(0f, depthOnlinePageWidthPx)
+                    }
+                    val startOffset = (depthOnlinePageOffset.value + depthOnlineBackDragOffsetPx)
+                        .coerceIn(0f, depthOnlinePageWidthPx)
+                    depthOnlineBackDragOffsetPx = 0f
+                    depthOnlineBackGestureActive = false
+                    depthOnlinePageOffset.snapTo(startOffset)
+                    showDepthOnlinePage = false
+                } catch (_: CancellationException) {
+                    depthOnlineBackGestureActive = false
+                    depthOnlineBackDragOffsetPx = 0f
+                    depthOnlinePageOffset.animateTo(
                         targetValue = 0f,
                         animationSpec = spring(
                             dampingRatio = Spring.DampingRatioNoBouncy,
@@ -519,12 +662,13 @@ class MainActivity : BaseActivity() {
                             when (rootIndex) {
                                 0 -> WallpaperRootPage(
                                     useDarkTheme = useDarkTheme,
+                                    accentColorKey = accentColorKey,
                                     enableLiquidGlass = enableLiquidGlass,
                                     showBottomBar = showBottomBar,
                                     wallpaperSelectionState = wallpaperSelectionState,
-                                    showMoreMenu = showMoreMenu && selectedRootIndex == 0,
-                                    showSortMenu = showSortMenu && selectedRootIndex == 0,
-                                    showFilterMenu = showFilterMenu && selectedRootIndex == 0,
+                                    showMoreMenu = showMoreMenu && selectedRootIndex == 0 && !showAppInfoPage && !renderAppInfoPage && !showDepthOnlinePage && !renderDepthOnlinePage,
+                                    showSortMenu = showSortMenu && selectedRootIndex == 0 && !showAppInfoPage && !renderAppInfoPage && !showDepthOnlinePage && !renderDepthOnlinePage,
+                                    showFilterMenu = showFilterMenu && selectedRootIndex == 0 && !showAppInfoPage && !renderAppInfoPage && !showDepthOnlinePage && !renderDepthOnlinePage,
                                     selectedKindFilters = selectedKindFilters,
                                     selectedSortMode = selectedSortMode,
                                     selectedSortDirection = selectedSortDirection,
@@ -541,134 +685,54 @@ class MainActivity : BaseActivity() {
                                         }
                                         persistKindFilters(next)
                                     },
-                                    onOpenSettingPage = { selectRoot(2) },
-                                    onOpenGroupPage = { selectRoot(1) },
-                                    onBottomBarVisibleChange = { setBottomBarVisible(it) }
+                                    onOpenSettingPage = { selectRoot(1) },
+                                    onOpenGroupPage = {
+                                        showMoreMenu = false
+                                        showSortMenu = false
+                                        showFilterMenu = false
+                                        showGroupSortMenu = false
+                                        showGroupFilterMenu = false
+                                        groupSelectionMode = false
+                                        settingsOverlayPage = SettingsOverlayPage.Group
+                                        showAppInfoPage = true
+                                    },
+                                    onBottomBarVisibleChange = { setBottomBarVisible(it) },
+                                    onOpenDepthOnlinePage = {
+                                        showMoreMenu = false
+                                        showSortMenu = false
+                                        showFilterMenu = false
+                                        showDepthOnlinePage = true
+                                    }
                                 )
-                                1 -> Box(Modifier.fillMaxSize()) {
-                                    val groupPageBackdrop = if (enableLiquidGlass) {
-                                        rememberLayerBackdrop {
-                                            drawRect(themeBackgroundColor)
-                                            drawContent()
-                                        }
-                                    } else null
-
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .let { base ->
-                                                if (groupPageBackdrop != null) base.layerBackdrop(groupPageBackdrop) else base
-                                            }
-                                    ) {
-                                        AboutRouteScreen(
-                                            useDarkTheme = useDarkTheme,
-                                            kindFilters = selectedKindFilters,
-                                            sortMode = selectedSortMode,
-                                            sortDirection = selectedSortDirection,
-                                            onSelectionModeChange = { inSelection -> showBottomBar = !inSelection },
-                                            showBackButton = false
-                                        )
-                                    }
-
-                                    if (showBottomBar) {
-                                        MainTopBar(
-                                            statusBarTopPaddingDp = statusBarTopPaddingDp,
-                                            enableLiquidGlass = enableLiquidGlass,
-                                            backdrop = groupPageBackdrop,
-                                            isLightTheme = !useDarkTheme,
-                                            onAdd = {},
-                                            onApply = {},
-                                            onMoreClick = { showMoreMenu = true },
-                                            onSortClick = { showSortMenu = true },
-                                            onFilterClick = { showFilterMenu = true },
-                                            onPreview = {},
-                                            showAddButton = false,
-                                            showPreviewButton = false,
-                                            showApplyButton = false,
-                                            showMoreButton = true,
-                                            showSortButton = true,
-                                            showFilterButton = true,
-                                            keepSlotWhenHidden = false
-                                        )
-
-                                        LiquidMoreMenuOverlay(
-                                            visible = showMoreMenu && selectedRootIndex == 1,
-                                            statusBarTopPaddingDp = statusBarTopPaddingDp,
-                                            currentPageRoute = "group",
-                                            useDarkTheme = useDarkTheme,
-                                            enableLiquidGlass = enableLiquidGlass,
-                                            liquidBackdrop = groupPageBackdrop,
-                                            menuItems = listOf(
-                                                LiquidMoreMenuItem("选择") {
-                                                    showMoreMenu = false
-                                                    RxBus.postWithCode(RxConstants.RX_TRIGGER_GROUP_OPTIONS, Unit)
-                                                }
-                                            ),
-                                            onDismiss = { showMoreMenu = false }
-                                        )
-
-                                        LiquidMoreMenuOverlay(
-                                            visible = showSortMenu && selectedRootIndex == 1,
-                                            statusBarTopPaddingDp = statusBarTopPaddingDp,
-                                            currentPageRoute = "group_sort",
-                                            useDarkTheme = useDarkTheme,
-                                            enableLiquidGlass = enableLiquidGlass,
-                                            liquidBackdrop = groupPageBackdrop,
-                                            menuWidth = 190.dp,
-                                            triggerEndPadding = 112.dp,
-                                            menuEndPadding = 112.dp,
-                                            closeOnItemClick = false,
-                                            triggerIconRes = R.drawable.sort,
-                                            menuItems = buildSortMenuItems(
-                                                selectedSortMode = selectedSortMode,
-                                                selectedSortDirection = selectedSortDirection,
-                                                onSortModeSelected = { persistSortMode(it) },
-                                                onSortDirectionSelected = { persistSortDirection(it) }
-                                            ),
-                                            onDismiss = { showSortMenu = false }
-                                        )
-
-                                        LiquidMoreMenuOverlay(
-                                            visible = showFilterMenu && selectedRootIndex == 1,
-                                            statusBarTopPaddingDp = statusBarTopPaddingDp,
-                                            currentPageRoute = "group_filter",
-                                            useDarkTheme = useDarkTheme,
-                                            enableLiquidGlass = enableLiquidGlass,
-                                            liquidBackdrop = groupPageBackdrop,
-                                            menuWidth = 176.dp,
-                                            triggerEndPadding = 64.dp,
-                                            menuEndPadding = 64.dp,
-                                            closeOnItemClick = false,
-                                            triggerIconRes = R.drawable.fliter,
-                                            menuItems = MainWallpaperKindFilter.values().map { filter ->
-                                                LiquidMoreMenuItem(
-                                                    label = filter.label,
-                                                    iconRes = filter.iconRes,
-                                                    checked = filter in selectedKindFilters,
-                                                    onClick = {
-                                                        val next = if (filter in selectedKindFilters) {
-                                                            selectedKindFilters - filter
-                                                        } else {
-                                                            selectedKindFilters + filter
-                                                        }
-                                                        persistKindFilters(next)
-                                                    }
-                                                )
-                                            },
-                                            onDismiss = { showFilterMenu = false }
-                                        )
-                                    }
-                                }
-                                2 -> SettingRouteScreen(
+                                1 -> SettingRouteScreen(
                                     useDarkTheme = useDarkTheme,
                                     onThemeModeChange = { mode -> themeMode = mode },
                                     accentColorKey = accentColorKey,
                                     onAccentColorChange = { key -> accentColorKey = key },
+                                    liquidGlassEnabled = liquidGlassEnabled,
+                                    onLiquidGlassEnabledChange = { enabled ->
+                                        liquidGlassEnabled = enabled
+                                        pref.edit().putBoolean(LiquidGlassPrefs.PREF_ENABLE_LIQUID_GLASS, enabled).apply()
+                                    },
                                     onOpenAppInfo = {
                                         showMoreMenu = false
                                         showSortMenu = false
                                         showFilterMenu = false
                                         settingsOverlayPage = SettingsOverlayPage.AppInfo
+                                        showAppInfoPage = true
+                                    },
+                                    onOpenUsage = {
+                                        showMoreMenu = false
+                                        showSortMenu = false
+                                        showFilterMenu = false
+                                        settingsOverlayPage = SettingsOverlayPage.Usage
+                                        showAppInfoPage = true
+                                    },
+                                    onOpenDataStorage = {
+                                        showMoreMenu = false
+                                        showSortMenu = false
+                                        showFilterMenu = false
+                                        settingsOverlayPage = SettingsOverlayPage.DataStorage
                                         showAppInfoPage = true
                                     },
                                     onOpenCorrugatedTest = {
@@ -737,7 +801,6 @@ class MainActivity : BaseActivity() {
                         lensRadiusY = bottomTabsStyle.trackLensRadius,
                         pressedExpansion = bottomTabsStyle.trackPressedExpansion
                     )
-                    val addButtonFallbackSurfaceColor = bottomTabsStyle.fallbackContainerColor
                     val addButtonTextColor = if (useDarkTheme) Color.White else Color(0xFF111318)
                     Row(
                         modifier = Modifier
@@ -801,13 +864,12 @@ class MainActivity : BaseActivity() {
                                 iconTint = addButtonTextColor
                             )
                         } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(bottomActionSize)
-                                    .clip(CircleShape)
-                                    .background(addButtonFallbackSurfaceColor)
-                                    .clickable { triggerBottomAdd() },
-                                contentAlignment = Alignment.Center
+                            PlainCircleButton(
+                                onClick = { triggerBottomAdd() },
+                                size = bottomActionSize,
+                                surfaceColor = PlainFallbackStyle.surface(isLightTheme = !useDarkTheme),
+                                contentColor = addButtonTextColor,
+                                border = PlainFallbackStyle.border(isLightTheme = !useDarkTheme)
                             ) {
                                 BasicText(
                                     text = "+",
@@ -819,6 +881,31 @@ class MainActivity : BaseActivity() {
                                 )
                             }
                         }
+                    }
+                }
+
+                if (renderDepthOnlinePage || showDepthOnlinePage) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(8f)
+                            .graphicsLayer {
+                                translationX = depthOnlinePageOffset.value + depthOnlineBackDragOffsetPx
+                                alpha = 1f
+                            }
+                    ) {
+                        DepthOnlineGenerateRoute(
+                            modifier = Modifier.fillMaxSize(),
+                            useDarkTheme = useDarkTheme,
+                            enableLiquidGlass = enableLiquidGlass,
+                            onBack = { closeDepthOnlinePage() },
+                            onImportSog = { sogUri: Uri, recordThumbnailUri: String?, recordId: String ->
+                                RxBus.postWithCode(
+                                    RxConstants.RX_IMPORT_ONLINE_DEPTH_SOG,
+                                    DepthOnlineSogImportRequest(sogUri, recordThumbnailUri, recordId)
+                                )
+                            }
+                        )
                     }
                 }
 
@@ -836,12 +923,52 @@ class MainActivity : BaseActivity() {
                             SettingsOverlayPage.AppInfo -> {
                                 com.zeaze.tianyinwallpaper.ui.setting.AppInfoRouteScreen(
                                     useDarkTheme = useDarkTheme,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    onBack = { closeAppInfoPage() },
+                                    onOpenAcknowledgements = {
+                                        settingsOverlayPage = SettingsOverlayPage.Acknowledgements
+                                    },
+                                    onOpenLicense = {
+                                        settingsOverlayPage = SettingsOverlayPage.License
+                                    }
+                                )
+                            }
+                            SettingsOverlayPage.Usage -> {
+                                com.zeaze.tianyinwallpaper.ui.setting.UsageGuideRouteScreen(
+                                    useDarkTheme = useDarkTheme,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    onBack = { closeAppInfoPage() }
+                                )
+                            }
+                            SettingsOverlayPage.Acknowledgements -> {
+                                com.zeaze.tianyinwallpaper.ui.setting.AcknowledgementsRouteScreen(
+                                    useDarkTheme = useDarkTheme,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    onBack = {
+                                        settingsOverlayPage = SettingsOverlayPage.AppInfo
+                                    }
+                                )
+                            }
+                            SettingsOverlayPage.License -> {
+                                com.zeaze.tianyinwallpaper.ui.setting.LicenseRouteScreen(
+                                    useDarkTheme = useDarkTheme,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    onBack = {
+                                        settingsOverlayPage = SettingsOverlayPage.AppInfo
+                                    }
+                                )
+                            }
+                            SettingsOverlayPage.DataStorage -> {
+                                com.zeaze.tianyinwallpaper.ui.setting.DataStorageRouteScreen(
+                                    useDarkTheme = useDarkTheme,
+                                    enableLiquidGlass = enableLiquidGlass,
                                     onBack = { closeAppInfoPage() }
                                 )
                             }
                             SettingsOverlayPage.CorrugatedTest -> {
                                 CorrugatedTestRouteScreen(
                                     useDarkTheme = useDarkTheme,
+                                    enableLiquidGlass = enableLiquidGlass,
                                     onBack = { closeAppInfoPage() }
                                 )
                             }
@@ -851,45 +978,98 @@ class MainActivity : BaseActivity() {
                                     onBack = { closeAppInfoPage() }
                                 )
                             }
+                            SettingsOverlayPage.Group -> {
+                                AboutRouteScreen(
+                                    useDarkTheme = useDarkTheme,
+                                    kindFilters = groupSelectedKindFilters,
+                                    sortMode = groupSelectedSortMode,
+                                    sortDirection = groupSelectedSortDirection,
+                                    enableLiquidGlass = enableLiquidGlass,
+                                    onPageBackdropReady = {},
+                                    onSelectionModeChange = { inSelection ->
+                                        groupSelectionMode = inSelection
+                                        showBottomBar = !inSelection
+                                    },
+                                    showBackButton = true,
+                                    onBack = { closeAppInfoPage() },
+                                    onSortClick = {
+                                        showMoreMenu = false
+                                        showSortMenu = false
+                                        showFilterMenu = false
+                                        showGroupFilterMenu = false
+                                        showGroupSortMenu = true
+                                    },
+                                    onFilterClick = {
+                                        showMoreMenu = false
+                                        showSortMenu = false
+                                        showFilterMenu = false
+                                        showGroupSortMenu = false
+                                        showGroupFilterMenu = true
+                                    }
+                                )
+                            }
                             null -> Unit
                         }
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .width(40.dp)
-                            .align(Alignment.CenterStart)
-                            .zIndex(9f)
-                            .pointerInput(showAppInfoPage, appInfoPageWidthPx) {
-                                detectDragGestures(
-                                    onDragStart = { offset ->
-                                        appInfoBackGestureActive = showAppInfoPage && offset.x <= appInfoBackEdgePx
-                                    },
-                                    onDragCancel = {
-                                        appInfoBackGestureActive = false
-                                        appInfoBackDragOffsetPx = 0f
-                                    },
-                                    onDragEnd = {
-                                        if (appInfoBackGestureActive && appInfoBackDragOffsetPx > appInfoPageWidthPx * 0.28f) {
-                                            closeAppInfoPage()
+                }
+
+                if ((renderAppInfoPage || showAppInfoPage) && settingsOverlayPage == SettingsOverlayPage.Group) {
+                    Box(Modifier.fillMaxSize().zIndex(12f)) {
+                        LiquidMoreMenuOverlay(
+                            visible = showGroupSortMenu,
+                            statusBarTopPaddingDp = statusBarTopPaddingDp,
+                            currentPageRoute = "group_sort",
+                            useDarkTheme = useDarkTheme,
+                            enableLiquidGlass = false,
+                            liquidBackdrop = null,
+                            menuWidth = 190.dp,
+                            triggerEndPadding = 64.dp,
+                            menuEndPadding = 64.dp,
+                            closeOnItemClick = false,
+                            triggerIconRes = R.drawable.sort,
+                            menuItems = buildSortMenuItems(
+                                selectedSortMode = groupSelectedSortMode,
+                                selectedSortDirection = groupSelectedSortDirection,
+                                onSortModeSelected = { persistGroupSortMode(it) },
+                                onSortDirectionSelected = { persistGroupSortDirection(it) }
+                            ),
+                            onDismiss = { showGroupSortMenu = false }
+                        )
+
+                        LiquidMoreMenuOverlay(
+                            visible = showGroupFilterMenu,
+                            statusBarTopPaddingDp = statusBarTopPaddingDp,
+                            currentPageRoute = "group_filter",
+                            useDarkTheme = useDarkTheme,
+                            enableLiquidGlass = false,
+                            liquidBackdrop = null,
+                            menuWidth = 176.dp,
+                            triggerEndPadding = 12.dp,
+                            menuEndPadding = 12.dp,
+                            closeOnItemClick = false,
+                            triggerIconRes = R.drawable.fliter,
+                            menuItems = listOf(
+                                MainWallpaperKindFilter.ImageWallpaper,
+                                MainWallpaperKindFilter.VideoWallpaper
+                            ).map { filter ->
+                                LiquidMoreMenuItem(
+                                    label = filter.label,
+                                    iconRes = filter.iconRes,
+                                    checked = filter in groupSelectedKindFilters,
+                                    onClick = {
+                                        val next = if (filter in groupSelectedKindFilters) {
+                                            groupSelectedKindFilters - filter
                                         } else {
-                                            appInfoBackDragOffsetPx = 0f
+                                            groupSelectedKindFilters + filter
                                         }
-                                        appInfoBackGestureActive = false
-                                    },
-                                    onDrag = { _, dragAmount ->
-                                        if (appInfoBackGestureActive) {
-                                            val nextOffset = (appInfoBackDragOffsetPx + dragAmount.x)
-                                                .coerceIn(0f, appInfoPageWidthPx)
-                                            if (nextOffset != appInfoBackDragOffsetPx) {
-                                                appInfoBackDragOffsetPx = nextOffset
-                                            }
-                                        }
+                                        persistGroupKindFilters(next)
                                     }
                                 )
-                            }
-                    )
+                            },
+                            onDismiss = { showGroupFilterMenu = false }
+                        )
+                    }
                 }
             }
 
@@ -929,6 +1109,9 @@ class MainActivity : BaseActivity() {
             LaunchedEffect(Unit) {
                 if (!hasCheckedUpdate) {
                     hasCheckedUpdate = true
+                    val checkUpdateOnStart = getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+                        .getBoolean(AppUpdateManager.PREF_CHECK_UPDATE_ON_START, true)
+                    if (!checkUpdateOnStart) return@LaunchedEffect
                     when (val result = AppUpdateManager.checkUpdate()) {
                         is AppUpdateManager.CheckResult.HasUpdate -> {
                             updateDialogState = UpdateDialogState(
@@ -1071,6 +1254,7 @@ class MainActivity : BaseActivity() {
 @Composable
 private fun WallpaperRootPage(
     useDarkTheme: Boolean,
+    accentColorKey: String,
     enableLiquidGlass: Boolean,
     showBottomBar: Boolean,
     wallpaperSelectionState: SelectionBarState,
@@ -1088,9 +1272,16 @@ private fun WallpaperRootPage(
     onToggleKindFilter: (MainWallpaperKindFilter) -> Unit,
     onOpenSettingPage: () -> Unit,
     onOpenGroupPage: () -> Unit,
-    onBottomBarVisibleChange: (Boolean) -> Unit
+    onBottomBarVisibleChange: (Boolean) -> Unit,
+    onOpenDepthOnlinePage: () -> Unit
 ) {
     val pageBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val showRegularWallpaperActions =
+        selectedKindFilters.isNotEmpty() &&
+            selectedKindFilters.all {
+                it == MainWallpaperKindFilter.ImageWallpaper ||
+                    it == MainWallpaperKindFilter.VideoWallpaper
+            }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -1106,11 +1297,15 @@ private fun WallpaperRootPage(
         ) {
             MainRouteScreen(
                 useDarkTheme = useDarkTheme,
+                accentColorKey = accentColorKey,
                 kindFilters = selectedKindFilters,
                 sortMode = selectedSortMode,
                 sortDirection = selectedSortDirection,
+                liquidGlassEnabled = enableLiquidGlass,
                 onOpenSettingPage = onOpenSettingPage,
-                onBottomBarVisibleChange = onBottomBarVisibleChange
+                onBottomBarVisibleChange = onBottomBarVisibleChange,
+                onOpenDepthOnlinePage = onOpenDepthOnlinePage,
+                onCustomSortActivated = { onSortModeSelected(MainWallpaperSortMode.Custom) }
             )
         }
 
@@ -1146,8 +1341,8 @@ private fun WallpaperRootPage(
                 onFilterClick = { onShowFilterMenuChange(true) },
                 onPreview = { RxBus.postWithCode(RxConstants.RX_TRIGGER_PREVIEW_WALLPAPER, Unit) },
                 showAddButton = false,
-                showPreviewButton = true,
-                showApplyButton = true,
+                showPreviewButton = showRegularWallpaperActions,
+                showApplyButton = showRegularWallpaperActions,
                 showMoreButton = true,
                 showSortButton = true,
                 showFilterButton = true,
@@ -1162,16 +1357,26 @@ private fun WallpaperRootPage(
             useDarkTheme = useDarkTheme,
             enableLiquidGlass = enableLiquidGlass,
             liquidBackdrop = pageBackdrop,
-            menuItems = listOf(
-                LiquidMoreMenuItem("保存到分组") {
-                    onShowMoreMenuChange(false)
-                    RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
-                },
-                LiquidMoreMenuItem("选择") {
+            menuItems = buildList {
+                if (showRegularWallpaperActions) {
+                    add(
+                        LiquidMoreMenuItem("分组", R.drawable.list) {
+                            onShowMoreMenuChange(false)
+                            onOpenGroupPage()
+                        }
+                    )
+                    add(
+                        LiquidMoreMenuItem("保存到分组") {
+                            onShowMoreMenuChange(false)
+                            RxBus.postWithCode(RxConstants.RX_TRIGGER_SAVE_GROUP, Unit)
+                        }
+                    )
+                }
+                add(LiquidMoreMenuItem("选择") {
                     onShowMoreMenuChange(false)
                     RxBus.postWithCode(RxConstants.RX_TRIGGER_ENTER_SELECT_MODE, Unit)
-                }
-            ),
+                })
+            },
             onDismiss = { onShowMoreMenuChange(false) }
         )
 
@@ -1289,9 +1494,9 @@ private fun LiquidMoreMenuOverlay(
     val menuSurfaceColor = if (enableLiquidGlass) {
         if (useDarkTheme) Color.Black.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.30f)
     } else {
-        if (useDarkTheme) Color(0x33000000) else Color(0xAAFFFFFF)
+        PlainFallbackStyle.surface(isLightTheme = !useDarkTheme)
     }
-    val menuBorderColor = if (useDarkTheme) Color(0x33FFFFFF) else Color(0x88FFFFFF)
+    val menuBorderColor = PlainFallbackStyle.borderColor(isLightTheme = !useDarkTheme)
     val textColor = if (useDarkTheme) Color.White else Color.Black
     val menuHeight = (menuItems.size * 44 + (menuItems.size - 1) * 4 + 16).dp
     val triggerSize = 48.dp
@@ -1421,17 +1626,6 @@ private fun LiquidMoreMenuOverlay(
                     scaleY = morphState.containerScale
                     transformOrigin = TransformOrigin(1f, 0f)
                     alpha = menuBodyAlpha
-                }
-                .let { base ->
-                    if (overlayBlocksInput) {
-                        base.pointerInput(Unit) {
-                            detectTapGestures {
-                                // Consume taps inside the menu so the outer layer does not dismiss first.
-                            }
-                        }
-                    } else {
-                        base
-                    }
                 }
         ) {
             Box(

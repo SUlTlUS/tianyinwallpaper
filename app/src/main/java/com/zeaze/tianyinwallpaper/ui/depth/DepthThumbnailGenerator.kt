@@ -5,14 +5,26 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.media.ImageReader
+import android.os.Looper
+import android.util.Log
+import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.model.DepthWallpaperModel
+import com.zeaze.tianyinwallpaper.renderer.WebGaussianWallpaperRenderer
 import com.zeaze.tianyinwallpaper.utils.DepthPrefs
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
+import com.zeaze.tianyinwallpaper.utils.SuperSplatWebParams
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val THUMBNAIL_WIDTH = 540
 internal const val THUMBNAIL_HEIGHT = 960
 private const val THUMBNAIL_MAX_SPLATS = 500_000
+private const val WEB_THUMBNAIL_TIMEOUT_MS = 15_000L
+private val webThumbnailLock = Any()
 
 private data class ProjectedSplat(
     val u: Float,
@@ -118,13 +130,18 @@ internal fun loadOrGenerateGaussianThumbnail(
     height: Int
 ): Bitmap? {
     val file = gaussianThumbnailCacheFile(context, model)
-    if (file?.exists() == true) {
-        BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
+    if (file?.exists() == true && file.length() > 0L) {
+        return BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
             inPreferredConfig = Bitmap.Config.RGB_565
-        })?.let { return it }
+        })
     }
 
-    val bitmap = generateGaussianThumbnail(context, model.gaussianUri, width, height) ?: return null
+    val bitmap = generateGaussianThumbnailWithWebView(context, model, width, height) ?: return null
+    if (model.sourceGenerationRecordId.isBlank() && bitmap.isNearlySolidColor()) {
+        bitmap.recycle()
+        Log.w(TAG, "rejected invalid solid SOG thumbnail id=${model.id}")
+        return null
+    }
     if (file != null) {
         runCatching {
             file.outputStream().use { output ->
@@ -133,6 +150,137 @@ internal fun loadOrGenerateGaussianThumbnail(
         }
     }
     return bitmap
+}
+
+private fun Bitmap.isNearlySolidColor(): Boolean {
+    if (width <= 0 || height <= 0) return true
+    var minRed = 255
+    var minGreen = 255
+    var minBlue = 255
+    var maxRed = 0
+    var maxGreen = 0
+    var maxBlue = 0
+    val sampleCount = 7
+    repeat(sampleCount) { row ->
+        val y = ((height - 1L) * row / (sampleCount - 1)).toInt()
+        repeat(sampleCount) { column ->
+            val x = ((width - 1L) * column / (sampleCount - 1)).toInt()
+            val color = getPixel(x, y)
+            val red = android.graphics.Color.red(color)
+            val green = android.graphics.Color.green(color)
+            val blue = android.graphics.Color.blue(color)
+            minRed = minOf(minRed, red)
+            minGreen = minOf(minGreen, green)
+            minBlue = minOf(minBlue, blue)
+            maxRed = maxOf(maxRed, red)
+            maxGreen = maxOf(maxGreen, green)
+            maxBlue = maxOf(maxBlue, blue)
+        }
+    }
+    return maxRed - minRed <= SOLID_THUMBNAIL_CHANNEL_RANGE &&
+        maxGreen - minGreen <= SOLID_THUMBNAIL_CHANNEL_RANGE &&
+        maxBlue - minBlue <= SOLID_THUMBNAIL_CHANNEL_RANGE
+}
+
+internal fun generateGaussianThumbnailWithWebView(
+    context: Context,
+    model: DepthWallpaperModel,
+    width: Int,
+    height: Int
+): Bitmap? {
+    if (model.gaussianUri.isBlank()) return null
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+        Log.w(TAG, "skip WebView thumbnail on main thread id=${model.id}")
+        return null
+    }
+    return synchronized(webThumbnailLock) {
+        runCatching {
+            val safeWidth = width.coerceAtLeast(1)
+            val safeHeight = height.coerceAtLeast(1)
+            val appContext = context.applicationContext
+            val prefs = appContext.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+            val imageReader = ImageReader.newInstance(safeWidth, safeHeight, PixelFormat.RGBA_8888, 2)
+            val renderer = WebGaussianWallpaperRenderer(appContext)
+            val latch = CountDownLatch(1)
+            val captureRequested = AtomicBoolean(false)
+            var result: Bitmap? = null
+            val thumbnailListener: (Bitmap) -> Unit = { bitmap ->
+                if (result == null) {
+                    result = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    latch.countDown()
+                }
+            }
+            val hasSavedOriginCameraDefaults =
+                model.cameraCalibrationVersion >= DepthWallpaperModel.ORIGIN_CAMERA_CALIBRATION_VERSION &&
+                    model.cameraDefaultDistance > 0f &&
+                    model.cameraDefaultFov > 0f
+            val initialCameraDefaultDistance = if (hasSavedOriginCameraDefaults) model.cameraDefaultDistance else 0f
+            val initialCameraDefaultFov = if (hasSavedOriginCameraDefaults) model.cameraDefaultFov else 0f
+            val initialCameraCalibrationVersion = if (hasSavedOriginCameraDefaults) {
+                DepthWallpaperModel.ORIGIN_CAMERA_CALIBRATION_VERSION
+            } else {
+                0
+            }
+            val initialCameraFov = initialCameraDefaultFov.takeIf { it > 0f } ?: DEFAULT_THUMBNAIL_CAMERA_FOV
+            val thumbnailParams = SuperSplatWebParams(
+                parallaxStrength = DepthWallpaperModel.DEFAULT_SOG_PARALLAX_STRENGTH,
+                cameraZoom = initialCameraDefaultDistance.takeIf { it > 0f }
+                    ?: DepthWallpaperModel.DEFAULT_SOG_CAMERA_ZOOM,
+                cameraDefaultDistance = initialCameraDefaultDistance,
+                cameraDefaultFov = initialCameraDefaultFov,
+                cameraCalibrationVersion = initialCameraCalibrationVersion,
+                centerOffsetX = 0f,
+                centerOffsetY = 0f,
+                focusDepth = DepthWallpaperModel.DEFAULT_SOG_FOCUS_DEPTH,
+                cameraFov = initialCameraFov,
+                performanceMode = prefs.getBoolean(DepthPrefs.PREF_WEB_PERFORMANCE_MODE, true)
+            )
+            try {
+                renderer.resize(safeWidth, safeHeight)
+                renderer.start(imageReader.surface)
+                renderer.setRenderingEnabled(true)
+                if (hasSavedOriginCameraDefaults) {
+                    renderer.setThumbnailFrameListener(thumbnailListener)
+                } else {
+                    renderer.setWebCameraDefaultsListener { distance, fov ->
+                        if (captureRequested.compareAndSet(false, true)) {
+                            renderer.loadWebGaussians(
+                                model.gaussianUri,
+                                thumbnailParams.copy(
+                                    cameraZoom = distance,
+                                    cameraDefaultDistance = distance,
+                                    cameraDefaultFov = fov,
+                                    cameraCalibrationVersion = DepthWallpaperModel.ORIGIN_CAMERA_CALIBRATION_VERSION,
+                                    cameraFov = fov
+                                )
+                            )
+                            renderer.setThumbnailFrameListener(thumbnailListener, armImmediately = true)
+                            renderer.requestRender()
+                        }
+                    }
+                }
+                renderer.loadWebGaussians(
+                    model.gaussianUri,
+                    thumbnailParams
+                )
+                renderer.requestRender()
+                if (!latch.await(WEB_THUMBNAIL_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                    Log.w(TAG, "WebView thumbnail timed out id=${model.id} uri=${model.gaussianUri}")
+                    null
+                } else {
+                    result
+                }
+            } finally {
+                renderer.setThumbnailFrameListener(null)
+                renderer.setWebCameraDefaultsListener(null)
+                renderer.setRenderingEnabled(false)
+                renderer.stopAndWait(500)
+                imageReader.close()
+            }
+        }.onFailure {
+            Log.w(TAG, "WebView thumbnail failed id=${model.id} uri=${model.gaussianUri}", it)
+        }.getOrNull()
+    }
 }
 
 internal fun removeGaussianThumbnailCache(context: Context, model: DepthWallpaperModel) {
@@ -147,3 +295,7 @@ internal fun gaussianThumbnailCacheFile(context: Context, model: DepthWallpaperM
 internal fun gaussianThumbnailCacheKey(model: DepthWallpaperModel): String {
     return "gaussian_${model.id}"
 }
+
+private const val TAG = "DepthThumbnailGenerator"
+private const val SOLID_THUMBNAIL_CHANNEL_RANGE = 6
+private const val DEFAULT_THUMBNAIL_CAMERA_FOV = 60f

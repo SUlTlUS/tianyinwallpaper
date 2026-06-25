@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -64,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -82,6 +84,8 @@ import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
+import com.zeaze.tianyinwallpaper.catalog.components.PlainSlider
+import com.zeaze.tianyinwallpaper.catalog.components.PlainSwitch
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
 import androidx.compose.ui.geometry.Rect
@@ -101,7 +105,6 @@ import com.zeaze.tianyinwallpaper.model.RasterGroupModel
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimationMode
 import com.zeaze.tianyinwallpaper.utils.FileUtil
-import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
 import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
 
@@ -115,6 +118,39 @@ import androidx.compose.animation.core.tween
 private const val WALLPAPER_TYPE_STATIC = 0
 private const val WALLPAPER_TYPE_DYNAMIC = 1
 private const val MIN_STATIC_GROUP_IMAGES = 2
+
+@Composable
+private fun AdaptiveRasterSlider(
+    value: () -> Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    visibilityThreshold: Float,
+    backdrop: Backdrop?,
+    isLightTheme: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (backdrop != null) {
+        LiquidSlider(
+            value = value,
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            valueRange = valueRange,
+            visibilityThreshold = visibilityThreshold,
+            backdrop = backdrop,
+            isLightTheme = isLightTheme,
+            modifier = modifier
+        )
+    } else {
+        PlainSlider(
+            value = value(),
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            valueRange = valueRange,
+            modifier = modifier
+        )
+    }
+}
 
 @Composable
 private fun RasterAdjustButtonContent(textColor: Color) {
@@ -176,7 +212,6 @@ fun RasterDetailScreen(
     onGlassBandWidthChangeFinished: (RasterGroupModel, Float) -> Unit,
     // ── 死区开关回调
     onDeadZoneEnabledChanged: (RasterGroupModel, Boolean) -> Unit,
-    onClockColorModeChanged: (RasterGroupModel, Int) -> Unit,
     groups: List<RasterGroupModel>,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
@@ -188,7 +223,8 @@ fun RasterDetailScreen(
     val onPage = MaterialTheme.colors.onBackground
     val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
     val contentColor = if (isLightTheme) Color.Black else Color.White
-    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+    val accentColor = MaterialTheme.colors.primary
+    val applyIconColor = if (accentColor.luminance() > 0.5f) Color.Black else Color.White
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
     val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF121212).copy(0.56f)
     val density = LocalDensity.current
@@ -314,7 +350,9 @@ fun RasterDetailScreen(
                     backdrop = detailBackdrop,
                     surfaceColor = pillBackground,
                     luminanceState = cancelLuminanceState,
-                    modifier = Modifier.height(44.dp),
+                    modifier = Modifier.size(44.dp),
+                    buttonHeight = 44.dp,
+                    contentPadding = PaddingValues(0.dp),
                     iconRes = R.drawable.back,
                     iconContentDescription = "取消",
                     iconSize = 18.dp,
@@ -324,24 +362,25 @@ fun RasterDetailScreen(
                 LiquidButton(
                     onClick = { if (!videoLoading) onApply() },
                     backdrop = detailBackdrop,
-                    surfaceColor = pillBackground,
+                    surfaceColor = accentColor,
                     luminanceState = applyLuminanceState,
-                    modifier = Modifier.height(44.dp).graphicsLayer {
+                    modifier = Modifier.size(44.dp).graphicsLayer {
                         alpha = if (videoLoading) 0.5f else 1f
                     },
+                    buttonHeight = 44.dp,
+                    contentPadding = PaddingValues(0.dp),
                     iconRes = R.drawable.complete,
                     iconContentDescription = "应用",
                     iconSize = 18.dp,
-                    iconTint = accentColor
+                    iconTint = applyIconColor
                 )
             } else {
                 Row(
                     modifier = Modifier
-                        .height(44.dp)
-                        .clip(Capsule())
+                        .size(44.dp)
+                        .clip(CircleShape)
                         .background(pillBackground)
-                        .combinedClickable(onClick = onDismiss)
-                        .padding(horizontal = 14.dp),
+                        .combinedClickable(onClick = onDismiss),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -354,11 +393,10 @@ fun RasterDetailScreen(
                 }
                 Row(
                     modifier = Modifier
-                        .height(44.dp)
-                        .clip(Capsule())
-                        .background(pillBackground)
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(accentColor)
                         .combinedClickable(onClick = { if (!videoLoading) onApply() })
-                        .padding(horizontal = 14.dp)
                         .graphicsLayer { alpha = if (videoLoading) 0.5f else 1f },
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
@@ -367,7 +405,7 @@ fun RasterDetailScreen(
                         painter = painterResource(R.drawable.complete),
                         contentDescription = "应用",
                         modifier = Modifier.size(18.dp),
-                        tint = accentColor
+                        tint = applyIconColor
                     )
                 }
             }
@@ -463,7 +501,7 @@ fun RasterDetailScreen(
         ) {
             if (currentEditorGroup != null) {
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
-                val sheetBackdrop = rememberLayerBackdrop()
+                val sheetBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
                 val thumbnailListState = rememberLazyListState()
 
                 // ★ 新增：当前选中的标签页 (0: 调整, 1: 效果)
@@ -481,7 +519,6 @@ fun RasterDetailScreen(
                 var glassAnimEnabled by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.glassAnimEnabled) }
                 var glassBandWidth by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.glassBandWidth) }
                 var deadZoneEnabled by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.deadZoneEnabled) }
-                var clockColorMode by remember(currentEditorGroup.id) { mutableStateOf(currentEditorGroup.clockColorMode) }
 
                 // ★ 控制 slider/toggle 交互时禁止滚动
                 var isSliderOrToggleInteracting by remember { mutableStateOf(false) }
@@ -593,41 +630,6 @@ fun RasterDetailScreen(
                             .verticalScroll(scrollState),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-
-                    // === 图集缩略图区域（保持不变） ===
-                        BasicText("锁屏时钟颜色", style = TextStyle(contentColor, 14.sp))
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(
-                                WallpaperClockColorMode.FOLLOW_GLOBAL,
-                                WallpaperClockColorMode.LIGHT_CLOCK,
-                                WallpaperClockColorMode.DARK_CLOCK
-                            ).forEach { mode ->
-                                val selected = clockColorMode == mode
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(36.dp)
-                                        .clip(RoundedCornerShape(18.dp))
-                                        .background(if (selected) accentColor else contentColor.copy(alpha = 0.1f))
-                                        .clickable {
-                                            clockColorMode = mode
-                                            onClockColorModeChanged(currentEditorGroup, mode)
-                                        },
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    BasicText(
-                                        WallpaperClockColorMode.label(mode),
-                                        style = TextStyle(if (selected) Color.White else contentColor, 13.sp)
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(16.dp))
 
                     if (currentEditorGroup.type == RasterGroupModel.TYPE_STATIC) {
                         val reorderableState = rememberReorderableLazyListState(
@@ -811,12 +813,13 @@ fun RasterDetailScreen(
                                                 isLightTheme = isLightTheme,
                                             )
                                         } else {
-                                            androidx.compose.material.Switch(
+                                            PlainSwitch(
                                                 checked = !deadZoneEnabled,
                                                 onCheckedChange = {
                                                     deadZoneEnabled = !it
                                                     onDeadZoneEnabledChanged(currentEditorGroup, !it)
-                                                }
+                                                },
+                                                isLightTheme = isLightTheme
                                             )
                                         }
                                     }
@@ -836,7 +839,7 @@ fun RasterDetailScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         BasicText("高", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                        LiquidSlider(
+                                        AdaptiveRasterSlider(
                                             value = { sensorWidth },
                                             onValueChange = { sensorWidth = it; isSliderOrToggleInteracting = true },
                                             onValueChangeFinished = { isSliderOrToggleInteracting = false; onSensorWidthChanged(currentEditorGroup, sensorWidth); onSensorWidthChangeFinished(currentEditorGroup, sensorWidth) },
@@ -858,7 +861,7 @@ fun RasterDetailScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                        LiquidSlider(
+                                        AdaptiveRasterSlider(
                                             value = { transitionBand },
                                             onValueChange = { transitionBand = it; isSliderOrToggleInteracting = true },
                                             onValueChangeFinished = { isSliderOrToggleInteracting = false; onTransitionBandChanged(currentEditorGroup, transitionBand); onTransitionBandChangeFinished(currentEditorGroup, transitionBand) },
@@ -880,7 +883,7 @@ fun RasterDetailScreen(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         BasicText("锐", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                        LiquidSlider(
+                                        AdaptiveRasterSlider(
                                             value = { edgeSoftness },
                                             onValueChange = { edgeSoftness = it; isSliderOrToggleInteracting = true },
                                             onValueChangeFinished = { isSliderOrToggleInteracting = false; onEdgeSoftnessChanged(currentEditorGroup, edgeSoftness); onEdgeSoftnessChangeFinished(currentEditorGroup, edgeSoftness) },
@@ -982,12 +985,13 @@ fun RasterDetailScreen(
                                                             isLightTheme = isLightTheme,
                                                         )
                                                     } else {
-                                                        androidx.compose.material.Switch(
+                                                        PlainSwitch(
                                                             checked = glassAnimEnabled,
                                                             onCheckedChange = {
                                                                 glassAnimEnabled = it
                                                                 onGlassAnimEnabledChanged(currentEditorGroup, it)
-                                                            }
+                                                            },
+                                                            isLightTheme = isLightTheme
                                                         )
                                                     }
                                                 }
@@ -1001,7 +1005,7 @@ fun RasterDetailScreen(
                                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
                                                     BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                                    LiquidSlider(
+                                                    AdaptiveRasterSlider(
                                                         value = { glassBandWidth },
                                                         onValueChange = { glassBandWidth = it; isSliderOrToggleInteracting = true },
                                                         onValueChangeFinished = { isSliderOrToggleInteracting = false; onGlassBandWidthChanged(currentEditorGroup, glassBandWidth); onGlassBandWidthChangeFinished(currentEditorGroup, glassBandWidth) },
@@ -1024,7 +1028,7 @@ fun RasterDetailScreen(
                                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
                                                     BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                                    LiquidSlider(
+                                                    AdaptiveRasterSlider(
                                                         value = { stripedWavelength },
                                                         onValueChange = { stripedWavelength = it; isSliderOrToggleInteracting = true },
                                                         onValueChangeFinished = { isSliderOrToggleInteracting = false; onStripedWavelengthChanged(currentEditorGroup, stripedWavelength); onStripedWavelengthChangeFinished(currentEditorGroup, stripedWavelength) },
@@ -1046,7 +1050,7 @@ fun RasterDetailScreen(
                                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                 ) {
                                                     BasicText("弱", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                                    LiquidSlider(
+                                                    AdaptiveRasterSlider(
                                                         value = { stripedAmplitude },
                                                         onValueChange = { stripedAmplitude = it; isSliderOrToggleInteracting = true },
                                                         onValueChangeFinished = { isSliderOrToggleInteracting = false; onStripedAmplitudeChanged(currentEditorGroup, stripedAmplitude); onStripedAmplitudeChangeFinished(currentEditorGroup, stripedAmplitude) },
@@ -1070,7 +1074,7 @@ fun RasterDetailScreen(
                                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                     ) {
                                                         BasicText("窄", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                                        LiquidSlider(
+                                                        AdaptiveRasterSlider(
                                                             value = { narrowWavelength },
                                                             onValueChange = { narrowWavelength = it; isSliderOrToggleInteracting = true },
                                                             onValueChangeFinished = { isSliderOrToggleInteracting = false; onNarrowWavelengthChanged(currentEditorGroup, narrowWavelength); onNarrowWavelengthChangeFinished(currentEditorGroup, narrowWavelength) },
@@ -1092,7 +1096,7 @@ fun RasterDetailScreen(
                                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                                     ) {
                                                         BasicText("弱", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                                                        LiquidSlider(
+                                                        AdaptiveRasterSlider(
                                                             value = { narrowAmplitude },
                                                             onValueChange = { narrowAmplitude = it; isSliderOrToggleInteracting = true },
                                                             onValueChangeFinished = { isSliderOrToggleInteracting = false; onNarrowAmplitudeChanged(currentEditorGroup, narrowAmplitude); onNarrowAmplitudeChangeFinished(currentEditorGroup, narrowAmplitude) },
@@ -1129,7 +1133,7 @@ fun RasterDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             BasicText("高", style = TextStyle(contentColor.copy(0.6f), 12.sp))
-                            LiquidSlider(
+                            AdaptiveRasterSlider(
                                 value = { sensorWidth },
                                 onValueChange = { sensorWidth = it; isSliderOrToggleInteracting = true },
                                 onValueChangeFinished = { isSliderOrToggleInteracting = false; onSensorWidthChanged(currentEditorGroup, sensorWidth); onSensorWidthChangeFinished(currentEditorGroup, sensorWidth) },

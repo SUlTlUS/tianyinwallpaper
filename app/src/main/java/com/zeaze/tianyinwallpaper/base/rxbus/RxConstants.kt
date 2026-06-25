@@ -33,4 +33,5 @@ object RxConstants {
     const val RX_DEPTH_SELECTION_CANCEL = 0x35
     const val RX_DEPTH_SELECTION_DELETE = 0x36
     const val RX_DEPTH_SELECTION_TOGGLE_ALL = 0x37
+    const val RX_IMPORT_ONLINE_DEPTH_SOG = 0x38
 }

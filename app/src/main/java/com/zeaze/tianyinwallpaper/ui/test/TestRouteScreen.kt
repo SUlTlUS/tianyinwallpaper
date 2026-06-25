@@ -1,7 +1,6 @@
 package com.zeaze.tianyinwallpaper.ui.test
 
 import android.net.Uri
-import android.os.Build
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -61,6 +60,7 @@ import com.zeaze.tianyinwallpaper.catalog.components.GlassProfile
 import com.zeaze.tianyinwallpaper.catalog.components.StripedDirection
 import com.zeaze.tianyinwallpaper.catalog.components.StripedGlass
 import com.zeaze.tianyinwallpaper.catalog.components.rememberStripedPhase
+import com.zeaze.tianyinwallpaper.utils.LiquidGlassPrefs
 import com.kyant.shapes.Capsule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -68,7 +68,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun CorrugatedTestRouteScreen(
     useDarkTheme: Boolean,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    enableLiquidGlass: Boolean = true
 ) {
     val context = LocalContext.current
     val isLightTheme = !useDarkTheme
@@ -144,7 +145,8 @@ fun CorrugatedTestRouteScreen(
         isReverse = reverseAnimation
     )
 
-    val stageBackdrop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    val useLiquidGlass = enableLiquidGlass && LiquidGlassPrefs.isEnabled(context)
+    val stageBackdrop = if (useLiquidGlass) {
         rememberLayerBackdrop()
     } else {
         null

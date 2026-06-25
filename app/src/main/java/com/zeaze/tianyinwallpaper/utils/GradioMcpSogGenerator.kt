@@ -7,6 +7,7 @@ import android.net.Uri
 import android.util.Log
 import com.alibaba.fastjson.JSON
 import com.alibaba.fastjson.JSONObject
+import com.zeaze.tianyinwallpaper.App
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -22,6 +23,7 @@ import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -46,17 +48,21 @@ import java.util.concurrent.TimeUnit
 object GradioMcpSogGenerator {
     private const val TAG = "GradioSogGen"
 
-    // ModelScope API Inference 域名
-    private const val GRADIO_BASE_URL = "https://studio-mi0hn0-ml-sharp.api-inference.modelscope.net"
-    private const val UPLOAD_ENDPOINT = "$GRADIO_BASE_URL/gradio_api/upload"
-    private const val CALL_ENDPOINT = "$GRADIO_BASE_URL/gradio_api/call/generate_sog"
-    private const val CHECK_ENDPOINT = "$GRADIO_BASE_URL/api/check_sog_result"
-    private const val DOWNLOAD_ENDPOINT = "$GRADIO_BASE_URL/api/download_sog"
+    const val DEFAULT_ONLINE_GENERATION_BASE_URL = "https://studio-mi0hn0-ml-sharp.api-inference.modelscope.net"
+    const val DEFAULT_LOCAL_GENERATION_BASE_URL = "http://192.168.1.177:7860"
+    const val PREF_ONLINE_GENERATION_BASE_URL = "online_generation_base_url"
+    const val PREF_LOCAL_GENERATION_BASE_URL = "local_generation_base_url"
+    const val PREF_GENERATION_SERVICE_TYPE = "generation_service_type"
+    const val SERVICE_TYPE_ONLINE = 0
+    const val SERVICE_TYPE_LOCAL = 1
     private const val TASK_TIMEOUT_MINUTES = 15L
     /** 轮询重试总窗口（含网络中断恢复时间），远大于生成超时 */
     private const val POLL_RETRY_WINDOW_MINUTES = 60L
     /** task_id HTTP 查询间隔 */
-    private const val TASK_ID_POLL_INTERVAL_SEC = 10L
+    private const val TASK_ID_POLL_INTERVAL_SEC = 30L
+    private const val LAN_TASK_ID_POLL_INTERVAL_SEC = 3L
+    private const val TASK_QUERY_RATE_LIMIT_MIN_SEC = 60L
+    private const val TASK_QUERY_RATE_LIMIT_MAX_SEC = 300L
     private const val PREFS_NAME = "sog_generation_history"
     private const val KEY_RECORDS = "records"
     private const val KEY_MODELSCOPE_TOKEN = "modelscope_sdk_token"
@@ -65,6 +71,12 @@ object GradioMcpSogGenerator {
     private const val LOG_DIR_NAME = "sog_generation_logs"
     private val jsonType = "application/json; charset=utf-8".toMediaType()
     private val logDateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+    private val taskQueryLock = Any()
+    private val activeRecordPollLock = Any()
+    private val activeRecordPollIds = mutableSetOf<String>()
+    @Volatile private var nextTaskQueryAtMs = 0L
+    @Volatile private var consecutiveTaskQueryRateLimits = 0
+    @Volatile private var taskQueryBaseUrl: String? = null
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -110,6 +122,114 @@ object GradioMcpSogGenerator {
     fun getModelScopeToken(context: Context): String? {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return prefs.getString(KEY_MODELSCOPE_TOKEN, null)
+    }
+
+    fun getGenerationServiceType(context: Context): Int {
+        ensureServiceConfigMigrated(context)
+        return context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+            .getInt(PREF_GENERATION_SERVICE_TYPE, SERVICE_TYPE_ONLINE)
+            .takeIf { it == SERVICE_TYPE_LOCAL } ?: SERVICE_TYPE_ONLINE
+    }
+
+    fun setGenerationServiceType(context: Context, serviceType: Int) {
+        ensureServiceConfigMigrated(context)
+        val normalized = if (serviceType == SERVICE_TYPE_LOCAL) SERVICE_TYPE_LOCAL else SERVICE_TYPE_ONLINE
+        context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(PREF_GENERATION_SERVICE_TYPE, normalized)
+            .apply()
+    }
+
+    fun getOnlineGenerationBaseUrl(context: Context): String {
+        return getGenerationBaseUrl(context, getGenerationServiceType(context))
+    }
+
+    fun getGenerationBaseUrl(context: Context, serviceType: Int): String {
+        ensureServiceConfigMigrated(context)
+        val prefs = context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+        val isLocal = serviceType == SERVICE_TYPE_LOCAL
+        val key = if (isLocal) PREF_LOCAL_GENERATION_BASE_URL else PREF_ONLINE_GENERATION_BASE_URL
+        val defaultUrl = if (isLocal) DEFAULT_LOCAL_GENERATION_BASE_URL else DEFAULT_ONLINE_GENERATION_BASE_URL
+        return normalizeConfiguredBaseUrl(
+            prefs.getString(key, defaultUrl)
+        ) ?: defaultUrl
+    }
+
+    fun setGenerationBaseUrl(context: Context, serviceType: Int, value: String): String {
+        val normalized = normalizeConfiguredBaseUrl(value)
+            ?: error("生成地址无效")
+        val key = if (serviceType == SERVICE_TYPE_LOCAL) {
+            PREF_LOCAL_GENERATION_BASE_URL
+        } else {
+            PREF_ONLINE_GENERATION_BASE_URL
+        }
+        context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+            .edit()
+            .putString(key, normalized)
+            .apply()
+        return normalized
+    }
+
+    private fun ensureServiceConfigMigrated(context: Context) {
+        val prefs = context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE)
+        if (prefs.contains(PREF_GENERATION_SERVICE_TYPE)) return
+
+        val legacyUrl = normalizeConfiguredBaseUrl(
+            prefs.getString(PREF_ONLINE_GENERATION_BASE_URL, DEFAULT_ONLINE_GENERATION_BASE_URL)
+        ) ?: DEFAULT_ONLINE_GENERATION_BASE_URL
+        val legacyWasLocal = isLanBaseUrl(legacyUrl)
+        prefs.edit()
+            .putInt(
+                PREF_GENERATION_SERVICE_TYPE,
+                if (legacyWasLocal) SERVICE_TYPE_LOCAL else SERVICE_TYPE_ONLINE
+            )
+            .putString(
+                PREF_ONLINE_GENERATION_BASE_URL,
+                if (legacyWasLocal) DEFAULT_ONLINE_GENERATION_BASE_URL else legacyUrl
+            )
+            .putString(
+                PREF_LOCAL_GENERATION_BASE_URL,
+                if (legacyWasLocal) legacyUrl else DEFAULT_LOCAL_GENERATION_BASE_URL
+            )
+            .apply()
+    }
+
+    private fun normalizeConfiguredBaseUrl(value: String?): String? {
+        val raw = value?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return null
+        val normalized = if (raw.startsWith("http://") || raw.startsWith("https://")) raw else "http://$raw"
+        val uri = runCatching { Uri.parse(normalized) }.getOrNull() ?: return null
+        if (uri.host.isNullOrBlank()) return null
+        return normalized
+    }
+
+    private fun baseUrl(context: Context) = getOnlineGenerationBaseUrl(context)
+    private fun uploadEndpoint(context: Context) = "${baseUrl(context)}/gradio_api/upload"
+    private fun callEndpoint(context: Context) = "${baseUrl(context)}/gradio_api/call/generate_sog"
+    private fun checkEndpoint(context: Context) = "${baseUrl(context)}/api/check_sog_result"
+    private fun downloadEndpoint(context: Context) = "${baseUrl(context)}/api/download_sog"
+
+    private fun taskIdPollIntervalSec(context: Context): Long {
+        return if (isLanBaseUrl(baseUrl(context))) {
+            LAN_TASK_ID_POLL_INTERVAL_SEC
+        } else {
+            TASK_ID_POLL_INTERVAL_SEC
+        }
+    }
+
+    private fun isLanBaseUrl(url: String): Boolean {
+        val host = Uri.parse(url).host?.lowercase(Locale.ROOT) ?: return false
+        if (host == "localhost" || host == "::1" || host.endsWith(".local")) return true
+
+        val parts = host.split('.')
+        if (parts.size != 4) {
+            return host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")
+        }
+        val octets = parts.map { it.toIntOrNull() ?: return false }
+        return octets[0] == 10 ||
+            octets[0] == 127 ||
+            (octets[0] == 169 && octets[1] == 254) ||
+            (octets[0] == 172 && octets[1] in 16..31) ||
+            (octets[0] == 192 && octets[1] == 168)
     }
 
     // ─── 生成历史记录 ─────────────────────────────────────────────
@@ -172,6 +292,19 @@ object GradioMcpSogGenerator {
         }.getOrDefault(emptyList())
     }
 
+    fun exportHistoryJson(context: Context): String {
+        return JSON.toJSONString(getHistory(context))
+    }
+
+    fun restoreHistoryJson(context: Context, json: String) {
+        val records = JSON.parseArray(json) ?: error("Invalid SOG generation history")
+        val limitedRecords = records.subList(0, records.size.coerceAtMost(50))
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_RECORDS, JSON.toJSONString(limitedRecords))
+            .apply()
+    }
+
     fun updateRecord(context: Context, id: String, transform: (SogGenerationRecord) -> SogGenerationRecord) {
         val records = getHistory(context).toMutableList()
         val idx = records.indexOfFirst { it.id == id }
@@ -211,8 +344,26 @@ object GradioMcpSogGenerator {
     // ─── 缩略图持久化 ──────────────────────────────────────────
 
     private const val THUMB_DIR_NAME = "sog_thumbnails"
+    private const val INPUT_DIR_NAME = "sog_inputs"
     private const val THUMB_MAX_SIDE_PX = 720
     private const val THUMB_JPEG_QUALITY = 82
+
+    fun copyInputImageToCache(context: Context, sourceUri: Uri, displayName: String? = null): Uri {
+        val dir = File(context.cacheDir, INPUT_DIR_NAME).apply { mkdirs() }
+        val extension = displayName
+            ?.substringAfterLast('.', missingDelimiterValue = "")
+            ?.takeIf { it.length in 1..8 && it.all { ch -> ch.isLetterOrDigit() } }
+            ?: "jpg"
+        val outFile = File(dir, "input_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.$extension")
+        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+            outFile.outputStream().use { output -> input.copyTo(output) }
+        } ?: error("Cannot read selected image")
+        if (outFile.length() <= 0L) {
+            outFile.delete()
+            error("Selected image is empty")
+        }
+        return Uri.fromFile(outFile)
+    }
 
     /**
      * 将在线生成记录的输入图压缩成小缩略图后保存到 app 缓存。
@@ -310,7 +461,7 @@ object GradioMcpSogGenerator {
      */
     private fun deleteRecordSogFiles(context: Context, record: SogGenerationRecord) {
         runCatching {
-            val generatedDir = File(context.filesDir, "generated_sog").canonicalFile
+            val generatedDir = File(context.filesDir, GENERATED_SOG_DIR_NAME).canonicalFile
             val localPath = record.sogLocalPath
             if (!localPath.isNullOrBlank()) {
                 val file = File(localPath).canonicalFile
@@ -500,7 +651,16 @@ object GradioMcpSogGenerator {
         val startRecord = getHistory(context).firstOrNull { it.id == recordId }
             ?: return SogGenerationRecord(id = recordId, status = "failed", errorMessage = "记录不存在")
 
+        val acquired = synchronized(activeRecordPollLock) {
+            activeRecordPollIds.add(recordId)
+        }
+        if (!acquired) {
+            logMsg(context, "记录已有轮询任务，跳过重复启动: record_id=$recordId")
+            return getHistory(context).firstOrNull { it.id == recordId } ?: startRecord
+        }
+
         return try {
+            try {
             val existingLocal = startRecord.sogLocalPath
             if (!existingLocal.isNullOrBlank() && File(existingLocal).exists() && File(existingLocal).length() > 0L) {
                 val updated = startRecord.copy(status = "completed", errorMessage = null)
@@ -513,7 +673,7 @@ object GradioMcpSogGenerator {
                 // 已经拿到服务端文件地址，说明生成阶段完成。失败后重试只继续下载。
                 !startRecord.sogServerUrl.isNullOrBlank() -> {
                     logMsg(context, "已有服务端 SOG 地址，直接继续下载: ${startRecord.sogServerUrl}")
-                    normalizeServerUrl(startRecord.sogServerUrl) ?: startRecord.sogServerUrl
+                    normalizeServerUrl(context, startRecord.sogServerUrl) ?: startRecord.sogServerUrl
                 }
 
                 !startRecord.taskId.isNullOrBlank() -> {
@@ -559,7 +719,7 @@ object GradioMcpSogGenerator {
             logMsg(context, "=== 生成成功 ===")
             closeLog()
             updated
-        } catch (e: Exception) {
+            } catch (e: Exception) {
             val fullError = buildString {
                 append(e.message ?: "未知错误")
                 e.cause?.message?.let { append(" | Cause: $it") }
@@ -573,6 +733,11 @@ object GradioMcpSogGenerator {
             updateRecord(context, recordId) { updated }
             closeLog()
             updated
+            }
+        } finally {
+            synchronized(activeRecordPollLock) {
+                activeRecordPollIds.remove(recordId)
+            }
         }
     }
 
@@ -589,7 +754,7 @@ object GradioMcpSogGenerator {
         // 用短超时轮询 SSE，只读当前事件不阻塞
         return try {
             val eventId = record.eventId
-            val resultUrl = "$CALL_ENDPOINT/$eventId"
+            val resultUrl = "${callEndpoint(context)}/$eventId"
             val reqBuilder = Request.Builder().url(resultUrl).get()
                 .header("Accept", "text/event-stream")
             addAuthHeader(context, reqBuilder)
@@ -662,16 +827,17 @@ object GradioMcpSogGenerator {
     /**
      * 服务端可能返回相对地址 /gradio_api/file=...，OkHttp 只能下载完整 http(s) URL。
      */
-    private fun normalizeServerUrl(rawUrl: String?): String? {
+    private fun normalizeServerUrl(context: Context, rawUrl: String?): String? {
         val url = rawUrl?.trim() ?: return null
         if (url.isBlank()) return null
+        val root = baseUrl(context)
         return when {
             url.startsWith("http://") || url.startsWith("https://") -> url.replace(
                 Regex("^https?://[^/]+\\.ms\\.show/"),
-                "$GRADIO_BASE_URL/"
+                "$root/"
             )
-            url.startsWith("/") -> "$GRADIO_BASE_URL$url"
-            else -> "$GRADIO_BASE_URL/$url"
+            url.startsWith("/") -> "$root$url"
+            else -> "$root/$url"
         }
     }
 
@@ -688,40 +854,47 @@ object GradioMcpSogGenerator {
             ?: return null
         val taskId = record.taskId ?: return null
 
-        logMsg(context, "查询服务端结果: task_id=$taskId")
-
         val requestBody = JSONObject().apply {
             put("task_id", taskId)
         }
 
         val reqBuilder = Request.Builder()
-            .url(CHECK_ENDPOINT)
+            .url(checkEndpoint(context))
             .post(requestBody.toJSONString().toRequestBody(jsonType))
             .header("Content-Type", "application/json")
         addAuthHeader(context, reqBuilder)
 
-        return try {
+        return withSerializedTaskQuery(context) {
+            try {
+            logMsg(context, "发起服务端结果查询: task_id=$taskId")
             quickClient.newCall(reqBuilder.build()).execute().use { resp ->
                 val responseText = resp.body?.string() ?: ""
                 logMsg(context, "查询结果响应: HTTP ${resp.code} ${responseText.take(500)}")
+
+                if (resp.code == 429) {
+                    val delaySec = scheduleTaskQueryRateLimit(resp.header("Retry-After"))
+                    logMsg(context, "查询接口限流，${delaySec}秒后再查询")
+                    return@use null
+                }
+                consecutiveTaskQueryRateLimits = 0
 
                 if (!resp.isSuccessful) {
                     if (resp.code == 401 || resp.code == 403 || responseText.contains("login", ignoreCase = true)) {
                         error("查询任务需要鉴权，请在设置中填写 ModelScope SDK Token")
                     }
-                    return null
+                    return@use null
                 }
 
-                val json = JSON.parseObject(responseText) ?: return null
+                val json = JSON.parseObject(responseText) ?: return@use null
                 when (val status = json.getString("status") ?: "") {
                     "completed" -> {
                         val sogDownloadUrl = json.getString("sog_download_url")
                         val sogUrl = json.getString("sog_url")
                         val sogPath = json.getString("sog_path")
                         val fixedUrl = when {
-                            !sogDownloadUrl.isNullOrBlank() -> normalizeServerUrl(sogDownloadUrl)
-                            !sogUrl.isNullOrBlank() -> normalizeServerUrl(sogUrl)
-                            !sogPath.isNullOrBlank() -> "$GRADIO_BASE_URL/gradio_api/file=$sogPath"
+                            !sogDownloadUrl.isNullOrBlank() -> normalizeServerUrl(context, sogDownloadUrl)
+                            !sogUrl.isNullOrBlank() -> normalizeServerUrl(context, sogUrl)
+                            !sogPath.isNullOrBlank() -> "${baseUrl(context)}/gradio_api/file=$sogPath"
                             else -> null
                         }
 
@@ -770,6 +943,7 @@ object GradioMcpSogGenerator {
             }
             logMsg(context, "查询结果异常: ${e.javaClass.simpleName}: ${e.message}")
             null
+            }
         }
     }
 
@@ -777,6 +951,59 @@ object GradioMcpSogGenerator {
      * 使用 task_id 持续轮询直到拿到 SOG URL。
      * 这是 App 关闭/重开后的主要恢复路径。
      */
+    private fun <T> withSerializedTaskQuery(context: Context, action: () -> T): T {
+        return synchronized(taskQueryLock) {
+            val currentBaseUrl = baseUrl(context)
+            if (taskQueryBaseUrl != currentBaseUrl) {
+                taskQueryBaseUrl = currentBaseUrl
+                nextTaskQueryAtMs = 0L
+                consecutiveTaskQueryRateLimits = 0
+            }
+            val waitMs = nextTaskQueryAtMs - System.currentTimeMillis()
+            if (waitMs > 0L) {
+                logMsg(context, "全局查询等待 ${((waitMs + 999L) / 1000L)} 秒")
+                Thread.sleep(waitMs)
+            }
+            try {
+                action()
+            } finally {
+                nextTaskQueryAtMs = maxOf(
+                    nextTaskQueryAtMs,
+                    System.currentTimeMillis() + taskIdPollIntervalSec(context) * 1000L
+                )
+            }
+        }
+    }
+
+    private fun scheduleTaskQueryRateLimit(retryAfterHeader: String?): Long {
+        consecutiveTaskQueryRateLimits++
+        val retryAfterSec = parseRetryAfterSeconds(retryAfterHeader)
+        val exponentialSec = (TASK_QUERY_RATE_LIMIT_MIN_SEC *
+            (1L shl (consecutiveTaskQueryRateLimits - 1).coerceIn(0, 3)))
+            .coerceAtMost(TASK_QUERY_RATE_LIMIT_MAX_SEC)
+        val delaySec = retryAfterSec
+            ?.coerceIn(TASK_ID_POLL_INTERVAL_SEC, TASK_QUERY_RATE_LIMIT_MAX_SEC)
+            ?: exponentialSec
+        nextTaskQueryAtMs = maxOf(
+            nextTaskQueryAtMs,
+            System.currentTimeMillis() + delaySec * 1000L
+        )
+        return delaySec
+    }
+
+    private fun parseRetryAfterSeconds(value: String?): Long? {
+        val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        raw.toLongOrNull()?.let { return it.coerceAtLeast(0L) }
+        return runCatching {
+            val parser = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("GMT")
+                isLenient = false
+            }
+            ((parser.parse(raw)?.time ?: return null) - System.currentTimeMillis())
+                .coerceAtLeast(0L) / 1000L
+        }.getOrNull()
+    }
+
     private fun pollTaskIdUntilResult(
         context: Context,
         recordId: String,
@@ -802,7 +1029,7 @@ object GradioMcpSogGenerator {
             }
 
             onStatus("后台生成中，正在通过 task_id 查询结果…", -1f)
-            Thread.sleep(TASK_ID_POLL_INTERVAL_SEC * 1000L)
+            Thread.sleep(taskIdPollIntervalSec(context) * 1000L)
         }
     }
 
@@ -815,7 +1042,7 @@ object GradioMcpSogGenerator {
 
         val candidateUrls = mutableListOf<String>().apply {
             if (!record.taskId.isNullOrBlank()) {
-                add("$DOWNLOAD_ENDPOINT?task_id=${Uri.encode(record.taskId)}")
+                add("${downloadEndpoint(context)}?task_id=${Uri.encode(record.taskId)}")
             }
             if (!record.sogServerUrl.isNullOrBlank()) {
                 add(record.sogServerUrl)
@@ -835,7 +1062,7 @@ object GradioMcpSogGenerator {
                 val localUri = downloadSog(context, candidate, recordId)
                 val latest = getHistory(context).firstOrNull { it.id == recordId } ?: record
                 val updated = latest.copy(
-                    sogServerUrl = normalizeServerUrl(candidate) ?: candidate,
+                    sogServerUrl = normalizeServerUrl(context, candidate) ?: candidate,
                     sogLocalPath = localUri.path,
                     status = "completed",
                     errorMessage = null
@@ -893,7 +1120,7 @@ object GradioMcpSogGenerator {
                 tempFile.outputStream().use { output -> input.copyTo(output) }
             } ?: error("Cannot read local image: $localUri")
 
-            val reqBuilder = Request.Builder().url(UPLOAD_ENDPOINT)
+            val reqBuilder = Request.Builder().url(uploadEndpoint(context))
             addAuthHeader(context, reqBuilder)
 
             val body = MultipartBody.Builder().setType(MultipartBody.FORM)
@@ -925,7 +1152,7 @@ object GradioMcpSogGenerator {
             if (paths.isNullOrEmpty()) error("Upload returned no file paths")
 
             val path = paths[0]
-            val serverUrl = "$GRADIO_BASE_URL/gradio_api/file=$path"
+            val serverUrl = "${baseUrl(context)}/gradio_api/file=$path"
 
             return UploadResult(
                 serverPath = path,
@@ -953,7 +1180,7 @@ object GradioMcpSogGenerator {
                     .readTimeout(WARMUP_TIMEOUT_SEC, TimeUnit.SECONDS)
                     .build()
 
-                val reqBuilder = Request.Builder().url(GRADIO_BASE_URL).get()
+                val reqBuilder = Request.Builder().url(baseUrl(context)).get()
                 addAuthHeader(context, reqBuilder)
 
                 val resp = warmupClient.newCall(reqBuilder.build()).execute()
@@ -1028,7 +1255,7 @@ object GradioMcpSogGenerator {
         }
 
         val reqBuilder = Request.Builder()
-            .url(CALL_ENDPOINT)
+            .url(callEndpoint(context))
             .post(requestBody.toJSONString().toRequestBody(jsonType))
             .header("Content-Type", "application/json")
         addAuthHeader(context, reqBuilder)
@@ -1095,7 +1322,7 @@ object GradioMcpSogGenerator {
                 .writeTimeout(15, TimeUnit.SECONDS)
                 .build()
 
-            val resultUrl = "$CALL_ENDPOINT/$eventId"
+            val resultUrl = "${callEndpoint(context)}/$eventId"
             val reqBuilder = Request.Builder().url(resultUrl).get()
                 .header("Accept", "text/event-stream")
             addAuthHeader(context, reqBuilder)
@@ -1223,11 +1450,11 @@ object GradioMcpSogGenerator {
                                                 if (url.isNotBlank()) {
                                                     val fixedUrl = url.replace(
                                                         Regex("^https?://[^/]+\\.ms\\.show/"),
-                                                        "$GRADIO_BASE_URL/"
+                                                        "${baseUrl(context)}/"
                                                     )
                                                     sogUrl = fixedUrl
                                                 } else if (path.isNotBlank()) {
-                                                    sogUrl = "$GRADIO_BASE_URL/gradio_api/file=$path"
+                                                    sogUrl = "${baseUrl(context)}/gradio_api/file=$path"
                                                 }
                                             }
                                         } catch (e: Exception) {
@@ -1309,10 +1536,10 @@ object GradioMcpSogGenerator {
     // ─── SOG 下载 ────────────────────────────────────────────────
 
     private fun downloadSog(context: Context, url: String, recordId: String? = null): Uri {
-        val downloadUrl = normalizeServerUrl(url) ?: error("下载地址为空")
+        val downloadUrl = normalizeServerUrl(context, url) ?: error("下载地址为空")
         logMsg(context, "开始下载 SOG: $downloadUrl")
 
-        val dir = File(context.filesDir, "generated_sog").apply { mkdirs() }
+        val dir = ensureGeneratedSogDir(context)
         val stableName = recordId?.let { "generated_${safeFileName(it)}.sog" } ?: "generated_${UUID.randomUUID()}.sog"
         val file = File(dir, stableName)
         val partFile = File(file.absolutePath + ".part")
@@ -1421,6 +1648,45 @@ object GradioMcpSogGenerator {
         error("下载 SOG 失败，已重试 ${maxAttempts} 次: ${lastError?.message ?: "未知错误"}")
     }
 
+    private fun ensureGeneratedSogDir(context: Context): File {
+        val dir = File(context.filesDir, GENERATED_SOG_DIR_NAME)
+        if (dir.isDirectory) return dir
+
+        var legacyFile: File? = null
+        if (dir.exists()) {
+            val backup = File(
+                context.filesDir,
+                "${GENERATED_SOG_DIR_NAME}_legacy_${System.currentTimeMillis()}.sog"
+            )
+            if (!dir.renameTo(backup)) {
+                error("无法迁移旧的 SOG 下载文件: ${dir.absolutePath}")
+            }
+            legacyFile = backup
+            Log.w(TAG, "Migrating generated_sog file to directory: ${backup.absolutePath}")
+        }
+
+        if (!dir.mkdirs() && !dir.isDirectory) {
+            legacyFile?.renameTo(dir)
+            error("无法创建 SOG 下载目录: ${dir.absolutePath}")
+        }
+
+        legacyFile?.let { source ->
+            val target = File(dir, source.name)
+            runCatching {
+                if (!source.renameTo(target)) {
+                    source.copyTo(target, overwrite = false)
+                    if (!source.delete()) {
+                        Log.w(TAG, "Legacy SOG source was copied but not deleted: ${source.absolutePath}")
+                    }
+                }
+                Log.i(TAG, "Legacy SOG preserved at ${target.absolutePath}")
+            }.onFailure {
+                Log.w(TAG, "Failed to move legacy SOG into generated_sog directory", it)
+            }
+        }
+        return dir
+    }
+
     private fun safeFileName(raw: String): String {
         return raw.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { UUID.randomUUID().toString() }
     }
@@ -1488,4 +1754,6 @@ object GradioMcpSogGenerator {
         } catch (_: Exception) {}
         logWriter = null
     }
+
+    private const val GENERATED_SOG_DIR_NAME = "generated_sog"
 }

@@ -2,9 +2,12 @@ package com.zeaze.tianyinwallpaper.ui.setting
 
     import androidx.compose.foundation.background
     import androidx.compose.foundation.clickable
+    import androidx.compose.foundation.interaction.MutableInteractionSource
     import androidx.compose.foundation.layout.*
     import androidx.compose.foundation.text.BasicText
+    import androidx.compose.material.MaterialTheme
     import androidx.compose.runtime.Composable
+    import androidx.compose.runtime.remember
     import androidx.compose.ui.Alignment
     import androidx.compose.ui.Modifier
     import androidx.compose.ui.draw.clip
@@ -15,8 +18,6 @@ package com.zeaze.tianyinwallpaper.ui.setting
     import androidx.compose.ui.text.font.FontWeight
     import androidx.compose.ui.unit.dp
     import androidx.compose.ui.unit.sp
-    import androidx.compose.ui.window.Dialog
-    import androidx.compose.ui.window.DialogProperties
     import com.kyant.shapes.Capsule
     import com.kyant.shapes.RoundedRectangle
     import com.zeaze.tianyinwallpaper.backdrop.Backdrop
@@ -25,9 +26,11 @@ package com.zeaze.tianyinwallpaper.ui.setting
     import com.zeaze.tianyinwallpaper.backdrop.effects.colorControls
     import com.zeaze.tianyinwallpaper.backdrop.effects.lens
     import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
+    import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedContent
 
     @Composable
     fun LiquidDialog(
+        visible: Boolean = true,
         backdrop: Backdrop,
         isLightTheme: Boolean,
         onDismissRequest: () -> Unit,
@@ -35,26 +38,38 @@ package com.zeaze.tianyinwallpaper.ui.setting
         title: String = "提示",
         content: String = "",
         confirmText: String = "确定",
-        dismissText: String = "取消"
+        dismissText: String = "取消",
+        customContent: (@Composable ColumnScope.() -> Unit)? = null
     ) {
         val contentColor = if (isLightTheme) Color.Black else Color.White
-        val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+        val accentColor = MaterialTheme.colors.primary
         val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
 
-        Dialog(
-            onDismissRequest = onDismissRequest,
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
+        LiquidWindowAnimatedContent(
+            targetState = if (visible) Unit else null,
+            contentAlignment = Alignment.Center,
+            label = "LiquidDialog",
+            modifier = Modifier.fillMaxSize()
+        ) { isVisible ->
+            if (isVisible == null) return@LiquidWindowAnimatedContent
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clickable(onClick = onDismissRequest),
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        onDismissRequest()
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Column(
                     Modifier
                         .padding(horizontal = 40.dp)
-                        .clickable(enabled = false) {}
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {}
                         .drawBackdrop(
                             backdrop = backdrop,
                             shape = { RoundedRectangle(48f.dp) },
@@ -77,14 +92,23 @@ package com.zeaze.tianyinwallpaper.ui.setting
                         style = TextStyle(contentColor, 24.sp, FontWeight.Medium)
                     )
 
-                    BasicText(
-                        content,
-                        Modifier
-                            .graphicsLayer(blendMode = if (isLightTheme) BlendMode.SrcOver else BlendMode.Plus)
-                            .padding(24.dp, 12.dp, 24.dp, 12.dp),
-                        style = TextStyle(contentColor.copy(0.68f), 15.sp),
-                        maxLines = 10
-                    )
+                    if (customContent != null) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp, 12.dp, 24.dp, 12.dp),
+                            content = customContent
+                        )
+                    } else {
+                        BasicText(
+                            content,
+                            Modifier
+                                .graphicsLayer(blendMode = if (isLightTheme) BlendMode.SrcOver else BlendMode.Plus)
+                                .padding(24.dp, 12.dp, 24.dp, 12.dp),
+                            style = TextStyle(contentColor.copy(0.68f), 15.sp),
+                            maxLines = 10
+                        )
+                    }
 
                     Row(
                         Modifier

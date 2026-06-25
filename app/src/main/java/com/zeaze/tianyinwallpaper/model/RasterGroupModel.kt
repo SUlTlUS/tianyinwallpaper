@@ -29,7 +29,6 @@ data class RasterGroupModel(
     var glassAnimEnabled: Boolean = true,    // 玻璃动画开关（扫描线移动时条纹滚动）
     var glassBandWidth: Float = 0.3f,        // 玻璃折射区域宽度 (0.05 ~ 1.0)
     var deadZoneEnabled: Boolean = true,     // 死区开关（关闭后倾斜始终响应，无淡出效果）
-    var clockColorMode: Int = 0
 ) {
     companion object {
         const val TYPE_STATIC = 0

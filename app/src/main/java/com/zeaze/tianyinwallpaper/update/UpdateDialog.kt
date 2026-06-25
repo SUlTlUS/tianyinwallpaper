@@ -4,9 +4,6 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -26,6 +23,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.LinearProgressIndicator
+import androidx.compose.material.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +52,7 @@ import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.shadow.InnerShadow
 import com.zeaze.tianyinwallpaper.backdrop.shadow.Shadow
+import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
 
 /**
  * 更新对话框状态
@@ -82,7 +81,7 @@ fun UpdateDialog(
     parentBackdrop: Backdrop? = null
 ) {
     val contentColor = if (isLightTheme) Color.Black else Color.White
-    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+    val accentColor = MaterialTheme.colors.primary
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
     val dimColor = if (isLightTheme) Color(0xFF29293A).copy(0.23f) else Color(0xFF121212).copy(0.56f)
 
@@ -108,18 +107,10 @@ fun UpdateDialog(
     }
 
     // 对话框内容
-    AnimatedVisibility(
+    LiquidWindowAnimatedVisibility(
         visible = state.isVisible,
-        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessLow)) +
-                scaleIn(
-                    initialScale = 0.8f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessLow
-                    )
-                ),
-        exit = fadeOut(),
-        modifier = modifier.fillMaxSize()
+        modifier = modifier.fillMaxSize(),
+        label = "UpdateDialog"
     ) {
         // 使用传入的 backdrop 或创建 canvas backdrop
         val dialogBackdrop = parentBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }

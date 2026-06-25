@@ -353,8 +353,10 @@ class VideoRasterWallpaperService : WallpaperService() {
 
         private fun updateCurrentWallpaperColors(videoPath: String) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return
-            val localMode = group?.clockColorMode ?: WallpaperClockColorMode.FOLLOW_GLOBAL
-            currentWallpaperColors = WallpaperClockColorMode.wallpaperColorsFor(applicationContext, localMode)
+            currentWallpaperColors = WallpaperClockColorMode.wallpaperColorsFor(
+                applicationContext,
+                WallpaperClockColorMode.FOLLOW_GLOBAL
+            )
             Handler(mainLooper).post { notifyColorsChanged() }
         }
 
@@ -362,6 +364,10 @@ class VideoRasterWallpaperService : WallpaperService() {
             val videoUri = group?.takeIf { it.type == RasterGroupModel.TYPE_DYNAMIC }?.videoUri
             if (videoUri.isNullOrEmpty()) return
             updateCurrentWallpaperColors(videoUri)
+        }
+
+        fun refreshCurrentWallpaperColors() {
+            updateCurrentWallpaperColors(group)
         }
 
         fun onSurfaceTextureAvailable() {
@@ -612,22 +618,32 @@ class VideoRasterWallpaperService : WallpaperService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_RELOAD -> activeEngine?.reload()
+            TianYinWallpaperService.ACTION_UPDATE_CLOCK_COLOR_MODE -> {
+                activeEngine?.refreshCurrentWallpaperColors()
+            }
             TianYinWallpaperService.ACTION_PREV_WALLPAPER -> {
-                MixedWallpaperPlaylist.switchRelative(
-                    applicationContext,
-                    getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
-                    -1
-                )
+                switchToRegularWallpaper(TianYinWallpaperService.ACTION_PREV_WALLPAPER)
             }
             TianYinWallpaperService.ACTION_NEXT_WALLPAPER -> {
-                MixedWallpaperPlaylist.switchRelative(
-                    applicationContext,
-                    getSharedPreferences(App.TIANYIN, MODE_PRIVATE),
-                    1
-                )
+                switchToRegularWallpaper(TianYinWallpaperService.ACTION_NEXT_WALLPAPER)
             }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    private fun switchToRegularWallpaper(action: String) {
+        startService(Intent(applicationContext, TianYinWallpaperService::class.java).apply {
+            this.action = action
+        })
+        runCatching {
+            val manager = android.app.WallpaperManager.getInstance(applicationContext)
+            val component = android.content.ComponentName(applicationContext, TianYinWallpaperService::class.java)
+            val method = manager.javaClass.getMethod(
+                "setWallpaperComponent",
+                android.content.ComponentName::class.java
+            )
+            method.invoke(manager, component)
+        }
     }
 
     companion object {

@@ -35,29 +35,8 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private const val RASTER_THUMBNAIL_TYPE_STATIC = 0
-private const val RASTER_THUMBNAIL_TYPE_DYNAMIC = 1
-
 internal fun RasterGroupModel.toThumbnailRequest(): ThumbnailUtils.Request? {
-    return if (type == RasterGroupModel.TYPE_STATIC) {
-        val firstImageUri = imageUris.firstOrNull() ?: return null
-        ThumbnailUtils.Request(
-            uuid = id,
-            type = RASTER_THUMBNAIL_TYPE_STATIC,
-            imgUri = firstImageUri,
-            videoUri = null,
-            imgPath = null
-        )
-    } else {
-        val dynamicVideoUri = videoUri ?: return null
-        ThumbnailUtils.Request(
-            uuid = id,
-            type = RASTER_THUMBNAIL_TYPE_DYNAMIC,
-            imgUri = null,
-            videoUri = dynamicVideoUri,
-            imgPath = null
-        )
-    }
+    return ThumbnailUtils.requestForRasterGroup(this)
 }
 
 @Composable

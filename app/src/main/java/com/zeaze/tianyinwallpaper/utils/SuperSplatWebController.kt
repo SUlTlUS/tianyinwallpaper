@@ -23,6 +23,9 @@ import java.util.Locale
 data class SuperSplatWebParams(
     val parallaxStrength: Float,
     val cameraZoom: Float,
+    val cameraDefaultDistance: Float = 0f,
+    val cameraDefaultFov: Float = 0f,
+    val cameraCalibrationVersion: Int = 0,
     val centerOffsetX: Float,
     val centerOffsetY: Float,
     val focusDepth: Float,
@@ -36,6 +39,9 @@ data class SuperSplatWebParams(
         return "window.tianyinSetParams && window.tianyinSetParams(" +
             "${parallaxStrength.toJsFloat()}, " +
             "${cameraZoom.toJsFloat()}, " +
+            "${cameraDefaultDistance.toJsFloat()}, " +
+            "${cameraDefaultFov.toJsFloat()}, " +
+            "$cameraCalibrationVersion, " +
             "${centerOffsetX.toJsFloat()}, " +
             "${centerOffsetY.toJsFloat()}, " +
             "${focusDepth.toJsFloat()}, " +
@@ -57,8 +63,10 @@ class SuperSplatWebController(
     var loadedUriString: String? = null
         private set
     var onCenterOffsetChange: ((Float, Float) -> Unit)? = null
+    var onCameraDefaultsChange: ((Float, Float) -> Unit)? = null
     var onRenderRequested: (() -> Unit)? = null
     var onLoadingChanged: ((Boolean) -> Unit)? = null
+    var onFirstFrameReady: (() -> Unit)? = null
     var pendingParams: SuperSplatWebParams? = null
     var pageReady: Boolean = false
         private set
@@ -125,13 +133,14 @@ class SuperSplatWebController(
         Log.d(TAG, "viewer ready elapsedMs=${elapsedSinceLoadStart()} uri=$loadedUriString")
         pageReady = true
         onLoadingChanged?.invoke(false)
-        applyParams(resetCamera = true)
+        applyParams(resetCamera = false)
         onRenderRequested?.invoke()
     }
 
     fun onFirstFrame() {
         Log.d(TAG, "first frame elapsedMs=${elapsedSinceLoadStart()} uri=$loadedUriString")
         onLoadingChanged?.invoke(false)
+        onFirstFrameReady?.invoke()
         onRenderRequested?.invoke()
     }
 
@@ -202,6 +211,17 @@ class SuperSplatWebController(
         fun onViewerReady() {
             mainHandler.post {
                 controller.onViewerReady()
+            }
+        }
+
+        @JavascriptInterface
+        fun onCameraDefaultsCalculated(distance: Double, fov: Double) {
+            val distanceValue = distance.toFloat()
+            val fovValue = fov.toFloat()
+            if (!distanceValue.isFinite() || distanceValue <= 0f) return
+            if (!fovValue.isFinite() || fovValue <= 0f) return
+            mainHandler.post {
+                controller.onCameraDefaultsChange?.invoke(distanceValue, fovValue)
             }
         }
 

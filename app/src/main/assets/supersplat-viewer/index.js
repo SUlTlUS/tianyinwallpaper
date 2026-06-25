@@ -85295,6 +85295,86 @@ const anyPostEffectEnabled = (settings) => {
         (settings.fringing.enabled && settings.fringing.intensity > 0);
 };
 const vec = new Vec3();
+const calculateOriginCameraProfile = (entity) => {
+    const centers = entity.gsplat?.resource?.centers;
+    if (!centers || centers.length < 3) return null;
+
+    const transform = entity.getWorldTransform().data;
+    const originX = transform[12];
+    const originY = transform[13];
+    const originZ = transform[14];
+    const splatCount = Math.floor(centers.length / 3);
+    const step = Math.max(1, Math.ceil(splatCount / 120000));
+    const horizontalAngles = [];
+    const verticalAngles = [];
+    const depths = [];
+
+    for (let i = 0; i < splatCount; i += step) {
+        const offset = i * 3;
+        const x = centers[offset];
+        const y = centers[offset + 1];
+        const z = centers[offset + 2];
+        const worldX = transform[0] * x + transform[4] * y + transform[8] * z + originX;
+        const worldY = transform[1] * x + transform[5] * y + transform[9] * z + originY;
+        const worldZ = transform[2] * x + transform[6] * y + transform[10] * z + originZ;
+        const relativeX = worldX - originX;
+        const relativeY = worldY - originY;
+        const relativeZ = worldZ - originZ;
+        if (
+            !Number.isFinite(relativeX) ||
+            !Number.isFinite(relativeY) ||
+            !Number.isFinite(relativeZ) ||
+            relativeZ <= 1e-4
+        ) {
+            continue;
+        }
+        horizontalAngles.push(Math.atan2(relativeX, relativeZ));
+        verticalAngles.push(Math.atan2(relativeY, relativeZ));
+        depths.push(relativeZ);
+    }
+
+    if (depths.length < 128) return null;
+    const ascending = (a, b) => a - b;
+    horizontalAngles.sort(ascending);
+    verticalAngles.sort(ascending);
+    depths.sort(ascending);
+    const quantile = (values, fraction) => {
+        const index = Math.max(0, Math.min(values.length - 1, Math.round((values.length - 1) * fraction)));
+        return values[index];
+    };
+    const horizontalMin = quantile(horizontalAngles, 0.02);
+    const horizontalMax = quantile(horizontalAngles, 0.98);
+    const verticalMin = quantile(verticalAngles, 0.02);
+    const verticalMax = quantile(verticalAngles, 0.98);
+    const depthMin = quantile(depths, 0.02);
+    const depthMax = quantile(depths, 0.98);
+    const depth = quantile(depths, 0.5);
+    if (
+        horizontalMax <= horizontalMin ||
+        verticalMax <= verticalMin ||
+        depthMax <= depthMin ||
+        !Number.isFinite(depth) ||
+        depth <= 0 ||
+        !Number.isFinite(depthMin) ||
+        !Number.isFinite(depthMax)
+    ) {
+        return null;
+    }
+    return {
+        origin: [originX, originY, originZ],
+        centerAngles: [
+            (horizontalMin + horizontalMax) * 0.5,
+            (verticalMin + verticalMax) * 0.5
+        ],
+        angularSize: [
+            horizontalMax - horizontalMin,
+            verticalMax - verticalMin
+        ],
+        depthRange: [depthMin, depthMax],
+        depth,
+        sampleCount: depths.length
+    };
+};
 // store the original isColorBufferSrgb so the override in updatePostEffects is idempotent
 const origIsColorBufferSrgb = RenderTarget.prototype.isColorBufferSrgb;
 class Viewer {
@@ -85451,7 +85531,14 @@ class Viewer {
                 sceneBound.center.y,
                 sceneBound.center.z
             ];
+            window.tianyinSceneHalfExtents = [
+                sceneBound.halfExtents.x,
+                sceneBound.halfExtents.y,
+                sceneBound.halfExtents.z
+            ];
             window.tianyinSceneRadius = sceneBound.halfExtents.length();
+            window.tianyinOriginCameraProfile = calculateOriginCameraProfile(results[0]);
+            window.tianyinOnOriginCameraProfile?.(window.tianyinOriginCameraProfile);
             if (!config.noui) {
                 this.annotations = new Annotations(global, this.cameraFrame != null);
             }

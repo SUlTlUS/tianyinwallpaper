@@ -1,0 +1,28 @@
+<!--
+  ~ Copyright (C) 2026 The Android Open Source Project
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="665dp"
+    android:height="843dp"
+    android:viewportWidth="665"
+    android:viewportHeight="843">
+  <group
+      android:scaleY="-1"
+      android:translateY="843">
+  <path
+      android:fillColor="#FF000000"
+      android:pathData="M117,0Q88,0 66,7.5Q44,15 29,30Q14,44 7,66Q0,88 0,117L0,487Q0,516 7,537.5Q14,559 29,574Q44,588 66,595.5Q88,603 117,603L232,603L232,543L118,543Q104,543 93.5,539Q83,535 75,528Q68,520 64,509Q60,498 60,484L60,120Q60,105 64,94Q68,83 75,76Q83,68 93.5,64.5Q104,61 118,61L546,61Q560,61 571,64.5Q582,68 590,76Q597,83 601,94Q605,105 605,120L605,484Q605,498 601,509Q597,520 590,528Q582,535 571,539Q560,543 546,543L432,543L432,603L547,603Q577,603 599,595.5Q621,588 636,574Q650,559 657.5,537.5Q665,516 665,487L665,117Q665,88 657.5,66Q650,44 636,30Q621,15 599,7.5Q577,0 548,0ZM332,294Q326,294 321,296.5Q316,299 311,303Q307,307 305,312Q303,317 303,323L303,705L305,761L284,739L226,677Q222,672 216.5,670Q211,668 205,668Q199,668 194.5,670Q190,672 186,675Q182,679 180,684Q178,689 178,694Q178,700 180.5,705Q183,710 187,714L310,833Q313,836 316,838Q319,840 321,841Q324,842 326.5,842.5Q329,843 332,843Q335,843 338,842.5Q341,842 343,841Q346,840 348.5,838Q351,836 354,833L478,714Q482,710 484,705Q486,700 486,694Q486,689 484,684Q482,679 478,675Q475,672 470,670Q465,668 459,668Q453,668 448,670Q443,672 439,677L381,739L360,761L362,705L362,323Q362,317 360,312Q358,307 353,303Q349,299 343.5,296.5Q338,294 332,294Z"/>
+  </group>
+</vector>

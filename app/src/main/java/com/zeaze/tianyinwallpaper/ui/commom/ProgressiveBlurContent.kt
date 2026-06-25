@@ -26,9 +26,9 @@ import com.zeaze.tianyinwallpaper.backdrop.effects.runtimeShaderEffect
 @Composable
 fun ProgressiveBlurContent(
     modifier: Modifier = Modifier,
-    backdrop: Backdrop? = null
+    backdrop: Backdrop? = null,
+    isLightTheme: Boolean = !isSystemInDarkTheme()
 ) {
-    val isLightTheme = !isSystemInDarkTheme()
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val tintColor = if (isLightTheme) Color.White else Color(0xFF808080)
     val fallbackColor = if (isLightTheme) Color.White.copy(alpha = 0.75f) else Color(0xFF202020).copy(alpha = 0.7f)

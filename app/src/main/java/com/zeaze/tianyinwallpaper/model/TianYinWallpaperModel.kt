@@ -7,6 +7,7 @@ data class TianYinWallpaperModel(
     var videoPath: String? = null,
     var imgUri: String? = null,
     var videoUri: String? = null,
+    var createdAt: Long = 0L,
     var startTime: Int = -1,
     var endTime: Int = -1,
     var loop: Boolean = true,
@@ -18,5 +19,4 @@ data class TianYinWallpaperModel(
     var rotation: Float = 0f,
     var brightness: Float = 0f,
     var volume: Float = 0f,
-    var clockColorMode: Int = 0
 )

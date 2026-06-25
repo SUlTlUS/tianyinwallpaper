@@ -36,13 +36,14 @@ fun MainAddDialog(
     containerColor: Color,
     onPickImageWallpaper: () -> Unit,
     onPickVideoWallpaper: () -> Unit,
-    onPickFolderWallpaper: () -> Unit,
     onPickRasterImages: () -> Unit,
     onPickRasterVideo: () -> Unit,
     onPickDepthSog: () -> Unit,
     onOpenOnlineSog: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val itemBackgroundColor = accentColor.copy(alpha = 0.12f)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -72,7 +73,7 @@ fun MainAddDialog(
             WallpaperTypeItem(
                 label = "图片",
                 contentColor = contentColor,
-                backgroundColor = accentColor.copy(alpha = 0.12f),
+                backgroundColor = itemBackgroundColor,
                 onClick = onPickImageWallpaper,
                 modifier = Modifier.weight(1f),
                 iconRes = R.drawable.picture
@@ -80,7 +81,7 @@ fun MainAddDialog(
             WallpaperTypeItem(
                 label = "视频",
                 contentColor = contentColor,
-                backgroundColor = accentColor.copy(alpha = 0.12f),
+                backgroundColor = itemBackgroundColor,
                 onClick = onPickVideoWallpaper,
                 modifier = Modifier.weight(1f),
                 iconRes = R.drawable.video
@@ -100,7 +101,7 @@ fun MainAddDialog(
             WallpaperTypeItem(
                 label = "图集光栅",
                 contentColor = contentColor,
-                backgroundColor = accentColor.copy(alpha = 0.12f),
+                backgroundColor = itemBackgroundColor,
                 onClick = onPickRasterImages,
                 modifier = Modifier.weight(1f),
                 iconRes = R.drawable.pictureraster
@@ -108,7 +109,7 @@ fun MainAddDialog(
             WallpaperTypeItem(
                 label = "视频光栅",
                 contentColor = contentColor,
-                backgroundColor = accentColor.copy(alpha = 0.12f),
+                backgroundColor = itemBackgroundColor,
                 onClick = onPickRasterVideo,
                 modifier = Modifier.weight(1f),
                 iconRes = R.drawable.videoraster
@@ -128,7 +129,7 @@ fun MainAddDialog(
             WallpaperTypeItem(
                 label = "本地导入",
                 contentColor = contentColor,
-                backgroundColor = accentColor.copy(alpha = 0.12f),
+                backgroundColor = itemBackgroundColor,
                 onClick = onPickDepthSog,
                 modifier = Modifier.weight(1f),
                 iconRes = R.drawable.depth
@@ -136,32 +137,13 @@ fun MainAddDialog(
             WallpaperTypeItem(
                 label = "在线生成",
                 contentColor = contentColor,
-                backgroundColor = accentColor.copy(alpha = 0.12f),
+                backgroundColor = itemBackgroundColor,
                 onClick = onOpenOnlineSog,
                 modifier = Modifier.weight(1f),
                 iconRes = R.drawable.depth
             )
         }
 
-        Spacer(Modifier.height(18.dp))
-
-        WallpaperTypeSectionTitle(
-            text = "",
-            contentColor = contentColor
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            WallpaperTypeItem(
-                label = "文件夹",
-                contentColor = contentColor,
-                backgroundColor = accentColor.copy(alpha = 0.12f),
-                onClick = onPickFolderWallpaper,
-                modifier = Modifier.weight(1f),
-                iconRes = R.drawable.folder
-            )
-        }
     }
 }
 

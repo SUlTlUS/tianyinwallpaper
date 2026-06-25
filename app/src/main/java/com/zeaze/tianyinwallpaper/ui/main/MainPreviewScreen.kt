@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
@@ -69,6 +70,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -85,6 +87,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -107,6 +110,8 @@ import com.zeaze.tianyinwallpaper.backdrop.highlight.Highlight
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidSlider
 import com.zeaze.tianyinwallpaper.catalog.components.LiquidToggle
+import com.zeaze.tianyinwallpaper.catalog.components.PlainSlider
+import com.zeaze.tianyinwallpaper.catalog.components.PlainSwitch
 import com.zeaze.tianyinwallpaper.catalog.components.WheelPicker
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberMultiRegionLuminanceSampler
 import com.zeaze.tianyinwallpaper.catalog.utils.rememberRegionLuminanceState
@@ -115,7 +120,7 @@ import com.zeaze.tianyinwallpaper.service.TianYinWallpaperService
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimatedVisibility
 import com.zeaze.tianyinwallpaper.ui.commom.LiquidWindowAnimationMode
 import com.zeaze.tianyinwallpaper.utils.FileUtil
-import com.zeaze.tianyinwallpaper.utils.WallpaperClockColorMode
+import com.zeaze.tianyinwallpaper.utils.LiquidGlassPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -129,6 +134,7 @@ internal fun MainPreviewOverlayHost(
     visible: Boolean,
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
     onClose: () -> Unit,
+    enableLiquidGlass: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -178,6 +184,7 @@ internal fun MainPreviewOverlayHost(
                 isListLoaded = isListLoaded,
                 currentIndex = liveSyncIndex,
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
+                liquidGlassEnabled = enableLiquidGlass,
                 onClose = onClose,
                 onPrev = {
                     context.startService(Intent(context, TianYinWallpaperService::class.java).apply {
@@ -217,6 +224,7 @@ internal fun LiveSyncPreview(
     isListLoaded: Boolean,
     currentIndex: Int,
     statusBarTopPaddingDp: androidx.compose.ui.unit.Dp,
+    liquidGlassEnabled: Boolean = true,
     onClose: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit
@@ -238,7 +246,7 @@ internal fun LiveSyncPreview(
     val isLightTheme = MaterialTheme.colors.isLight
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val pageBackground = MaterialTheme.colors.background
-    val enableLiquidGlass = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+    val enableLiquidGlass = liquidGlassEnabled && LiquidGlassPrefs.isEnabled(context)
     val previewBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
     val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
     val onPage = if (isLightTheme) Color.Black else Color.White
@@ -310,7 +318,8 @@ internal fun LiveSyncPreview(
                 luminanceState = closeLuminanceState,
                 surfaceColor = pillBackground,
                 textColor = closeLuminanceState?.contentColor ?: onPage,
-                modifier = Modifier.height(44.dp),
+                modifier = Modifier.size(44.dp),
+                iconRes = R.drawable.back,
                 fallbackAsTextChip = true,
                 fallbackTextChipPadding = androidx.compose.foundation.layout.PaddingValues(
                     horizontal = 18.dp,
@@ -366,7 +375,8 @@ internal fun LiveSyncPreview(
                 luminanceState = prevLuminanceState,
                 surfaceColor = pillBackground,
                 textColor = prevLuminanceState?.contentColor ?: onPage,
-                modifier = Modifier.height(44.dp),
+                modifier = Modifier.size(44.dp),
+                iconRes = R.drawable.back,
                 fallbackBorder = androidx.compose.foundation.BorderStroke(
                     1.dp, Color.White.copy(alpha = 0.2f)
                 )
@@ -379,7 +389,9 @@ internal fun LiveSyncPreview(
                 luminanceState = nextLuminanceState,
                 surfaceColor = pillBackground,
                 textColor = nextLuminanceState?.contentColor ?: onPage,
-                modifier = Modifier.height(44.dp),
+                modifier = Modifier.size(44.dp),
+                iconRes = R.drawable.back,
+                iconRotation = 180f,
                 fallbackBorder = androidx.compose.foundation.BorderStroke(
                     1.dp, Color.White.copy(alpha = 0.2f)
                 )
@@ -399,16 +411,22 @@ private fun LiveSyncActionButton(
     modifier: Modifier = Modifier,
     fallbackAsTextChip: Boolean = false,
     fallbackTextChipPadding: androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-    fallbackBorder: androidx.compose.foundation.BorderStroke? = null
+    fallbackBorder: androidx.compose.foundation.BorderStroke? = null,
+    @DrawableRes iconRes: Int? = null,
+    iconRotation: Float = 0f
 ) {
-    if (enableLiquidGlass && backdrop != null) {
-        LiquidButton(
-            onClick = onClick,
-            backdrop = backdrop,
-            luminanceState = luminanceState,
-            modifier = modifier,
-            surfaceColor = surfaceColor
-        ) {
+    @Composable
+    fun ButtonContent() {
+        if (iconRes != null) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = label,
+                modifier = Modifier
+                    .size(18.dp)
+                    .graphicsLayer { rotationZ = iconRotation },
+                tint = textColor
+            )
+        } else {
             androidx.compose.foundation.text.BasicText(
                 label,
                 modifier = Modifier.padding(horizontal = 14.dp),
@@ -419,10 +437,24 @@ private fun LiveSyncActionButton(
                 )
             )
         }
+    }
+
+    if (enableLiquidGlass && backdrop != null) {
+        LiquidButton(
+            onClick = onClick,
+            backdrop = backdrop,
+            luminanceState = luminanceState,
+            modifier = modifier,
+            surfaceColor = surfaceColor,
+            buttonHeight = 44.dp,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+        ) {
+            ButtonContent()
+        }
         return
     }
 
-    if (fallbackAsTextChip) {
+    if (fallbackAsTextChip && iconRes == null) {
         Text(
             text = label,
             color = textColor,
@@ -437,12 +469,12 @@ private fun LiveSyncActionButton(
 
     Surface(
         modifier = modifier.clickable(onClick = onClick),
-        shape = Capsule(),
+        shape = if (iconRes != null) CircleShape else Capsule(),
         color = surfaceColor,
         border = fallbackBorder
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(text = label, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            ButtonContent()
         }
     }
 }
@@ -656,13 +688,7 @@ private fun WallpaperThumbnail(
             modifier = if (useClip) modifier.clip(dialogShape) else modifier
         )
     } else {
-        val request = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.Request(
-            uuid = model.uuid.orEmpty(),
-            type = model.type,
-            imgUri = model.imgUri,
-            videoUri = model.videoUri,
-            imgPath = model.imgPath
-        )
+        val request = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.requestForWallpaper(model)
         val bitmapState = produceState<Bitmap?>(
             initialValue = com.zeaze.tianyinwallpaper.utils.ThumbnailUtils.getFromCache(request),
             request
@@ -858,11 +884,12 @@ private fun SettingToggleRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     contentColor: Color,
-    isLightTheme: Boolean
+    isLightTheme: Boolean,
+    enableLiquidGlass: Boolean = true
 ) {
     val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
     val currentChecked by rememberUpdatedState(checked)
-    val toggleBackdrop = rememberLayerBackdrop()
+    val toggleBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
 
     Row(
         modifier = Modifier
@@ -872,12 +899,20 @@ private fun SettingToggleRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         androidx.compose.foundation.text.BasicText(label, style = TextStyle(contentColor, 15.sp))
-        LiquidToggle(
-            selected = { currentChecked },
-            onSelect = { currentOnCheckedChange(it) },
-            backdrop = toggleBackdrop,
-            isLightTheme = isLightTheme
-        )
+        if (toggleBackdrop != null) {
+            LiquidToggle(
+                selected = { currentChecked },
+                onSelect = { currentOnCheckedChange(it) },
+                backdrop = toggleBackdrop,
+                isLightTheme = isLightTheme
+            )
+        } else {
+            PlainSwitch(
+                checked = currentChecked,
+                onCheckedChange = { currentOnCheckedChange(it) },
+                isLightTheme = isLightTheme
+            )
+        }
     }
 }
 
@@ -921,7 +956,9 @@ private fun DetailHeaderChip(
                 surfaceColor = surfaceColor,
                 tint = tint,
                 luminanceState = luminanceState,
-                modifier = Modifier.height(44.dp)
+                modifier = Modifier.size(44.dp),
+                buttonHeight = 44.dp,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) {
                 Content()
             }
@@ -931,7 +968,9 @@ private fun DetailHeaderChip(
                 backdrop = backdrop,
                 surfaceColor = surfaceColor,
                 luminanceState = luminanceState,
-                modifier = Modifier.height(44.dp)
+                modifier = Modifier.size(44.dp),
+                buttonHeight = 44.dp,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
             ) {
                 Content()
             }
@@ -939,11 +978,10 @@ private fun DetailHeaderChip(
     } else if (iconRes != null) {
         Row(
             modifier = Modifier
-                .height(44.dp)
-                .clip(Capsule())
+                .size(44.dp)
+                .clip(CircleShape)
                 .background(surfaceColor)
-                .clickable(onClick = onClick)
-                .padding(horizontal = 14.dp),
+                .clickable(onClick = onClick),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1036,7 +1074,7 @@ private fun AdaptiveValueSlider(
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
     onValueChangeFinished: () -> Unit,
-    backdrop: Backdrop,
+    backdrop: Backdrop?,
     isLightTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -1044,16 +1082,27 @@ private fun AdaptiveValueSlider(
     val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
     val currentValue by rememberUpdatedState(value)
 
-    LiquidSlider(
-        value = { currentValue },
-        onValueChange = { currentOnValueChange(it) },
-        valueRange = valueRange,
-        visibilityThreshold = 0.001f,
-        backdrop = backdrop,
-        isLightTheme = isLightTheme,
-        onValueChangeFinished = { currentOnValueChangeFinished() },
-        modifier = modifier
-    )
+    if (backdrop != null) {
+        LiquidSlider(
+            value = { currentValue },
+            onValueChange = { currentOnValueChange(it) },
+            valueRange = valueRange,
+            visibilityThreshold = 0.001f,
+            backdrop = backdrop,
+            isLightTheme = isLightTheme,
+            onValueChangeFinished = { currentOnValueChangeFinished() },
+            modifier = modifier
+        )
+    } else {
+        PlainSlider(
+            value = currentValue,
+            onValueChange = { currentOnValueChange(it) },
+            valueRange = valueRange,
+            onValueChangeFinished = { currentOnValueChangeFinished() },
+            modifier = modifier,
+            contentColor = if (isLightTheme) Color.Black else Color.White
+        )
+    }
 }
 
 private fun resolvedContentColor(
@@ -1072,8 +1121,7 @@ internal fun WallpaperDetailScreen(
     onTimeAction: (startTime: Int, endTime: Int, loop: Boolean, independentTime: Boolean) -> Unit,
     onTransformAction: (scale: Float, offsetX: Float, offsetY: Float, rotation: Float) -> Unit,
     onBrightnessAction: (brightness: Float) -> Unit,
-    onVolumeAction: (volume: Float) -> Unit,
-    onClockColorModeAction: (mode: Int) -> Unit
+    onVolumeAction: (volume: Float) -> Unit
 ) {
     val context = LocalContext.current
     val isLightTheme = MaterialTheme.colors.isLight
@@ -1081,7 +1129,8 @@ internal fun WallpaperDetailScreen(
     val onPage = MaterialTheme.colors.onBackground
     val pillBackground = if (!isLightTheme) Color(0x22222222) else Color(0x22FFFFFF)
     val containerColor = if (isLightTheme) Color(0xFFFAFAFA).copy(0.6f) else Color(0xFF121212).copy(0.4f)
-    val accentColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF0091FF)
+    val accentColor = MaterialTheme.colors.primary
+    val applyIconColor = if (accentColor.luminance() > 0.5f) Color.Black else Color.White
     val contentColor = if (isLightTheme) Color.Black else Color.White
     val density = LocalDensity.current
     val bottomActionPadding =
@@ -1105,7 +1154,6 @@ internal fun WallpaperDetailScreen(
     val brightnessMax = 0f
     var brightness by remember { mutableStateOf(model.brightness.coerceIn(brightnessMin, brightnessMax)) }
     var volume by remember { mutableStateOf(model.volume.coerceIn(0f, 1f)) }
-    var clockColorMode by remember { mutableStateOf(model.clockColorMode) }
     var sourceWidth by remember { mutableStateOf(0f) }
     var sourceHeight by remember { mutableStateOf(0f) }
     val transformScope = rememberCoroutineScope()
@@ -1271,7 +1319,6 @@ internal fun WallpaperDetailScreen(
         onTransformAction(scale, offsetX, offsetY, rotation)
         onBrightnessAction(brightness)
         onVolumeAction(volume)
-        onClockColorModeAction(clockColorMode)
     }
 
     // 预览页返回时先保存当前缩放/位置/亮度。
@@ -1487,11 +1534,11 @@ internal fun WallpaperDetailScreen(
                 enableLiquidGlass = enableLiquidGlass,
                 backdrop = detailBackdrop,
                 luminanceState = applyLuminanceState,
-                surfaceColor = pillBackground,
-                textColor = accentColor,
+                surfaceColor = accentColor,
+                textColor = applyIconColor,
                 iconRes = R.drawable.complete,
                 iconContentDescription = "应用",
-                iconTint = accentColor
+                iconTint = applyIconColor
             )
         }
 
@@ -1541,7 +1588,6 @@ internal fun WallpaperDetailScreen(
                 if (!saveTimeSettings()) return
                 onBrightnessAction(brightness)
                 onVolumeAction(volume)
-                onClockColorModeAction(clockColorMode)
                 sheetCoroutineScope.launch {
                     animatedOffset.animateTo(2000f, animationSpec = tween(250))
                     onDismiss()
@@ -1584,7 +1630,7 @@ internal fun WallpaperDetailScreen(
                     .align(Alignment.BottomCenter)
                     .padding(start = 16.dp, end = 16.dp, bottom = sheetOuterBottomPadding)
             ) {
-                val sheetBackdrop = rememberLayerBackdrop()
+                val sheetBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
                 val editBackdrop = detailBackdrop ?: rememberCanvasBackdrop { drawRect(containerColor) }
 
                 Column(
@@ -1682,7 +1728,8 @@ internal fun WallpaperDetailScreen(
                             checked = magneticAssistEnabled,
                             onCheckedChange = { magneticAssistEnabled = it },
                             contentColor = contentColor,
-                            isLightTheme = isLightTheme
+                            isLightTheme = isLightTheme,
+                            enableLiquidGlass = enableLiquidGlass
                         )
 
                         if (showLoopToggle) {
@@ -1692,7 +1739,8 @@ internal fun WallpaperDetailScreen(
                                 checked = loopEnabled,
                                 onCheckedChange = { loopEnabled = it },
                                 contentColor = contentColor,
-                                isLightTheme = isLightTheme
+                                isLightTheme = isLightTheme,
+                                enableLiquidGlass = enableLiquidGlass
                             )
                         }
                         Spacer(Modifier.height(12.dp))
@@ -1702,7 +1750,8 @@ internal fun WallpaperDetailScreen(
                             checked = independentTimeEnabled,
                             onCheckedChange = { independentTimeEnabled = it },
                             contentColor = contentColor,
-                            isLightTheme = isLightTheme
+                            isLightTheme = isLightTheme,
+                            enableLiquidGlass = enableLiquidGlass
                         )
                         Spacer(Modifier.height(12.dp))
 
@@ -1742,41 +1791,6 @@ internal fun WallpaperDetailScreen(
                                 )
                             }
                         }
-                        Spacer(Modifier.height(12.dp))
-
-                        BasicText("锁屏时钟颜色", style = TextStyle(contentColor, 14.sp))
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(
-                                WallpaperClockColorMode.FOLLOW_GLOBAL,
-                                WallpaperClockColorMode.LIGHT_CLOCK,
-                                WallpaperClockColorMode.DARK_CLOCK
-                            ).forEach { mode ->
-                                val selected = clockColorMode == mode
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(36.dp)
-                                        .clip(RoundedCornerShape(18.dp))
-                                        .background(if (selected) accentColor else contentColor.copy(alpha = 0.1f))
-                                        .clickable {
-                                            clockColorMode = mode
-                                            onClockColorModeAction(mode)
-                                        },
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    BasicText(
-                                        WallpaperClockColorMode.label(mode),
-                                        style = TextStyle(if (selected) Color.White else contentColor, 13.sp)
-                                    )
-                                }
-                            }
-                        }
-
                         Spacer(Modifier.height(12.dp))
 
                         if (showVolumeSlider) {

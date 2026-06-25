@@ -71,7 +71,10 @@ class WebGaussianWallpaperRenderer(
     private var virtualDisplayHeight = 0
     @Volatile private var webLoadingListener: ((Boolean) -> Unit)? = null
     @Volatile private var webCenterOffsetListener: ((Float, Float) -> Unit)? = null
+    @Volatile private var webCameraDefaultsListener: ((Float, Float) -> Unit)? = null
     @Volatile private var backdropFrameListener: ((Bitmap) -> Unit)? = null
+    @Volatile private var thumbnailFrameListener: ((Bitmap) -> Unit)? = null
+    @Volatile private var thumbnailCaptureArmed = false
 
     init {
         controller.onRenderRequested = { requestRender() }
@@ -80,6 +83,13 @@ class WebGaussianWallpaperRenderer(
             webLoadingListener?.invoke(loading)
         }
         controller.onCenterOffsetChange = { x, y -> webCenterOffsetListener?.invoke(x, y) }
+        controller.onCameraDefaultsChange = { distance, fov ->
+            webCameraDefaultsListener?.invoke(distance, fov)
+        }
+        controller.onFirstFrameReady = {
+            thumbnailCaptureArmed = true
+            requestRender()
+        }
     }
 
     override fun start(surface: Surface) {
@@ -196,8 +206,18 @@ class WebGaussianWallpaperRenderer(
         webCenterOffsetListener = listener
     }
 
+    override fun setWebCameraDefaultsListener(listener: ((Float, Float) -> Unit)?) {
+        webCameraDefaultsListener = listener
+    }
+
     override fun setBackdropFrameListener(listener: ((Bitmap) -> Unit)?) {
         backdropFrameListener = listener
+        if (listener != null) requestRender()
+    }
+
+    fun setThumbnailFrameListener(listener: ((Bitmap) -> Unit)?, armImmediately: Boolean = false) {
+        thumbnailFrameListener = listener
+        thumbnailCaptureArmed = listener != null && armImmediately
         if (listener != null) requestRender()
     }
 
@@ -212,7 +232,7 @@ class WebGaussianWallpaperRenderer(
         controller.setParams(next)
     }
 
-    override fun updateGaussianParams(params: DepthGLRenderer.GaussianRenderParams) {
+    override fun updateGaussianParams(params: GaussianRenderParams) {
         val current = pendingParams ?: return
         val next = current.copy(
             cameraZoom = params.cameraZoom,
@@ -643,6 +663,7 @@ class WebGaussianWallpaperRenderer(
             }
             if (consumedWebFrame) {
                 captureBackdropFrameIfNeeded()
+                captureThumbnailFrameIfNeeded()
             }
         }
 
@@ -674,7 +695,33 @@ class WebGaussianWallpaperRenderer(
             val targetHeight = (height.toLong() * targetWidth / width.coerceAtLeast(1))
                 .toInt()
                 .coerceAtLeast(1)
-            if (!ensureCaptureTarget(targetWidth, targetHeight)) return
+            val bitmap = captureCurrentFrame(targetWidth, targetHeight) ?: return
+            lastBackdropCaptureNs = now
+            backdropCaptureCount++
+            if (backdropCaptureCount == 1 || backdropCaptureCount % 120 == 0) {
+                Log.d(
+                    TAG,
+                    "captured backdrop frame count=$backdropCaptureCount size=${captureWidth}x$captureHeight"
+                )
+            }
+            mainHandler.post {
+                backdropFrameListener?.invoke(bitmap)
+            }
+        }
+
+        private fun captureThumbnailFrameIfNeeded() {
+            val listener = thumbnailFrameListener ?: return
+            if (!hasFrame || !thumbnailCaptureArmed) return
+            val bitmap = captureCurrentFrame(width.coerceAtLeast(1), height.coerceAtLeast(1)) ?: return
+            thumbnailFrameListener = null
+            thumbnailCaptureArmed = false
+            mainHandler.post {
+                listener(bitmap)
+            }
+        }
+
+        private fun captureCurrentFrame(targetWidth: Int, targetHeight: Int): Bitmap? {
+            if (!ensureCaptureTarget(targetWidth, targetHeight)) return null
 
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, captureFramebufferId)
             GLES20.glViewport(0, 0, captureWidth, captureHeight)
@@ -682,7 +729,7 @@ class WebGaussianWallpaperRenderer(
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             drawOesTexture()
 
-            val rgba = captureBuffer ?: return
+            val rgba = captureBuffer ?: return null
             rgba.clear()
             GLES20.glReadPixels(
                 0,
@@ -694,7 +741,6 @@ class WebGaussianWallpaperRenderer(
                 rgba
             )
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
-            lastBackdropCaptureNs = now
 
             val pixels = capturePixels
             for (sourceY in 0 until captureHeight) {
@@ -709,22 +755,12 @@ class WebGaussianWallpaperRenderer(
                         (alpha shl 24) or (red shl 16) or (green shl 8) or blue
                 }
             }
-            val bitmap = Bitmap.createBitmap(
+            return Bitmap.createBitmap(
                 pixels,
                 captureWidth,
                 captureHeight,
                 Bitmap.Config.ARGB_8888
             )
-            backdropCaptureCount++
-            if (backdropCaptureCount == 1 || backdropCaptureCount % 120 == 0) {
-                Log.d(
-                    TAG,
-                    "captured backdrop frame count=$backdropCaptureCount size=${captureWidth}x$captureHeight"
-                )
-            }
-            mainHandler.post {
-                backdropFrameListener?.invoke(bitmap)
-            }
         }
 
         private fun ensureCaptureTarget(targetWidth: Int, targetHeight: Int): Boolean {

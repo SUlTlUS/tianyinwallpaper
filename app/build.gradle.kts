@@ -1,6 +1,5 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import org.gradle.api.JavaVersion
-import java.io.File
 
 plugins {
     alias(libs.plugins.android.application)
@@ -18,11 +17,6 @@ android {
         versionCode = 39
         versionName = "3.6.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        externalNativeBuild {
-            cmake {
-                cppFlags += listOf("-std=c++17", "-Wall", "-Wextra")
-            }
-        }
     }
 
     signingConfigs {
@@ -81,12 +75,6 @@ android {
         noCompress += listOf("tflite", "lite")
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
 }
 
 tasks.withType<KotlinCompile>().configureEach {

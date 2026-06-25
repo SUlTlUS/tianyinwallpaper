@@ -7,6 +7,8 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import android.util.LruCache
+import com.zeaze.tianyinwallpaper.model.RasterGroupModel
+import com.zeaze.tianyinwallpaper.model.TianYinWallpaperModel
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -29,8 +31,8 @@ object ThumbnailUtils {
 
     private const val TAG = "ThumbnailUtils"
     private const val MEMORY_DIVISOR = 8L
-    private const val VIDEO_THUMBNAIL_WIDTH = 360
-    private const val VIDEO_THUMBNAIL_HEIGHT = 640
+    private const val VIDEO_THUMBNAIL_WIDTH = 540
+    private const val VIDEO_THUMBNAIL_HEIGHT = 960
     
     // 预加载线程池
     private val preloadExecutor: ExecutorService = Executors.newFixedThreadPool(2)
@@ -80,6 +82,48 @@ object ThumbnailUtils {
         val cached: Int
     )
 
+    fun requestForWallpaper(
+        model: TianYinWallpaperModel,
+        priority: Int = Request.PRIORITY_NORMAL
+    ): Request {
+        val fallbackId = model.imgUri ?: model.videoUri ?: model.imgPath ?: model.videoPath ?: "unknown"
+        return Request(
+            uuid = model.uuid ?: fallbackId,
+            type = model.type,
+            imgUri = model.imgUri,
+            videoUri = model.videoUri,
+            imgPath = model.imgPath,
+            priority = priority
+        )
+    }
+
+    fun requestForRasterGroup(
+        group: RasterGroupModel,
+        priority: Int = Request.PRIORITY_NORMAL
+    ): Request? {
+        return if (group.type == RasterGroupModel.TYPE_STATIC) {
+            val firstImageUri = group.imageUris.firstOrNull() ?: return null
+            Request(
+                uuid = group.id,
+                type = RasterGroupModel.TYPE_STATIC,
+                imgUri = firstImageUri,
+                videoUri = null,
+                imgPath = null,
+                priority = priority
+            )
+        } else {
+            val dynamicVideoUri = group.videoUri ?: return null
+            Request(
+                uuid = group.id,
+                type = RasterGroupModel.TYPE_DYNAMIC,
+                imgUri = null,
+                videoUri = dynamicVideoUri,
+                imgPath = null,
+                priority = priority
+            )
+        }
+    }
+
     /**
      * 从内存缓存获取缩略图
      */
@@ -90,15 +134,27 @@ object ThumbnailUtils {
      */
     fun getFromCache(cacheKey: String): Bitmap? = cache.get(cacheKey)
 
+    fun getFromCacheOrDisk(context: Context, request: Request): Bitmap? {
+        getFromCache(request)?.let { return it }
+        return loadPersistedThumbnail(context, request)?.also { bitmap ->
+            cache.put(request.cacheKey, bitmap)
+        }
+    }
+
     /**
      * 加载缩略图（带缓存）
      */
     fun loadThumbnail(context: Context, request: Request): Bitmap? {
         // 先查缓存
         getFromCache(request)?.let { return it }
+        loadPersistedThumbnail(context, request)?.let { bitmap ->
+            cache.put(request.cacheKey, bitmap)
+            return bitmap
+        }
 
         // 加载缩略图
         val bitmap = loadThumbnailInternal(context, request) ?: return null
+        persistThumbnail(context, request, bitmap)
 
         // 存入缓存
         cache.put(request.cacheKey, bitmap)
@@ -279,19 +335,26 @@ object ThumbnailUtils {
      */
     fun removeWallpaperCache(context: Context, request: Request) {
         removeFromCache(request)
-        removeVideoThumbnailFile(context, request.uuid)
+        removeVideoThumbnailFile(context, request.cacheKey)
+        if (request.uuid != request.cacheKey) {
+            removeVideoThumbnailFile(context, request.uuid)
+        }
     }
 
     /**
      * 按 uuid 删除视频缩略图磁盘缓存
      */
-    fun removeVideoThumbnailFile(context: Context, uuid: String) {
-        if (uuid.isBlank()) return
-        val thumbnailFile = getVideoThumbnailFile(context, uuid) ?: return
-        if (!thumbnailFile.exists()) return
-
-        if (!thumbnailFile.delete()) {
-            Log.w(TAG, "Failed to delete video thumbnail: ${thumbnailFile.absolutePath}")
+    fun removeVideoThumbnailFile(context: Context, cacheKey: String) {
+        if (cacheKey.isBlank()) return
+        val thumbnailDir = getVideoThumbnailDir(context) ?: return
+        val candidates = listOf(
+            File(thumbnailDir, "${videoThumbnailFileStem(cacheKey)}.jpg"),
+            File(thumbnailDir, "$cacheKey.jpg")
+        ).distinctBy { it.absolutePath }
+        candidates.forEach { thumbnailFile ->
+            if (thumbnailFile.exists() && !thumbnailFile.delete()) {
+                Log.w(TAG, "Failed to delete video thumbnail: ${thumbnailFile.absolutePath}")
+            }
         }
     }
 
@@ -322,17 +385,11 @@ object ThumbnailUtils {
     // ── 内部方法 ──
 
     private fun loadThumbnailInternal(context: Context, request: Request): Bitmap? {
-        val options = BitmapFactory.Options().apply {
-            inPreferredConfig = Bitmap.Config.RGB_565
-        }
-
         return runCatching {
             when {
                 // 图片 URI
                 request.type == 0 && !request.imgUri.isNullOrEmpty() -> {
-                    context.contentResolver.openInputStream(Uri.parse(request.imgUri))?.use {
-                        BitmapFactory.decodeStream(it, null, options)
-                    }
+                    decodeSampledBitmap(context, Uri.parse(request.imgUri))
                 }
                 // 视频 URI
                 request.type == 1 && !request.videoUri.isNullOrEmpty() -> {
@@ -340,16 +397,65 @@ object ThumbnailUtils {
                 }
                 // 本地图片路径（旧版兼容）
                 !request.imgPath.isNullOrEmpty() -> {
-                    BitmapFactory.decodeFile(request.imgPath, options)
+                    decodeSampledBitmap(request.imgPath)
                 }
                 else -> null
             }
         }.getOrNull()
     }
 
+    private fun decodeSampledBitmap(context: Context, uri: Uri): Bitmap? {
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, bounds)
+        }
+        val options = BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.RGB_565
+            inSampleSize = calculateInSampleSize(bounds, VIDEO_THUMBNAIL_WIDTH, VIDEO_THUMBNAIL_HEIGHT)
+        }
+        return context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, options)
+        }
+    }
+
+    private fun decodeSampledBitmap(path: String): Bitmap? {
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeFile(path, bounds)
+        val options = BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.RGB_565
+            inSampleSize = calculateInSampleSize(bounds, VIDEO_THUMBNAIL_WIDTH, VIDEO_THUMBNAIL_HEIGHT)
+        }
+        return BitmapFactory.decodeFile(path, options)
+    }
+
+    private fun calculateInSampleSize(
+        options: BitmapFactory.Options,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Int {
+        val height = options.outHeight
+        val width = options.outWidth
+        var inSampleSize = 1
+
+        if (height > reqHeight || width > reqWidth) {
+            var halfHeight = height / 2
+            var halfWidth = width / 2
+
+            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+
+        return inSampleSize.coerceAtLeast(1)
+    }
+
     private fun loadVideoThumbnail(context: Context, request: Request): Bitmap? {
         // 先尝试从缓存文件读取
-        val thumbnailFile = getVideoThumbnailFile(context, request.uuid)
+        val thumbnailFile = getVideoThumbnailFile(context, request.cacheKey)
         if (thumbnailFile != null && thumbnailFile.exists()) {
             val options = BitmapFactory.Options().apply {
                 inPreferredConfig = Bitmap.Config.RGB_565
@@ -382,13 +488,37 @@ object ThumbnailUtils {
         }
     }
 
-    private fun getVideoThumbnailFile(context: Context, uuid: String): File? {
+    private fun loadPersistedThumbnail(context: Context, request: Request): Bitmap? {
+        val thumbnailFile = getVideoThumbnailFile(context, request.cacheKey) ?: return null
+        if (!thumbnailFile.exists() || thumbnailFile.length() <= 0L) return null
+        val options = BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        return BitmapFactory.decodeFile(thumbnailFile.absolutePath, options)
+    }
+
+    private fun persistThumbnail(context: Context, request: Request, bitmap: Bitmap) {
+        val thumbnailFile = getVideoThumbnailFile(context, request.cacheKey) ?: return
+        if (thumbnailFile.exists() && thumbnailFile.length() > 0L) return
+        saveVideoThumbnail(bitmap, thumbnailFile)
+    }
+
+    private fun getVideoThumbnailFile(context: Context, cacheKey: String): File? {
+        val thumbnailDir = getVideoThumbnailDir(context) ?: return null
+        return File(thumbnailDir, "${videoThumbnailFileStem(cacheKey)}.jpg")
+    }
+
+    private fun getVideoThumbnailDir(context: Context): File? {
         val root = context.getExternalFilesDir(null) ?: return null
         val thumbnailDir = File(root, "thumbnail_cache")
         if (!thumbnailDir.mkdirs() && !thumbnailDir.exists()) {
             return null
         }
-        return File(thumbnailDir, "$uuid.jpg")
+        return thumbnailDir
+    }
+
+    private fun videoThumbnailFileStem(cacheKey: String): String {
+        return Integer.toHexString(cacheKey.hashCode())
     }
 
     private fun saveVideoThumbnail(bitmap: Bitmap, file: File) {

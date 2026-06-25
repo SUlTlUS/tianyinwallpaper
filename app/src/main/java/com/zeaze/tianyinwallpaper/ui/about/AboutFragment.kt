@@ -2,12 +2,13 @@ package com.zeaze.tianyinwallpaper.ui.about
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.PredictiveBackHandler
 import com.zeaze.tianyinwallpaper.utils.ThumbnailUtils
 import com.zeaze.tianyinwallpaper.App
 import com.zeaze.tianyinwallpaper.base.rxbus.RxBus
 import com.zeaze.tianyinwallpaper.base.rxbus.RxConstants
+import com.zeaze.tianyinwallpaper.backdrop.Backdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.layerBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberCanvasBackdrop
 import com.zeaze.tianyinwallpaper.backdrop.backdrops.rememberLayerBackdrop
@@ -19,7 +20,10 @@ import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperKindFilter
 import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperSortDirection
 import com.zeaze.tianyinwallpaper.ui.main.MainWallpaperSortMode
 import com.zeaze.tianyinwallpaper.utils.FileUtil
-import androidx.compose.foundation.BorderStroke
+import com.zeaze.tianyinwallpaper.utils.LiquidGlassPrefs
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import com.zeaze.tianyinwallpaper.catalog.components.LiquidButtonGroup
+import com.zeaze.tianyinwallpaper.catalog.components.PlainFallbackStyle
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +41,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -59,10 +64,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.TextStyle
@@ -72,7 +79,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.alibaba.fastjson.JSON
 import com.kyant.shapes.Capsule
-import com.zeaze.tianyinwallpaper.backdrop.backdrops.LayerBackdrop
+import com.zeaze.tianyinwallpaper.R
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -82,7 +89,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.zeaze.tianyinwallpaper.catalog.components.LiquidButton
+import kotlinx.coroutines.CancellationException
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.ui.graphics.graphicsLayer
@@ -91,9 +98,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 
 private data class AboutGroupUiModel(
+    val stableId: String,
+    val addedIndex: Int,
     val saveData: SaveData,
-    val wallpapers: List<TianYinWallpaperModel>
+    val wallpapers: List<TianYinWallpaperModel>,
+    val typeRank: Int
 )
+
+private val AboutTopButtonSize = 44.dp
 
 @OptIn(FlowPreview::class)
 @Composable
@@ -102,9 +114,13 @@ fun AboutRouteScreen(
     kindFilters: Set<MainWallpaperKindFilter> = emptySet(),
     sortMode: MainWallpaperSortMode = MainWallpaperSortMode.Custom,
     sortDirection: MainWallpaperSortDirection = MainWallpaperSortDirection.Descending,
+    onPageBackdropReady: (Backdrop?) -> Unit = {},
     onSelectionModeChange: (Boolean) -> Unit = {},
     showBackButton: Boolean = false,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onSortClick: () -> Unit = {},
+    onFilterClick: () -> Unit = {},
+    enableLiquidGlass: Boolean = true
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -114,7 +130,7 @@ fun AboutRouteScreen(
         if (id > 0) context.resources.getDimensionPixelSize(id) else 0
     }
     val statusBarTopPaddingDp = with(density) { statusBarTopPadding.toDp() }
-    val groupUiList = remember { mutableStateListOf<AboutGroupUiModel>() }
+    var groupUiList by remember { mutableStateOf<List<AboutGroupUiModel>>(emptyList()) }
     val selectedPositions = remember { mutableStateListOf<Int>() }
     val listState = rememberLazyListState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -124,19 +140,20 @@ fun AboutRouteScreen(
     var selectionMode by remember { mutableStateOf(false) }
     var pendingOverwriteGroup by remember { mutableStateOf<SaveData?>(null) }
     val isLightTheme = !useDarkTheme
-    val enableLiquidGlass = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-    val liquidBackdrop = if (enableLiquidGlass) rememberLayerBackdrop() else null
+    val useLiquidGlass = enableLiquidGlass && LiquidGlassPrefs.isEnabled(context)
     val backgroundColor = if (isLightTheme) Color.White else Color(0xFF0A0A0C)
     val canvasBackdrop = rememberCanvasBackdrop { drawRect(backgroundColor) }
-    val dialogBackdrop = liquidBackdrop ?: canvasBackdrop
+    val topBackdrop = if (useLiquidGlass) rememberLayerBackdrop() else null
+    val dialogBackdrop = topBackdrop ?: canvasBackdrop
     val groupBackgroundColor = if (isLightTheme) Color(0xFFF2F3F7) else Color(0xFF1C1C20).copy(alpha = 0.94f)
+    val topSurfaceColor = if (isLightTheme) Color.White.copy(alpha = 0.3f) else Color.Black.copy(alpha = 0.3f)
     val groupLabelColor = if (isLightTheme) Color(0xFF1A1A1F) else Color(0xFFF5F5FA)
-    val selectedIndicatorColor = if (isLightTheme) Color(0xFF0088FF) else Color(0xFF4DA3FF)
+    val selectedIndicatorColor = MaterialTheme.colors.primary
     val pref = remember(context) { context.getSharedPreferences(App.TIANYIN, Context.MODE_PRIVATE) }
     var recentOpenedVersion by remember { mutableStateOf(0) }
 
     fun groupKey(group: AboutGroupUiModel): String {
-        return "${group.saveData.name.orEmpty()}\u0000${group.saveData.s.orEmpty()}"
+        return group.stableId
     }
 
     fun groupMatchesFilters(group: AboutGroupUiModel): Boolean {
@@ -150,13 +167,7 @@ fun AboutRouteScreen(
     }
 
     fun groupTypeRank(group: AboutGroupUiModel): Int {
-        val hasImage = group.wallpapers.any { it.type == 0 }
-        val hasVideo = group.wallpapers.any { it.type != 0 }
-        return when {
-            hasImage && hasVideo -> 2
-            hasVideo -> 1
-            else -> 0
-        }
+        return group.typeRank
     }
 
     fun groupRecentRank(group: AboutGroupUiModel): Long {
@@ -189,8 +200,10 @@ fun AboutRouteScreen(
         onMove = { from, to ->
             if (sortMode != MainWallpaperSortMode.Custom || kindFilters.isNotEmpty()) return@rememberReorderableLazyListState
             updateSelectedIndices(from.index, to.index)
-            val movedItem = groupUiList.removeAt(from.index)
-            groupUiList.add(to.index, movedItem)
+            val movedGroups = groupUiList.toMutableList()
+            val movedItem = movedGroups.removeAt(from.index)
+            movedGroups.add(to.index, movedItem)
+            groupUiList = movedGroups
             pendingReorderSave = true
         }
     )
@@ -205,43 +218,67 @@ fun AboutRouteScreen(
         selectedPositions.clear()
     }
 
+    DisposableEffect(topBackdrop) {
+        onPageBackdropReady(topBackdrop)
+        onDispose { onPageBackdropReady(null) }
+    }
+
+    PredictiveBackHandler(enabled = selectionMode) { progress ->
+        try {
+            progress.collect { }
+            exitSelectionMode()
+        } catch (_: CancellationException) {
+        }
+    }
+
     fun loadGroups() {
         loadGroupsJob?.cancel()
         loadGroupsJob = scope.launch(Dispatchers.IO) {
             val data = FileUtil.loadData(context, FileUtil.dataPath)
             if (data == lastGroupsJson) return@launch
             val list = JSON.parseArray(data, SaveData::class.java) ?: emptyList()
-            val uiModels = list.map { saveData ->
+            val uiModels = list.mapIndexed { index, saveData ->
+                val wallpapers = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java) ?: emptyList()
+                val hasImage = wallpapers.any { it.type == 0 }
+                val hasVideo = wallpapers.any { it.type != 0 }
                 AboutGroupUiModel(
+                    stableId = "${saveData.name.orEmpty().hashCode().toUInt().toString(16)}-${saveData.s.orEmpty().hashCode().toUInt().toString(16)}",
+                    addedIndex = index,
                     saveData = saveData,
-                    wallpapers = JSON.parseArray(saveData.s, TianYinWallpaperModel::class.java) ?: emptyList()
+                    wallpapers = wallpapers,
+                    typeRank = when {
+                        hasImage && hasVideo -> 2
+                        hasVideo -> 1
+                        else -> 0
+                    }
                 )
             }
             withContext(Dispatchers.Main) {
                 if (data == lastGroupsJson) return@withContext
                 lastGroupsJson = data
-                groupUiList.clear()
-                groupUiList.addAll(uiModels)
+                groupUiList = uiModels
                 selectedPositions.clear()
                 groupsVersion++
             }
         }
     }
 
-    val filteredGroups = groupUiList.filter { groupMatchesFilters(it) }
-    val visibleGroups = if (sortMode == MainWallpaperSortMode.Custom) {
-        filteredGroups
-    } else {
-        val sorted = when (sortMode) {
-            MainWallpaperSortMode.Custom -> filteredGroups
-            MainWallpaperSortMode.AddedDate -> filteredGroups.sortedBy { -groupUiList.indexOf(it).toLong() }
-            MainWallpaperSortMode.Type -> filteredGroups.sortedWith(
-                compareBy<AboutGroupUiModel> { groupTypeRank(it) }.thenBy { it.saveData.name.orEmpty() }
-            )
-            MainWallpaperSortMode.Size -> filteredGroups.sortedBy { it.wallpapers.size }
-            MainWallpaperSortMode.RecentOpened -> filteredGroups.sortedBy { groupRecentRank(it) }
+    val visibleGroups = remember(groupUiList, kindFilters, sortMode, sortDirection, recentOpenedVersion) {
+        val filteredGroups = groupUiList.filter { groupMatchesFilters(it) }
+        if (sortMode == MainWallpaperSortMode.Custom) {
+            filteredGroups
+        } else {
+            val sorted = when (sortMode) {
+                MainWallpaperSortMode.Custom -> filteredGroups
+                MainWallpaperSortMode.AddedDate -> filteredGroups.sortedBy { it.addedIndex }
+                MainWallpaperSortMode.Type -> filteredGroups.sortedWith(
+                    compareBy<AboutGroupUiModel> { groupTypeRank(it) }.thenBy { it.saveData.name.orEmpty() }
+                )
+                MainWallpaperSortMode.Size -> filteredGroups.sortedBy { it.wallpapers.size }
+                MainWallpaperSortMode.RecentOpened -> filteredGroups.sortedBy { groupRecentRank(it) }
+            }
+            if (sortDirection == MainWallpaperSortDirection.Descending) sorted.asReversed() else sorted
         }
-        if (sortDirection == MainWallpaperSortDirection.Descending) sorted.asReversed() else sorted
     }
 
     fun deleteSelectedGroups() {
@@ -255,8 +292,7 @@ fun AboutRouteScreen(
         FileUtil.save(context, remainedJson, FileUtil.dataPath) {
             scope.launch {
                 lastGroupsJson = remainedJson
-                groupUiList.clear()
-                groupUiList.addAll(remained)
+                groupUiList = remained
                 groupsVersion++
                 exitSelectionMode()
                 Toast.makeText(context, "已删除选中分组", Toast.LENGTH_SHORT).show()
@@ -265,9 +301,9 @@ fun AboutRouteScreen(
     }
 
     LaunchedEffect(Unit) { loadGroups() }
-    val preloadRequests = remember(groupsVersion) { buildPreloadRequests(groupUiList) }
-    LaunchedEffect(listState, groupsVersion) {
-        if (preloadRequests.isEmpty()) return@LaunchedEffect
+    val preloadRequestGroups = remember(groupUiList) { buildPreloadRequestGroups(groupUiList) }
+    LaunchedEffect(listState, preloadRequestGroups) {
+        if (preloadRequestGroups.isEmpty()) return@LaunchedEffect
         androidx.compose.runtime.snapshotFlow {
             val visibleItems = listState.layoutInfo.visibleItemsInfo
             val start = visibleItems.firstOrNull()?.index ?: 0
@@ -277,13 +313,26 @@ fun AboutRouteScreen(
             .debounce(120)
             .distinctUntilChanged()
             .collectLatest { (start, end) ->
-                ThumbnailUtils.preloadVisibleRange(
-                    context = context,
-                    requests = preloadRequests,
-                    visibleStart = start,
-                    visibleEnd = end,
-                    preloadOffset = PRELOAD_RANGE_OFFSET
-                )
+                val nearbyRequests = buildList {
+                    val beforeStart = (start - PRELOAD_GROUP_OFFSET).coerceAtLeast(0)
+                    for (index in beforeStart until start.coerceAtMost(preloadRequestGroups.size)) {
+                        addAll(preloadRequestGroups[index])
+                    }
+                    val afterStart = (end + 1).coerceAtLeast(0)
+                    val afterEnd = (end + 1 + PRELOAD_GROUP_OFFSET).coerceAtMost(preloadRequestGroups.size)
+                    for (index in afterStart until afterEnd) {
+                        addAll(preloadRequestGroups[index])
+                    }
+                }.distinctBy { it.cacheKey }
+                if (nearbyRequests.isNotEmpty()) {
+                    ThumbnailUtils.preloadVisibleRange(
+                        context = context,
+                        requests = nearbyRequests,
+                        visibleStart = 0,
+                        visibleEnd = nearbyRequests.lastIndex,
+                        preloadOffset = 0
+                    )
+                }
             }
     }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -314,38 +363,50 @@ fun AboutRouteScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .let { m ->
-                    if (enableLiquidGlass && liquidBackdrop != null) m.layerBackdrop(liquidBackdrop) else m
+                .let { base ->
+                    if (useLiquidGlass && topBackdrop != null) {
+                        base.layerBackdrop(topBackdrop)
+                    } else {
+                        base
+                    }
                 }
         ) {
-            Box(modifier = Modifier.fillMaxSize().background(backgroundColor))
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(
-                    top = statusBarTopPaddingDp + 76.dp,
-                    bottom = if (selectionMode) 90.dp else 110.dp
-                )
-            ) {
-                itemsIndexed(
-                    visibleGroups,
-                    key = { _, item -> "${item.saveData.name ?: ""}\u0000${item.saveData.s ?: ""}" }
-                ) { index, group ->
-                    val selected = selectedPositions.contains(index)
-                    val key = "${group.saveData.name ?: ""}\u0000${group.saveData.s ?: ""}"
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.fillMaxSize().background(backgroundColor))
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(
+                        top = statusBarTopPaddingDp + 76.dp,
+                        bottom = if (selectionMode) 90.dp else 110.dp
+                    )
+                ) {
+                    itemsIndexed(
+                        visibleGroups,
+                        key = { _, item -> item.stableId }
+                    ) { index, group ->
+                        val selected = selectedPositions.contains(index)
+                        val key = group.stableId
 
-                    ReorderableItem(reorderableState, key = key) { isDragging ->
-                        AboutGroupItem(
+                        ReorderableItem(reorderableState, key = key) { isDragging ->
+                            val itemShape = RoundedCornerShape(28.dp)
+                            AboutGroupItem(
                             modifier = Modifier.fillMaxWidth()
-                                .graphicsLayer {
-                                    scaleX = if (isDragging) 1.05f else 1f
-                                    scaleY = if (isDragging) 1.05f else 1f
-                                    shadowElevation = if (isDragging) 8.dp.toPx() else 0f
-                                    shape = RoundedCornerShape(28.dp)
-                                    clip = true
+                                .let { base ->
+                                    if (isDragging) {
+                                        base.graphicsLayer {
+                                            scaleX = 1.05f
+                                            scaleY = 1.05f
+                                            shadowElevation = 8.dp.toPx()
+                                            shape = itemShape
+                                            clip = true
+                                        }
+                                    } else {
+                                        base
+                                    }
                                 }
                                 .let { base ->
                                     if (sortMode == MainWallpaperSortMode.Custom && kindFilters.isEmpty()) {
@@ -403,7 +464,8 @@ fun AboutRouteScreen(
                                     pendingOverwriteGroup = group.saveData
                                 }
                             }
-                        )
+                            )
+                        }
                     }
                 }
             }
@@ -414,7 +476,8 @@ fun AboutRouteScreen(
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .zIndex(2f),
-            backdrop = liquidBackdrop
+            backdrop = topBackdrop,
+            isLightTheme = isLightTheme
         )
 
         LiquidConfirmOverlay(
@@ -456,8 +519,8 @@ fun AboutRouteScreen(
             com.zeaze.tianyinwallpaper.ui.main.SelectionTopBar(
                 modifier = Modifier.zIndex(3f),
                 statusBarTopPaddingDp = statusBarTopPaddingDp,
-                enableLiquidGlass = enableLiquidGlass,
-                backdrop = liquidBackdrop,
+                enableLiquidGlass = useLiquidGlass,
+                backdrop = topBackdrop,
                 isAllSelected = isAllSelected,
                 isLightTheme = !useDarkTheme,
                 onCancelSelect = { exitSelectionMode() },
@@ -477,33 +540,34 @@ fun AboutRouteScreen(
                 modifier = Modifier
                     .zIndex(3f)
                     .fillMaxWidth()
-                    .padding(top = statusBarTopPaddingDp + 10.dp, start = 12.dp, end = 12.dp),
+                    .padding(top = statusBarTopPaddingDp + 12.dp, start = 12.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val isDark = useDarkTheme
-                val adaptiveSurfaceColor = groupBackgroundColor
                 val textColor = if (isDark) Color.White else Color.Black
 
-                Text(
-                    text = "分组",
-                    color = textColor,
-                    fontSize = 32.sp,
-                    modifier = Modifier.weight(1f),
-                    style = TextStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                )
-
                 if (showBackButton) {
-                    AboutTopActionButton(
-                        text = "返回",
+                    AboutTopIconButton(
+                        iconRes = R.drawable.back,
                         onClick = onBack,
-                        enableLiquidGlass = enableLiquidGlass,
-                        liquidBackdrop = liquidBackdrop,
-                        surfaceColor = adaptiveSurfaceColor,
+                        enableLiquidGlass = useLiquidGlass,
+                        backdrop = topBackdrop,
+                        surfaceColor = topSurfaceColor,
                         isDark = isDark,
                         textColor = textColor
                     )
                 }
+
+                AboutSortFilterButtonGroup(
+                    onSortClick = onSortClick,
+                    onFilterClick = onFilterClick,
+                    enableLiquidGlass = useLiquidGlass,
+                    backdrop = topBackdrop,
+                    surfaceColor = topSurfaceColor,
+                    isDark = isDark,
+                    textColor = textColor
+                )
 
             }
         }
@@ -515,39 +579,102 @@ fun AboutRouteScreen(
 }
 
 @Composable
-private fun AboutTopActionButton(
-    text: String,
+private fun AboutTopIconButton(
+    iconRes: Int,
     onClick: () -> Unit,
     enableLiquidGlass: Boolean,
-    liquidBackdrop: LayerBackdrop?,
+    backdrop: Backdrop?,
     surfaceColor: Color,
     isDark: Boolean,
     textColor: Color
 ) {
-    if (enableLiquidGlass && liquidBackdrop != null) {
+    if (enableLiquidGlass && backdrop != null) {
         LiquidButton(
             onClick = onClick,
-            backdrop = liquidBackdrop,
+            backdrop = backdrop,
+            modifier = Modifier.size(AboutTopButtonSize),
             surfaceColor = surfaceColor,
-            modifier = Modifier.height(48.dp)
-        ) {
-            BasicText(
-                text = text,
-                modifier = Modifier.padding(horizontal = 16.dp),
-                style = TextStyle(textColor, 15.sp)
-            )
-        }
+            buttonHeight = AboutTopButtonSize,
+            contentPadding = PaddingValues(0.dp),
+            iconRes = iconRes,
+            iconContentDescription = null,
+            iconSize = 20.dp,
+            iconTint = textColor
+        )
     } else {
         Surface(
             modifier = Modifier
-                .height(48.dp)
+                .size(AboutTopButtonSize)
                 .clickable { onClick() },
-            shape = Capsule(),
-            color = if (isDark) Color(0x33000000) else Color(0xAAFFFFFF),
-            border = BorderStroke(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x88FFFFFF))
+            shape = CircleShape,
+            color = PlainFallbackStyle.surface(isLightTheme = !isDark),
+            border = PlainFallbackStyle.border(isLightTheme = !isDark)
         ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
-                Text(text = text, color = textColor, fontSize = 15.sp)
+            Box(contentAlignment = Alignment.Center) {
+                Image(
+                    painter = painterResource(iconRes),
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(textColor),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AboutSortFilterButtonGroup(
+    onSortClick: () -> Unit,
+    onFilterClick: () -> Unit,
+    enableLiquidGlass: Boolean,
+    backdrop: Backdrop?,
+    surfaceColor: Color,
+    isDark: Boolean,
+    textColor: Color
+) {
+    if (enableLiquidGlass && backdrop != null) {
+        LiquidButtonGroup(
+            buttonCount = 2,
+            onButtonClick = { index -> if (index == 0) onSortClick() else onFilterClick() },
+            backdrop = backdrop,
+            surfaceColor = surfaceColor,
+            buttonHeight = AboutTopButtonSize,
+            buttonWidth = AboutTopButtonSize,
+            contentPadding = PaddingValues(0.dp),
+            iconRes = { index -> if (index == 0) R.drawable.sort else R.drawable.fliter },
+            iconContentDescription = { index -> if (index == 0) "排序" else "筛选" },
+            iconSize = { 20.dp },
+            iconTint = { textColor }
+        )
+    } else {
+        Surface(
+            modifier = Modifier
+                .height(AboutTopButtonSize)
+                .width(AboutTopButtonSize * 2f),
+            shape = Capsule(),
+            color = PlainFallbackStyle.surface(isLightTheme = !isDark),
+            border = PlainFallbackStyle.border(isLightTheme = !isDark)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(2) { index ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clickable(onClick = if (index == 0) onSortClick else onFilterClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(if (index == 0) R.drawable.sort else R.drawable.fliter),
+                            contentDescription = null,
+                            colorFilter = ColorFilter.tint(textColor),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -635,8 +762,14 @@ private fun AboutGroupItem(
 
 @Composable
 private fun PreviewImage(context: Context, model: TianYinWallpaperModel?, modifier: Modifier) {
-    val bitmap by produceState<Bitmap?>(initialValue = null, model) {
-        value = loadPreviewBitmap(context, model)
+    val request = remember(model) { model?.toThumbnailRequest() }
+    val bitmap by produceState<Bitmap?>(
+        initialValue = request?.let { ThumbnailUtils.getFromCache(it) },
+        request?.cacheKey
+    ) {
+        if (request != null && value == null) {
+            value = loadPreviewBitmap(context, request)
+        }
     }
     bitmap?.let {
         Image(
@@ -650,39 +783,31 @@ private fun PreviewImage(context: Context, model: TianYinWallpaperModel?, modifi
         .background(MaterialTheme.colors.background))
 }
 
-private suspend fun loadPreviewBitmap(context: Context, model: TianYinWallpaperModel?): Bitmap? {
-    if (model == null) return null
+private suspend fun loadPreviewBitmap(context: Context, request: ThumbnailUtils.Request?): Bitmap? {
+    if (request == null) return null
     return withContext(Dispatchers.IO) {
-        ThumbnailUtils.loadThumbnail(context, model.toThumbnailRequest())
+        ThumbnailUtils.loadThumbnail(context, request)
     }
 }
 
-private fun buildPreloadRequests(groups: List<AboutGroupUiModel>): List<ThumbnailUtils.Request> {
-    val requests = ArrayList<ThumbnailUtils.Request>(groups.size * PREVIEW_COUNT)
-    groups.forEach { group ->
-        group.wallpapers.take(PREVIEW_COUNT).forEach { model ->
-            requests.add(model.toThumbnailRequest(priority = ThumbnailUtils.Request.PRIORITY_HIGH))
-        }
+private fun buildPreloadRequestGroups(
+    groups: List<AboutGroupUiModel>
+): List<List<ThumbnailUtils.Request>> {
+    return groups.map { group ->
+        group.wallpapers.take(PREVIEW_COUNT)
+            .map { model -> model.toThumbnailRequest(priority = ThumbnailUtils.Request.PRIORITY_HIGH) }
+            .distinctBy { it.cacheKey }
     }
-    return requests.distinctBy { it.cacheKey }
 }
 
 private fun TianYinWallpaperModel.toThumbnailRequest(
     priority: Int = ThumbnailUtils.Request.PRIORITY_NORMAL
 ): ThumbnailUtils.Request {
-    val fallbackId = imgUri ?: videoUri ?: imgPath ?: "unknown"
-    return ThumbnailUtils.Request(
-        uuid = uuid ?: fallbackId,
-        type = type,
-        imgUri = imgUri,
-        videoUri = videoUri,
-        imgPath = imgPath,
-        priority = priority
-    )
+    return ThumbnailUtils.requestForWallpaper(this, priority)
 }
 
 private const val ITEM_PREVIEW_HEIGHT_DP = 100
 private const val ITEM_PREVIEW_TOP_MARGIN_DP = 8
 private const val ITEM_PREVIEW_SPACING_DP = 6
 private const val PREVIEW_COUNT = 5
-private const val PRELOAD_RANGE_OFFSET = 6
+private const val PRELOAD_GROUP_OFFSET = 2

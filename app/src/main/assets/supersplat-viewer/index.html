@@ -589,11 +589,15 @@
                 let frameCamera = null;
                 let baseCamera = null;
                 let cameraDefaults = null;
-                let parallaxStrength = 0.075;
-                let cameraZoom = 1;
+                let parallaxStrength = 0.08;
+                let cameraZoom = 0;
+                let cameraDefaultDistance = 0;
+                let cameraDefaultFov = 0;
+                let cameraCalibrationVersion = 0;
+                let resetToWallpaperDefaultDistance = true;
                 let centerOffsetX = 0;
                 let centerOffsetY = 0;
-                let focusDepth = 0.25;
+                let focusDepth = 30;
                 let cameraFov = 60;
                 let backgroundRed = 0;
                 let backgroundGreen = 0;
@@ -601,6 +605,11 @@
                 let lastTiltX = 0;
                 let lastTiltY = 0;
                 let suppressParamApply = false;
+                let cameraCalibrationRunning = false;
+                let cameraCalibrationComplete = false;
+                let originCameraProfileReady = false;
+                let firstModelFrameReady = false;
+                let cameraCalibrationTimer = 0;
 
                 const requestFrame = () => {
                     viewer.forceRenderNextFrame = true;
@@ -615,6 +624,92 @@
                     y: a.z * b.x - a.x * b.z,
                     z: a.x * b.y - a.y * b.x
                 });
+
+                const normalize = (value) => {
+                    const length = Math.hypot(value.x, value.y, value.z);
+                    if (!Number.isFinite(length) || length <= 0.000001) return null;
+                    return {
+                        x: value.x / length,
+                        y: value.y / length,
+                        z: value.z / length
+                    };
+                };
+
+                const cameraFrustumTangents = (fov) => {
+                    const device = viewer.global.app.graphicsDevice;
+                    const width = Math.max(device.width, 1);
+                    const height = Math.max(device.height, 1);
+                    const aspect = width / height;
+                    const tangent = Math.tan(Math.max(1, Math.min(179, fov)) * Math.PI / 360);
+                    return width > height
+                        ? { horizontal: tangent, vertical: tangent / aspect }
+                        : { horizontal: tangent * aspect, vertical: tangent };
+                };
+
+                const calculateProfileFov = (profile) => {
+                    const angularSize = profile?.angularSize;
+                    if (!angularSize?.every(Number.isFinite)) return 0;
+                    const device = viewer.global.app.graphicsDevice;
+                    const width = Math.max(device.width, 1);
+                    const height = Math.max(device.height, 1);
+                    const aspect = width / height;
+                    const horizontal = Math.max(0.01, angularSize[0]);
+                    const vertical = Math.max(0.01, angularSize[1]);
+                    const fovRadians = width > height
+                        ? Math.min(horizontal, 2 * Math.atan(Math.tan(vertical * 0.5) * aspect))
+                        : Math.min(vertical, 2 * Math.atan(Math.tan(horizontal * 0.5) / aspect));
+                    return Math.max(20, Math.min(120, fovRadians * 180 / Math.PI * 1.04));
+                };
+
+                const viewFitsFrontFace = (position, target, fov, bounds) => {
+                    const forward = normalize({
+                        x: target.x - position.x,
+                        y: target.y - position.y,
+                        z: target.z - position.z
+                    });
+                    if (!forward) return false;
+                    const right = normalize({ x: forward.z, y: 0, z: -forward.x });
+                    if (!right) return false;
+                    const up = normalize(cross(forward, right));
+                    if (!up) return false;
+                    const tangents = cameraFrustumTangents(fov);
+                    const epsilon = Math.max(bounds.halfX, bounds.halfY) * 0.0001;
+                    for (const xSign of [-1, 1]) {
+                        for (const ySign of [-1, 1]) {
+                            const rayX = forward.x + right.x * tangents.horizontal * xSign + up.x * tangents.vertical * ySign;
+                            const rayY = forward.y + right.y * tangents.horizontal * xSign + up.y * tangents.vertical * ySign;
+                            const rayZ = forward.z + right.z * tangents.horizontal * xSign + up.z * tangents.vertical * ySign;
+                            if (Math.abs(rayZ) <= 0.000001) return false;
+                            const distance = (bounds.frontZ - position.z) / rayZ;
+                            if (!Number.isFinite(distance) || distance <= 0) return false;
+                            const hitX = position.x + rayX * distance;
+                            const hitY = position.y + rayY * distance;
+                            if (
+                                hitX < bounds.centerX - bounds.halfX - epsilon ||
+                                hitX > bounds.centerX + bounds.halfX + epsilon ||
+                                hitY < bounds.centerY - bounds.halfY - epsilon ||
+                                hitY > bounds.centerY + bounds.halfY + epsilon
+                            ) {
+                                return false;
+                            }
+                        }
+                    }
+                    return true;
+                };
+
+                const calculateParallaxMove = (base) => {
+                    const strength = Math.max(0, Math.min(parallaxStrength, 0.16));
+                    const depthFactor = base.parallaxDepthFactor;
+                    if (Number.isFinite(depthFactor) && depthFactor > 0.000001) {
+                        const tangents = cameraFrustumTangents(base.fov);
+                        const screenTangent = Math.max(0.001, Math.min(tangents.horizontal, tangents.vertical));
+                        const move = strength * 2.0 * screenTangent / depthFactor;
+                        if (Number.isFinite(move) && move > 0) {
+                            return Math.min(move, base.distance * 0.8);
+                        }
+                    }
+                    return base.frameDistance * strength * 2.4;
+                };
 
                 const applyRenderPose = (position, target, fov) => {
                     const cm = getCameraManager();
@@ -644,56 +739,162 @@
                         const camera = cm.camera;
                         if (!cameraDefaults) {
                             const sceneCenter = window.tianyinSceneCenter;
-                            const rawTarget = camera.position.clone();
-                            camera.calcFocusPoint(rawTarget);
-                            if ((!Number.isFinite(rawTarget.x) || !Number.isFinite(rawTarget.y) || !Number.isFinite(rawTarget.z)) && sceneCenter) {
-                                rawTarget.set(sceneCenter[0], sceneCenter[1], sceneCenter[2]);
+                            const sceneHalfExtents = window.tianyinSceneHalfExtents;
+                            if (
+                                !sceneCenter?.every(Number.isFinite) ||
+                                !sceneHalfExtents?.every(Number.isFinite)
+                            ) {
+                                return null;
                             }
                             window.tianyinCameraOverride = true;
-                            const radius = Math.max(window.tianyinSceneRadius || 1, 0.001);
-                            const target = rawTarget.clone();
-                            target.z += radius * focusDepth;
-                            const frontDirection = rawTarget.clone().set(0, 0, -1);
-                            const defaultDistance = Math.max(camera.position.distance(target), radius * 0.02);
+                            const halfX = Math.max(sceneHalfExtents[0], 0.001);
+                            const halfY = Math.max(sceneHalfExtents[1], 0.001);
+                            const halfZ = Math.max(sceneHalfExtents[2], 0.001);
+                            const radius = Math.hypot(halfX, halfY, halfZ);
+                            const profile = window.tianyinOriginCameraProfile;
+                            const profileValid =
+                                profile?.origin?.every(Number.isFinite) &&
+                                profile?.centerAngles?.every(Number.isFinite) &&
+                                profile?.depthRange?.every(Number.isFinite) &&
+                                profile.depthRange[1] > profile.depthRange[0] &&
+                                Number.isFinite(profile?.depth) &&
+                                profile.depth > 0;
+                            let rawTarget;
+                            let rightBase;
+                            let upBase;
+                            let frontDirection;
+                            let originDistance = 0;
+                            let parallaxDepthFactor = 0;
+                            if (profileValid) {
+                                const origin = camera.position.clone().set(...profile.origin);
+                                const direction = camera.position.clone().set(
+                                    Math.tan(profile.centerAngles[0]),
+                                    Math.tan(profile.centerAngles[1]),
+                                    1
+                                ).normalize();
+                                const focusPercent = Math.max(0, Math.min(100, focusDepth <= 1 ? 30 : focusDepth)) / 100;
+                                const focusDepthOnCameraAxis = profile.depthRange[0] +
+                                    (profile.depthRange[1] - profile.depthRange[0]) * focusPercent;
+                                const focusDistance = Math.max(
+                                    0.01,
+                                    focusDepthOnCameraAxis / Math.max(direction.z, 0.0001)
+                                );
+                                rawTarget = origin.clone().addScaled(direction, focusDistance);
+                                frontDirection = origin.clone().sub(rawTarget).normalize();
+                                const worldUp = origin.clone().set(0, 1, 0);
+                                rightBase = origin.clone().cross(worldUp, direction).normalize();
+                                upBase = origin.clone().cross(direction, rightBase).normalize();
+                                originDistance = focusDistance;
+                                const inverseFocusDepth = 1 / Math.max(focusDepthOnCameraAxis, 0.0001);
+                                parallaxDepthFactor = Math.max(
+                                    Math.abs(1 / Math.max(profile.depthRange[0], 0.0001) - inverseFocusDepth),
+                                    Math.abs(1 / Math.max(profile.depthRange[1], 0.0001) - inverseFocusDepth)
+                                );
+                            } else {
+                                rawTarget = camera.position.clone();
+                                camera.calcFocusPoint(rawTarget);
+                                const cameraSide = camera.position.z <= sceneCenter[2] ? -1 : 1;
+                                frontDirection = rawTarget.clone().set(0, 0, cameraSide);
+                                rightBase = rawTarget.clone().set(1, 0, 0);
+                                upBase = rawTarget.clone().set(0, 1, 0);
+                            }
+                            const cameraSide = frontDirection.z < 0 ? -1 : 1;
                             cameraDefaults = {
                                 rawSceneTarget: rawTarget,
-                                rightBase: rawTarget.clone().set(1, 0, 0),
-                                upBase: rawTarget.clone().set(0, 1, 0),
+                                rightBase,
+                                upBase,
                                 frontDirection,
-                                defaultDistance,
+                                origin: profileValid ? camera.position.clone().set(...profile.origin) : null,
+                                usesOriginCamera: profileValid,
+                                originDistance,
+                                parallaxDepthFactor,
                                 radius,
+                                bounds: {
+                                    centerX: sceneCenter[0],
+                                    centerY: sceneCenter[1],
+                                    centerZ: sceneCenter[2],
+                                    halfX,
+                                    halfY,
+                                    halfZ,
+                                    frontZ: sceneCenter[2] + cameraSide * halfZ
+                                },
                                 fov: camera.fov
                             };
                         }
                         if (!frameCamera) {
                             const target = cameraDefaults.rawSceneTarget.clone();
-                            target.z += cameraDefaults.radius * focusDepth;
+                            if (!cameraDefaults.usesOriginCamera) {
+                                target.z += cameraDefaults.radius * focusDepth;
+                            }
                             frameCamera = {
                                 sceneTarget: target,
                                 rightBase: cameraDefaults.rightBase.clone(),
                                 upBase: cameraDefaults.upBase.clone(),
                                 frontDirection: cameraDefaults.frontDirection.clone(),
-                                position: target.clone().add(cameraDefaults.frontDirection.clone().mulScalar(cameraDefaults.defaultDistance)),
-                                defaultDistance: cameraDefaults.defaultDistance,
+                                parallaxDepthFactor: cameraDefaults.parallaxDepthFactor,
                                 radius: cameraDefaults.radius,
+                                bounds: cameraDefaults.bounds,
                                 fov: cameraFov
                             };
                         }
                         const target = frameCamera.sceneTarget.clone()
                             .addScaled(frameCamera.rightBase, centerOffsetX * frameCamera.radius)
                             .addScaled(frameCamera.upBase, centerOffsetY * frameCamera.radius);
-                        const distance = Math.max(
-                            frameCamera.radius * 0.02,
-                            frameCamera.defaultDistance / Math.max(0.6, Math.min(cameraZoom, 10))
-                        );
-                        const position = target.clone().add(frameCamera.frontDirection.clone().mulScalar(distance));
+                        const bounds = frameCamera.bounds;
+                        let fitDistance;
+                        let calculatedDefaultDistance;
+                        let position;
+                        if (cameraDefaults.usesOriginCamera) {
+                            position = cameraDefaults.origin.clone();
+                            fitDistance = position.distance(target);
+                            calculatedDefaultDistance = fitDistance;
+                        } else {
+                            const tangents = cameraFrustumTangents(frameCamera.fov);
+                            const availableX = Math.min(
+                                target.x - (bounds.centerX - bounds.halfX),
+                                bounds.centerX + bounds.halfX - target.x
+                            );
+                            const availableY = Math.min(
+                                target.y - (bounds.centerY - bounds.halfY),
+                                bounds.centerY + bounds.halfY - target.y
+                            );
+                            if (availableX <= 0 || availableY <= 0) return null;
+                            const frontFitDistance = Math.min(
+                                availableX / tangents.horizontal,
+                                availableY / tangents.vertical
+                            );
+                            const targetBehindFront = Math.abs(target.z - bounds.frontZ);
+                            fitDistance = targetBehindFront + frontFitDistance;
+                            calculatedDefaultDistance = Math.max(
+                                frameCamera.radius * 0.02,
+                                targetBehindFront + frontFitDistance / 1.12
+                            );
+                        }
+                        if (!Number.isFinite(cameraDefaultDistance) || cameraDefaultDistance <= 0) {
+                            cameraDefaultDistance = calculatedDefaultDistance;
+                            cameraZoom = calculatedDefaultDistance;
+                        }
+                        const minimumDistance = Math.max(frameCamera.radius * 0.005, 0.0001);
+                        const savedDefaultDistance = Math.max(cameraDefaultDistance, minimumDistance);
+                        const adjustedDistance = Math.max(cameraZoom, minimumDistance);
+                        const distance = cameraDefaults.usesOriginCamera
+                            ? fitDistance
+                            : (resetToWallpaperDefaultDistance ? savedDefaultDistance : adjustedDistance);
+                        if (!cameraDefaults.usesOriginCamera) {
+                            position = target.clone().add(frameCamera.frontDirection.clone().mulScalar(distance));
+                        }
                         baseCamera = {
                             target,
                             position,
                             distance,
-                            frameDistance: frameCamera.defaultDistance,
+                            frameDistance: fitDistance,
+                            parallaxDepthFactor: frameCamera.parallaxDepthFactor,
                             radius: frameCamera.radius,
-                            front: frameCamera.frontDirection.clone().normalize(),
+                            bounds,
+                            usesOriginCamera: cameraDefaults.usesOriginCamera,
+                            front: cameraDefaults.usesOriginCamera
+                                ? position.clone().sub(target).normalize()
+                                : frameCamera.frontDirection.clone().normalize(),
                             right: frameCamera.rightBase.clone().normalize(),
                             up: frameCamera.upBase.clone().normalize(),
                             fov: frameCamera.fov
@@ -717,21 +918,43 @@
                             viewer.global.state.cameraMode = 'orbit';
                         }
 
-                        const radius = Math.max(base.distance, 0.001);
-                        const desiredMove = base.frameDistance * Math.max(0.02, Math.min(parallaxStrength, 0.12)) * 2.4;
+                        const desiredMove = calculateParallaxMove(base);
                         const tangentOffset = base.right.clone()
                             .mulScalar(lastTiltX * desiredMove)
                             .addScaled(base.up, -lastTiltY * desiredMove);
-                        const maxTangent = radius * 0.75;
-                        const tangentLength = tangentOffset.length();
-                        if (tangentLength > maxTangent && tangentLength > 0.0001) {
-                            tangentOffset.mulScalar(maxTangent / tangentLength);
+                        const positionForOffset = (offset) => {
+                            const tangentDistance = offset.length();
+                            if (tangentDistance >= base.distance) return null;
+                            const frontDistance = Math.sqrt(
+                                Math.max(base.distance * base.distance - tangentDistance * tangentDistance, 0)
+                            );
+                            return base.target.clone()
+                                .addScaled(base.front, frontDistance)
+                                .add(offset);
+                        };
+                        let position = positionForOffset(tangentOffset);
+                        if (!position || !viewFitsFrontFace(position, base.target, base.fov, base.bounds)) {
+                            position = base.position.clone();
+                            if (viewFitsFrontFace(position, base.target, base.fov, base.bounds)) {
+                                let low = 0;
+                                let high = 1;
+                                for (let iteration = 0; iteration < 14; iteration++) {
+                                    const middle = (low + high) * 0.5;
+                                    const candidatePosition = positionForOffset(
+                                        tangentOffset.clone().mulScalar(middle)
+                                    );
+                                    if (
+                                        candidatePosition &&
+                                        viewFitsFrontFace(candidatePosition, base.target, base.fov, base.bounds)
+                                    ) {
+                                        low = middle;
+                                        position = candidatePosition;
+                                    } else {
+                                        high = middle;
+                                    }
+                                }
+                            }
                         }
-                        const clampedLength = tangentOffset.length();
-                        const depth = Math.sqrt(Math.max(radius * radius - clampedLength * clampedLength, radius * radius * 0.25));
-                        const position = base.target.clone()
-                            .addScaled(base.front, depth)
-                            .add(tangentOffset);
                         applyRenderPose(position, base.target, base.fov);
                         requestFrame();
                     } catch (error) {
@@ -755,8 +978,9 @@
 
                 window.tianyinSetCameraZoom = (value) => {
                     const next = Number(value);
-                    if (Number.isFinite(next)) {
-                        cameraZoom = Math.max(0.6, Math.min(10, next));
+                    if (Number.isFinite(next) && next > 0) {
+                        cameraZoom = next;
+                        resetToWallpaperDefaultDistance = false;
                         baseCamera = null;
                         applyParamsIfReady();
                     }
@@ -768,6 +992,7 @@
                     if (Number.isFinite(nextX) && Number.isFinite(nextY)) {
                         centerOffsetX = clampCenterOffset(nextX);
                         centerOffsetY = clampCenterOffset(nextY);
+                        resetToWallpaperDefaultDistance = false;
                         baseCamera = null;
                         applyParamsIfReady();
                     }
@@ -776,17 +1001,202 @@
                 window.tianyinSetFocusDepth = (value) => {
                     const next = Number(value);
                     if (Number.isFinite(next)) {
-                        focusDepth = Math.max(-1, Math.min(1, next));
+                        focusDepth = Math.max(0, Math.min(100, next <= 1 ? 30 : next));
+                        resetToWallpaperDefaultDistance = false;
+                        if (window.tianyinOriginCameraProfile) cameraDefaults = null;
                         frameCamera = null;
                         baseCamera = null;
                         applyParamsIfReady();
                     }
                 };
 
+                const captureRenderedPixels = () => new Promise((resolve) => {
+                    let completed = false;
+                    const finish = (result = null) => {
+                        if (completed) return;
+                        completed = true;
+                        resolve(result);
+                    };
+                    viewer.global.app.once('frameend', () => {
+                        try {
+                            const device = viewer.global.app.graphicsDevice;
+                            const width = Math.max(device.width, 1);
+                            const height = Math.max(device.height, 1);
+                            const pixels = new Uint8Array(width * height * 4);
+                            device.readPixels(0, 0, width, height, pixels);
+                            finish({ pixels, width, height });
+                        } catch (error) {
+                            console.warn('tianyin camera pixel read failed', error);
+                            finish();
+                        }
+                    });
+                    requestFrame();
+                    setTimeout(() => finish(), 500);
+                });
+
+                const measureRenderedContent = (capture) => {
+                    if (!capture) return null;
+                    const { pixels, width, height } = capture;
+                    const backgroundR = Math.round(backgroundRed * 255);
+                    const backgroundG = Math.round(backgroundGreen * 255);
+                    const backgroundB = Math.round(backgroundBlue * 255);
+                    const sampleStep = Math.max(1, Math.floor(Math.max(width, height) / 320));
+                    const sampleWidth = Math.ceil(width / sampleStep);
+                    const sampleHeight = Math.ceil(height / sampleStep);
+                    const columns = new Uint32Array(sampleWidth);
+                    const rows = new Uint32Array(sampleHeight);
+                    let foregroundPixels = 0;
+                    for (let sampleY = 0, y = 0; y < height; sampleY += 1, y += sampleStep) {
+                        for (let sampleX = 0, x = 0; x < width; sampleX += 1, x += sampleStep) {
+                            const index = (y * width + x) * 4;
+                            const difference = Math.max(
+                                Math.abs(pixels[index] - backgroundR),
+                                Math.abs(pixels[index + 1] - backgroundG),
+                                Math.abs(pixels[index + 2] - backgroundB)
+                            );
+                            if (pixels[index + 3] > 16 && difference > 10) {
+                                columns[sampleX] += 1;
+                                rows[sampleY] += 1;
+                                foregroundPixels += 1;
+                            }
+                        }
+                    }
+                    if (foregroundPixels < sampleWidth * sampleHeight * 0.001) return null;
+                    const percentileBounds = (counts) => {
+                        const trim = foregroundPixels * 0.02;
+                        let cumulative = 0;
+                        let minimum = 0;
+                        for (; minimum < counts.length - 1; minimum += 1) {
+                            cumulative += counts[minimum];
+                            if (cumulative >= trim) break;
+                        }
+                        cumulative = 0;
+                        let maximum = counts.length - 1;
+                        for (; maximum > minimum; maximum -= 1) {
+                            cumulative += counts[maximum];
+                            if (cumulative >= trim) break;
+                        }
+                        return { minimum, maximum };
+                    };
+                    const horizontal = percentileBounds(columns);
+                    const vertical = percentileBounds(rows);
+                    return {
+                        width: sampleWidth,
+                        height: sampleHeight,
+                        contentWidth: horizontal.maximum - horizontal.minimum + 1,
+                        contentHeight: vertical.maximum - vertical.minimum + 1
+                    };
+                };
+
+                const waitForStableCoverage = async () => {
+                    let previous = null;
+                    let stableCount = 0;
+                    for (let attempt = 0; attempt < 10; attempt += 1) {
+                        const coverage = measureRenderedContent(await captureRenderedPixels());
+                        if (coverage) {
+                            if (
+                                previous &&
+                                Math.abs(coverage.contentWidth - previous.contentWidth) <= 1 &&
+                                Math.abs(coverage.contentHeight - previous.contentHeight) <= 1
+                            ) {
+                                stableCount += 1;
+                                if (stableCount >= 2) return coverage;
+                            } else {
+                                stableCount = 0;
+                            }
+                            previous = coverage;
+                        }
+                        await new Promise((resolve) => setTimeout(resolve, 50));
+                    }
+                    return null;
+                };
+
+                const scheduleCameraCalibration = () => {
+                    if (
+                        !originCameraProfileReady ||
+                        !firstModelFrameReady ||
+                        cameraCalibrationRunning ||
+                        cameraCalibrationComplete ||
+                        cameraCalibrationVersion >= 2
+                    ) {
+                        return;
+                    }
+                    clearTimeout(cameraCalibrationTimer);
+                    cameraCalibrationTimer = setTimeout(() => window.tianyinCalibrateCamera?.(), 120);
+                };
+
+                window.tianyinCalibrateCamera = async () => {
+                    if (
+                        cameraCalibrationRunning ||
+                        cameraCalibrationComplete ||
+                        cameraCalibrationVersion >= 2 ||
+                        !originCameraProfileReady ||
+                        !firstModelFrameReady
+                    ) return;
+                    cameraCalibrationRunning = true;
+                    try {
+                        lastTiltX = 0;
+                        lastTiltY = 0;
+                        for (let iteration = 0; iteration < 3; iteration += 1) {
+                            const coverage = await waitForStableCoverage();
+                            const base = baseCamera || captureBaseCamera();
+                            if (!coverage || !base) {
+                                console.warn('tianyin camera calibration skipped', {
+                                    iteration,
+                                    hasCoverage: !!coverage,
+                                    hasBase: !!base
+                                });
+                                break;
+                            }
+                            const coverScale = Math.min(4, Math.max(
+                                coverage.width / Math.max(coverage.contentWidth, 1),
+                                coverage.height / Math.max(coverage.contentHeight, 1)
+                            ) * 0.94);
+                            console.log(
+                                `tianyin camera calibration sample iteration=${iteration} ` +
+                                `distance=${base.distance.toFixed(6)} ` +
+                                `content=${coverage.contentWidth}x${coverage.contentHeight} ` +
+                                `viewport=${coverage.width}x${coverage.height} ` +
+                                `coverScale=${coverScale.toFixed(6)}`
+                            );
+                            if (!Number.isFinite(coverScale) || coverScale <= 1.01) break;
+                            cameraFov = Math.max(20, Math.min(120,
+                                2 * Math.atan(
+                                    Math.tan(cameraFov * Math.PI / 360) / coverScale
+                                ) * 180 / Math.PI
+                            ));
+                            cameraDefaultFov = cameraFov;
+                            resetToWallpaperDefaultDistance = true;
+                            if (frameCamera) frameCamera.fov = cameraFov;
+                            baseCamera = null;
+                            applyWallpaperCamera();
+                        }
+                        if (
+                            Number.isFinite(cameraDefaultDistance) &&
+                            cameraDefaultDistance > 0 &&
+                            Number.isFinite(cameraDefaultFov) &&
+                            cameraDefaultFov > 0
+                        ) {
+                            console.log('tianyin camera calibration result', cameraDefaultDistance, cameraDefaultFov);
+                            window.TianyinSplat?.onCameraDefaultsCalculated?.(
+                                cameraDefaultDistance,
+                                cameraDefaultFov
+                            );
+                            cameraCalibrationVersion = 2;
+                        }
+                        cameraCalibrationComplete = true;
+                    } catch (error) {
+                        console.warn('tianyin camera calibration failed', error);
+                    } finally {
+                        cameraCalibrationRunning = false;
+                    }
+                };
+
                 window.tianyinSetCameraFov = (value) => {
                     const next = Number(value);
                     if (Number.isFinite(next)) {
-                        cameraFov = Math.max(35, Math.min(80, next));
+                        cameraFov = Math.max(20, Math.min(120, next));
+                        resetToWallpaperDefaultDistance = false;
                         if (frameCamera) frameCamera.fov = cameraFov;
                         if (baseCamera) baseCamera.fov = cameraFov;
                         applyParamsIfReady();
@@ -806,20 +1216,37 @@
                     requestFrame();
                 };
 
-                window.tianyinSetParams = (parallax, zoom, centerX, centerY, depth, fov, performanceMode, backgroundR, backgroundG, backgroundB, resetCamera) => {
+                window.tianyinSetParams = (parallax, zoom, defaultDistance, defaultFov, calibrationVersion, centerX, centerY, depth, fov, performanceMode, backgroundR, backgroundG, backgroundB, resetCamera) => {
                     suppressParamApply = true;
                     try {
                         window.tianyinSetParallax(parallax);
                         window.tianyinSetCameraZoom(zoom);
+                        const nextDefaultDistance = Number(defaultDistance);
+                        cameraDefaultDistance = Number.isFinite(nextDefaultDistance) && nextDefaultDistance > 0
+                            ? nextDefaultDistance
+                            : 0;
+                        const nextDefaultFov = Number(defaultFov);
+                        if (Number.isFinite(nextDefaultFov) && nextDefaultFov > 0) {
+                            cameraDefaultFov = nextDefaultFov;
+                        } else if (!originCameraProfileReady) {
+                            cameraDefaultFov = 0;
+                        }
+                        const nextCalibrationVersion = Number(calibrationVersion);
+                        cameraCalibrationVersion = Number.isFinite(nextCalibrationVersion)
+                            ? Math.max(0, Math.trunc(nextCalibrationVersion))
+                            : 0;
                         window.tianyinSetCenterOffset(centerX, centerY);
                         window.tianyinSetFocusDepth(depth);
-                        window.tianyinSetCameraFov(fov);
+                        if (cameraCalibrationVersion >= 2 || !originCameraProfileReady) {
+                            window.tianyinSetCameraFov(fov);
+                        }
                         window.tianyinSetPerformanceMode?.(performanceMode);
                         window.tianyinSetBackgroundColor(backgroundR, backgroundG, backgroundB);
                     } finally {
                         suppressParamApply = false;
                     }
                     if (resetCamera) {
+                        resetToWallpaperDefaultDistance = true;
                         window.tianyinResetCamera();
                     } else {
                         applyWallpaperCamera();
@@ -827,20 +1254,68 @@
                 };
 
                 window.tianyinSetTilt = (x, y) => {
-                    lastTiltX = Math.max(-1, Math.min(1, Number(x) || 0));
-                    lastTiltY = Math.max(-1, Math.min(1, Number(y) || 0));
+                    const nextX = Math.max(-1, Math.min(1, Number(x) || 0));
+                    const nextY = Math.max(-1, Math.min(1, Number(y) || 0));
+                    const length = Math.hypot(nextX, nextY);
+                    const scale = length > 0.55 ? 0.55 / length : 1;
+                    lastTiltX = nextX * scale;
+                    lastTiltY = nextY * scale;
                     applyWallpaperCamera();
                 };
 
                 window.tianyinResetCamera = () => {
                     lastTiltX = 0;
                     lastTiltY = 0;
+                    resetToWallpaperDefaultDistance = true;
+                    if (cameraDefaultFov > 0) cameraFov = cameraDefaultFov;
+                    if (frameCamera) frameCamera.fov = cameraFov;
                     baseCamera = null;
                     captureBaseCamera();
                     applyWallpaperCamera();
                 };
 
+                window.tianyinApplyCurrentCamera = () => {
+                    lastTiltX = 0;
+                    lastTiltY = 0;
+                    resetToWallpaperDefaultDistance = false;
+                    if (frameCamera) frameCamera.fov = cameraFov;
+                    baseCamera = null;
+                    captureBaseCamera();
+                    applyWallpaperCamera();
+                };
+
+                window.tianyinOnOriginCameraProfile = (profile) => {
+                    const profileFov = calculateProfileFov(profile);
+                    if (!Number.isFinite(profileFov) || profileFov <= 0) return;
+                    const hasSavedCalibration =
+                        cameraCalibrationVersion >= 2 &&
+                        cameraDefaultDistance > 0 &&
+                        cameraDefaultFov > 0;
+                    if (!hasSavedCalibration) {
+                        cameraDefaultDistance = 0;
+                        cameraZoom = 0;
+                        cameraDefaultFov = profileFov;
+                        cameraFov = profileFov;
+                    }
+                    resetToWallpaperDefaultDistance = !hasSavedCalibration;
+                    cameraDefaults = null;
+                    frameCamera = null;
+                    baseCamera = null;
+                    originCameraProfileReady = true;
+                    cameraCalibrationComplete = hasSavedCalibration;
+                    applyWallpaperCamera();
+                    scheduleCameraCalibration();
+                };
+                if (window.tianyinOriginCameraProfile) {
+                    window.tianyinOnOriginCameraProfile(window.tianyinOriginCameraProfile);
+                }
+
                 window.tianyinFitWallpaper = window.tianyinResetCamera;
+
+                window.addEventListener('resize', () => {
+                    baseCamera = null;
+                    applyWallpaperCamera();
+                });
 
                 let dragState = null;
                 const reportCenterOffset = () => {
@@ -880,20 +1355,26 @@
                 canvas.addEventListener('pointerup', endDrag);
                 canvas.addEventListener('pointercancel', endDrag);
                 window.TianyinSplat?.onViewerReady?.();
+
+                window.tianyinNotifyFirstModelFrame = () => {
+                    firstModelFrameReady = true;
+                    window.tianyinApplyCurrentCamera?.();
+                    scheduleCameraCalibration();
+                };
             });
 
             window.firstFrame = () => {
                 window.TianyinSplat?.onFirstFrame?.();
-                window.tianyinResetCamera?.();
+                window.tianyinNotifyFirstModelFrame?.();
             };
 
             window.addEventListener('pageshow', () => {
-                window.tianyinResetCamera?.();
+                window.tianyinApplyCurrentCamera?.();
             });
 
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) {
-                    window.tianyinResetCamera?.();
+                    window.tianyinApplyCurrentCamera?.();
                 }
             });
         </script>

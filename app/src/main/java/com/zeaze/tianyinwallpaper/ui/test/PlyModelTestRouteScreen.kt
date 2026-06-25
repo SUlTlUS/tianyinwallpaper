@@ -4,13 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,29 +26,22 @@ import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.Slider
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.kyant.shapes.Capsule
-import com.zeaze.tianyinwallpaper.renderer.DepthGLRenderer
-import com.zeaze.tianyinwallpaper.renderer.NativeGaussianBackendMode
-import com.zeaze.tianyinwallpaper.renderer.NativeGaussianRendererFactory
 import com.zeaze.tianyinwallpaper.ui.depth.SuperSplatWebView
 import com.zeaze.tianyinwallpaper.utils.GaussianPlyLoader
 import com.zeaze.tianyinwallpaper.utils.GaussianSceneLoader
@@ -284,20 +274,6 @@ private fun RendererModeCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             SogRendererModePill(
-                text = SogTestRendererMode.GLES.label,
-                selected = selectedMode == SogTestRendererMode.GLES,
-                contentColor = contentColor,
-                onClick = { onModeChange(SogTestRendererMode.GLES) },
-                modifier = Modifier.weight(1f)
-            )
-            SogRendererModePill(
-                text = SogTestRendererMode.VULKAN.label,
-                selected = selectedMode == SogTestRendererMode.VULKAN,
-                contentColor = contentColor,
-                onClick = { onModeChange(SogTestRendererMode.VULKAN) },
-                modifier = Modifier.weight(1f)
-            )
-            SogRendererModePill(
                 text = SogTestRendererMode.WEB.label,
                 selected = selectedMode == SogTestRendererMode.WEB,
                 contentColor = contentColor,
@@ -378,153 +354,10 @@ private fun GaussianPreviewCard(
             Text(rendererMode.label, color = contentColor.copy(alpha = 0.55f), fontSize = 12.sp)
         }
 
-        if (rendererMode == SogTestRendererMode.WEB) {
-            WebGaussianPreview(
-                uriString = uriString,
-                contentColor = contentColor
-            )
-        } else {
-            NativeGaussianPreview(
-                scene = scene,
-                rendererMode = rendererMode,
-                contentColor = contentColor
-            )
-        }
-    }
-}
-
-@Composable
-private fun NativeGaussianPreview(
-    scene: GaussianPlyLoader.GaussianScene,
-    rendererMode: SogTestRendererMode,
-    contentColor: Color
-) {
-    val appContext = LocalContext.current.applicationContext
-    val backendMode = rendererMode.nativeBackendMode()
-    val renderer = remember(appContext, backendMode) {
-        NativeGaussianRendererFactory.create(appContext, backendMode)
-    }
-    val previewTilt = remember(renderer) { FloatArray(2) }
-    var splatScale by remember(renderer) { mutableStateOf(1.0f) }
-    var globalOpacity by remember(renderer) { mutableStateOf(1.0f) }
-    var alphaFalloff by remember(renderer) { mutableStateOf(1.0f) }
-    var minPointSize by remember(renderer) { mutableStateOf(0.5f) }
-    var maxPointSize by remember(renderer) { mutableStateOf(120f) }
-
-    fun currentGaussianParams(): DepthGLRenderer.GaussianRenderParams {
-        return DepthGLRenderer.GaussianRenderParams(
-            splatScale = splatScale,
-            globalOpacity = globalOpacity,
-            alphaFalloff = alphaFalloff,
-            minPointSize = minPointSize,
-            maxPointSize = maxPointSize,
-            useLayerCache = false
+        WebGaussianPreview(
+            uriString = uriString,
+            contentColor = contentColor
         )
-    }
-
-    fun applyGaussianParams() {
-        renderer.updateGaussianParams(currentGaussianParams())
-    }
-
-    DisposableEffect(renderer) {
-        onDispose {
-            renderer.stopAndWait(300)
-        }
-    }
-
-    LaunchedEffect(scene, renderer) {
-        renderer.loadGaussians(scene)
-        renderer.updateParams(0.075f, 0f)
-        applyGaussianParams()
-        renderer.updateTilt(previewTilt[0], previewTilt[1])
-    }
-
-    key(renderer) {
-        AndroidView(
-            factory = { viewContext ->
-                SurfaceView(viewContext).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) = Unit
-
-                        override fun surfaceChanged(
-                            holder: SurfaceHolder,
-                            format: Int,
-                            width: Int,
-                            height: Int
-                        ) {
-                            renderer.start(holder.surface)
-                            renderer.resize(width, height)
-                            renderer.loadGaussians(scene)
-                            renderer.updateParams(0.075f, 0f)
-                            applyGaussianParams()
-                            renderer.updateTilt(previewTilt[0], previewTilt[1])
-                        }
-
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            renderer.stopAndWait(300)
-                        }
-                    })
-                }
-            },
-            update = { view ->
-                if (view.holder.surface.isValid && view.width > 0 && view.height > 0) {
-                    renderer.resize(view.width, view.height)
-                    applyGaussianParams()
-                    renderer.updateTilt(previewTilt[0], previewTilt[1])
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(SOG_PREVIEW_ASPECT)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color.Black)
-                .pointerInput(scene) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        previewTilt[0] = (previewTilt[0] + dragAmount.x / 360f).coerceIn(-1f, 1f)
-                        previewTilt[1] = (previewTilt[1] + dragAmount.y / 520f).coerceIn(-1f, 1f)
-                        renderer.updateTilt(previewTilt[0], previewTilt[1])
-                    }
-                }
-        )
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(contentColor.copy(alpha = 0.07f))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        GaussianParamSlider("Splat scale", splatScale, 0.35f..3.0f, contentColor, { splatScale = it }, { applyGaussianParams() })
-        GaussianParamSlider("Global opacity", globalOpacity, 0.2f..3.0f, contentColor, { globalOpacity = it }, { applyGaussianParams() })
-        GaussianParamSlider("Alpha falloff", alphaFalloff, 0.2f..4.0f, contentColor, { alphaFalloff = it }, { applyGaussianParams() })
-        GaussianParamSlider("Min point size", minPointSize, 0.5f..8.0f, contentColor, { minPointSize = it.coerceAtMost(maxPointSize) }, { applyGaussianParams() })
-        GaussianParamSlider("Max point size", maxPointSize, 24f..160f, contentColor, { maxPointSize = it.coerceAtLeast(minPointSize) }, { applyGaussianParams() })
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(42.dp)
-            .clip(Capsule())
-            .background(contentColor.copy(alpha = 0.10f))
-            .clickable {
-                previewTilt[0] = 0f
-                previewTilt[1] = 0f
-                splatScale = 1.0f
-                globalOpacity = 1.0f
-                alphaFalloff = 1.0f
-                minPointSize = 0.5f
-                maxPointSize = 120f
-                applyGaussianParams()
-                renderer.updateTilt(0f, 0f)
-            },
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text("Reset preview params", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -564,34 +397,6 @@ private fun WebGaussianPreview(
             previewFps = 60,
             onCenterOffsetChange = { _, _ -> },
             modifier = Modifier.fillMaxSize()
-        )
-    }
-}
-
-@Composable
-private fun GaussianParamSlider(
-    label: String,
-    value: Float,
-    valueRange: ClosedFloatingPointRange<Float>,
-    contentColor: Color,
-    onValueChange: (Float) -> Unit,
-    onValueChangeFinished: () -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(label, color = contentColor, fontSize = 13.sp)
-            Text(String.format("%.2f", value), color = contentColor.copy(alpha = 0.58f), fontSize = 12.sp)
-        }
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            onValueChangeFinished = onValueChangeFinished,
-            valueRange = valueRange,
-            modifier = Modifier.fillMaxWidth()
         )
     }
 }
@@ -681,16 +486,7 @@ private fun queryDisplayName(context: Context, uri: Uri): String? {
 }
 
 private enum class SogTestRendererMode(val label: String) {
-    GLES("GLES"),
-    VULKAN("Vulkan"),
     WEB("WebView")
-}
-
-private fun SogTestRendererMode.nativeBackendMode(): NativeGaussianBackendMode {
-    return when (this) {
-        SogTestRendererMode.VULKAN -> NativeGaussianBackendMode.VULKAN
-        else -> NativeGaussianBackendMode.GLES
-    }
 }
 
 private const val MIN_TEST_SPLATS = 60_000
